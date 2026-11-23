@@ -1,11 +1,14 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
+import type { EncounterOutcome } from './agency';
 import { bossFor, floorScale, MonsterKind, monsterPool, TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 
 export interface Monster {
   id: number;
   kind: MonsterKind;
+  /** Set when this enemy is a named hunter of the rival agency. */
+  hunter?: Hunter;
   x: number;
   y: number;
   hp: number;
@@ -21,7 +24,31 @@ export type Action =
   | { type: 'skill' }
   | { type: 'potion' };
 
-export type RunStatus = 'playing' | 'onStairs' | 'dead' | 'returned';
+export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'dead' | 'returned';
+
+export type RewardKind = 'item' | 'gold' | 'skill' | 'rescue';
+
+export const REWARDS: Record<RewardKind, { label: string; describe: (level: number) => string }> = {
+  item: { label: '아이템', describe: () => '포션 3개' },
+  gold: { label: '골드', describe: (lv) => `${lv * 15}G (헌터 소지금)` },
+  skill: { label: '스킬', describe: () => '회전베기 위력 +25%' },
+  rescue: { label: '위기 시 1회 지원', describe: () => '쓰러질 때 한 번 체력 30%로 버팀' },
+};
+
+/** Choice offered after beating a rival hunter: two random rewards, or finishing them for experience. */
+export interface PendingChoice {
+  hunter: Hunter;
+  rewards: RewardKind[];
+  finishExp: number;
+}
+
+export interface RunOptions {
+  /** Hunters of the rival agency who may turn up in the tower. */
+  rivals?: Hunter[];
+  rivalAgency?: string;
+  /** Chance per floor (from floor 2) that one of them appears. */
+  encounterChance?: number;
+}
 
 export const SIGHT = 7;
 export const SKILL_NAME = '회전베기';
@@ -42,11 +69,16 @@ export class TowerRun {
   seen: boolean[][] = [];
   log: string[] = [];
   killer?: string;
+  pendingChoice?: PendingChoice;
+  /** Rival hunters beaten this run and whether they were finished for good. */
+  encounters: EncounterOutcome[] = [];
   private nextId = 1;
+  private met = new Set<number>();
 
   constructor(
     public hunter: Hunter,
     private rng: Rng,
+    private options: RunOptions = {},
   ) {
     this.enterFloor(1);
   }
@@ -84,6 +116,8 @@ export class TowerRun {
       this.spawn(this.rng.pick(pool), x, y, n);
     }
 
+    this.maybeSpawnRival(n);
+
     const boss = bossFor(n);
     if (boss) {
       const c = center(this.map.rooms[this.map.rooms.length - 1]);
@@ -100,6 +134,35 @@ export class TowerRun {
     }
     this.say(`성장의 탑 ${n}층에 들어섰다.`);
     this.updateSight();
+  }
+
+  private maybeSpawnRival(floor: number) {
+    const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id));
+    if (floor < 2 || pool.length === 0) return;
+    if (!this.rng.chance(this.options.encounterChance ?? 0.25)) return;
+    // The hunter's own rival shows up more often than the others.
+    const mine = pool.find((h) => h.rivalOf === this.hunter.id);
+    const h = mine && this.rng.chance(0.5) ? mine : this.rng.pick(pool);
+    const room = this.rng.pick(this.map.rooms.slice(1));
+    const x = this.rng.int(room.x, room.x + room.w - 1);
+    const y = this.rng.int(room.y, room.y + room.h - 1);
+    if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) return;
+    this.met.add(h.id);
+    const agency = this.options.rivalAgency ?? '경쟁사';
+    const kind: MonsterKind = {
+      id: `hunter-${h.id}`,
+      name: `${agency} ${h.name}`,
+      glyph: 'H',
+      hp: h.maxHp,
+      atk: h.atk,
+      def: h.def,
+      exp: h.level * 12,
+      gold: h.level * 8,
+      score: 40 + h.level * 10,
+    };
+    this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
+    const tag = h.origin === 'rival' ? '라이벌' : '옛 동료';
+    this.say(`[${tag}] ${h.name}의 기척이 느껴진다...`);
   }
 
   private spawn(kind: MonsterKind, x: number, y: number, floor: number) {
@@ -150,6 +213,7 @@ export class TowerRun {
     const used = this.playerAct(action);
     if (!used) return false;
     if (this.status === 'playing' || this.status === 'onStairs') this.monstersAct();
+    // While a choice is pending the world waits; enemies act once it is made.
     this.turn += 1;
     if (this.turn % MP_REGEN_EVERY === 0) this.hunter.mp = Math.min(this.hunter.maxMp, this.hunter.mp + 1);
     this.updateSight();
@@ -190,7 +254,7 @@ export class TowerRun {
         }
         h.mp -= SKILL_COST;
         this.say(`${SKILL_NAME}!`);
-        for (const m of targets) this.hitMonster(m, this.damage(h.atk, m.def, 1.5));
+        for (const m of targets) this.hitMonster(m, this.damage(h.atk, m.def, h.skillPower));
         return true;
       }
       case 'move': {
@@ -223,13 +287,48 @@ export class TowerRun {
       return;
     }
     this.monsters = this.monsters.filter((o) => o !== m);
-    const gold = Math.round(m.kind.gold * floorScale(this.floor));
+    const scale = m.hunter ? 1 : floorScale(this.floor);
+    const gold = Math.round(m.kind.gold * scale);
     this.runGold += gold;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
-    const levels = gainExp(this.hunter, Math.round(m.kind.exp * floorScale(this.floor)));
+    const levels = gainExp(this.hunter, Math.round(m.kind.exp * scale));
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level}`);
+    if (m.hunter) this.offerChoice(m.hunter);
+  }
+
+  private offerChoice(h: Hunter) {
+    const all: RewardKind[] = ['item', 'gold', 'skill', 'rescue'];
+    const first = this.rng.pick(all);
+    const second = this.rng.pick(all.filter((r) => r !== first));
+    this.pendingChoice = { hunter: h, rewards: [first, second], finishExp: h.level * 25 };
+    this.status = 'choosing';
+  }
+
+  /** Pick a reward (0 or 1), or 2 to finish the rival hunter for good and take experience. */
+  resolveChoice(index: number): string {
+    const c = this.pendingChoice;
+    if (!c || this.status !== 'choosing') return '';
+    const h = this.hunter;
+    let msg: string;
+    if (index >= 2) {
+      gainExp(h, c.finishExp);
+      this.encounters.push({ hunterId: c.hunter.id, finished: true });
+      msg = `${c.hunter.name}을(를) 완전히 쓰러뜨렸다. 경험치 +${c.finishExp}`;
+    } else {
+      const kind = c.rewards[index];
+      if (kind === 'item') h.potions += 3;
+      if (kind === 'gold') h.gold += c.hunter.level * 15;
+      if (kind === 'skill') h.skillPower = Math.round((h.skillPower + 0.25) * 100) / 100;
+      if (kind === 'rescue') h.rescues += 1;
+      this.encounters.push({ hunterId: c.hunter.id, finished: false });
+      msg = `${REWARDS[kind].label}: ${REWARDS[kind].describe(c.hunter.level)}. ${c.hunter.name}은(는) 물러났다... 더 강해져서 돌아올 것이다.`;
+    }
+    this.say(msg);
+    this.pendingChoice = undefined;
+    this.status = this.map.tiles[this.pos.y][this.pos.x] === Tile.Stairs && !this.bossAlive ? 'onStairs' : 'playing';
+    return msg;
   }
 
   private monstersAct() {
@@ -243,6 +342,12 @@ export class TowerRun {
         const dmg = this.damage(m.atk, this.hunter.def);
         this.hunter.hp -= dmg;
         this.say(`${m.kind.name}의 공격! ${dmg} 피해.`);
+        if (this.hunter.hp <= 0 && this.hunter.rescues > 0) {
+          this.hunter.rescues -= 1;
+          this.hunter.hp = Math.ceil(this.hunter.maxHp * 0.3);
+          this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
+          continue;
+        }
         if (this.hunter.hp <= 0) {
           this.hunter.hp = 0;
           this.status = 'dead';

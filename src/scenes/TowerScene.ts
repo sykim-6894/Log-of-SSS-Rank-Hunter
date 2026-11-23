@@ -1,8 +1,8 @@
 import * as Phaser from 'phaser';
-import { recordDeath, settleReturn } from '../core/agency';
+import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
 import { MAP_H, MAP_W, Tile } from '../core/dungeon';
-import { combatPower, gradeOf, hallOfFameScore } from '../core/hunter';
-import { Action, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
+import { hallOfFameScore } from '../core/hunter';
+import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 
@@ -22,7 +22,7 @@ export class TowerScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
-    this.run = new TowerRun(state.hunter, rng);
+    this.run = new TowerRun(activeHunter(state)!, rng, { rivals: state.rival.roster, rivalAgency: state.rival.name });
     this.mapLayer = this.add.graphics();
 
     const keys: Record<string, Action> = {
@@ -91,7 +91,7 @@ export class TowerScene extends Phaser.Scene {
 
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
-      const color = m.kind.boss ? INK.red : m.awake ? INK.rust : '#c9a46a';
+      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.awake ? INK.rust : '#c9a46a';
       this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
@@ -108,6 +108,7 @@ export class TowerScene extends Phaser.Scene {
 
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
+    if (run.status === 'choosing' && !this.overlay.length) this.showChoice();
   }
 
   /** Stone floor with a little speckle; bricked walls. Remembered tiles are drawn dark. */
@@ -158,14 +159,14 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, HUD_Y, 960, 2);
     g.fillStyle(PALETTE.shadow, 1).fillRect(0, HUD_Y + 2, 960, 2);
     const nameText = k(title(this, 16, HUD_Y + 12, h.name, 15, INK.text));
-    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, `${gradeOf(combatPower(h))}급 · Lv.${h.level}`, 12, INK.rust, true));
+    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
     k(text(this, 16, HUD_Y + 40, `체력`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 43, 150, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, 212, HUD_Y + 40, `${h.hp}/${h.maxHp}`, 12, INK.text));
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 88, `${run.floor}층  ·  수입 ${run.runGold}G  ·  포션 ${h.potions}`, 12, INK.gold));
+    k(text(this, 16, HUD_Y + 88, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -221,16 +222,45 @@ export class TowerScene extends Phaser.Scene {
     this.dialog('계단에 도착했다', lines, buttons);
   }
 
+  private showChoice() {
+    const run = this.run;
+    const c = run.pendingChoice!;
+    const tag = c.hunter.origin === 'rival' ? '라이벌' : '옛 동료';
+    const pick = (i: number) => () => {
+      this.closeOverlay();
+      run.resolveChoice(i);
+      this.redraw();
+    };
+    this.dialog(
+      `[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`,
+      [`${state.rival.name} 소속 · Lv.${c.hunter.level}`, '보상을 받고 보내주면 더 강해져서 다시 나타난다.', '완전히 쓰러뜨리면 다시는 만나지 않는다.'],
+      [
+        [`${REWARDS[c.rewards[0]].label}: ${REWARDS[c.rewards[0]].describe(c.hunter.level)}`, pick(0), true],
+        [`${REWARDS[c.rewards[1]].label}: ${REWARDS[c.rewards[1]].describe(c.hunter.level)}`, pick(1), true],
+        [`완전한 사망: 경험치 +${c.finishExp}`, pick(2)],
+      ],
+      '#d79bff',
+    );
+  }
+
+  private newsLines(n: AfterRunNews): string[] {
+    const msgs: string[] = [];
+    for (const name of n.finished) msgs.push(`${name}은(는) 명예의 전당에 이름만 남겼다.`);
+    for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 더 강해졌다.`);
+    if (n.rivalCreated) msgs.push(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`);
+    return msgs;
+  }
+
   private finishReturn() {
     const run = this.run;
-    const r = settleReturn(state, run.runGold);
+    const r = settleReturn(state, rng, run.runGold, run.encounters);
     const msgs = [
-      `${run.floor}층에서 귀환. 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%)를 에이전시에 상납했다.`,
+      `${run.floor}층에서 귀환. 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
     ];
     if (r.promotedTo) {
-      msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급 승급! 재계약으로 상납 비율이 낮아졌다.`);
-      if (r.signingSupport > 0) msgs.push(`재계약 기념 아이템 지원금 ${r.signingSupport}G를 받았다.`);
+      msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
+    msgs.push(...this.newsLines(r));
     persist();
     this.scene.start('HQ', { messages: msgs });
   }
@@ -239,27 +269,28 @@ export class TowerScene extends Phaser.Scene {
     const run = this.run;
     const h = run.hunter;
     const score = hallOfFameScore(h);
+    const grade = gradeIn(state, h);
+    const killer = run.killer ?? '알 수 없는 적';
+    const d = settleDeath(state, rng, killer, run.encounters);
+    persist();
+    const legend = h.everSSS;
+    const fateLine = d.scouted
+      ? `지나가던 ${state.rival.name}이(가) ${h.name}을(를) 구해 데려갔다...`
+      : `${h.name}의 이름은 기록으로만 남는다.`;
+    const msgs = [
+      d.scouted ? `${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.` : `${h.name}의 기록이 남았다.`,
+      ...this.newsLines(d),
+    ];
     this.dialog(
-      '넌 주인공이 아니었네...',
+      legend ? '그래, 너였구나.' : '넌 주인공이 아니었네...',
       [
-        `${h.name} · ${gradeOf(combatPower(h))}급 · Lv.${h.level}`,
-        `${run.floor}층에서 ${run.killer}에게 쓰러졌다.`,
+        `${h.name} · ${grade}급 · Lv.${h.level}`,
+        `${run.floor}층에서 ${killer}에게 쓰러졌다.`,
         `처치 ${h.kills}마리 · 최고 ${h.bestFloor}층 · 기록 점수 ${score}`,
-        '이번 탑에서 번 돈은 모두 잃었다.',
+        fateLine,
       ],
-      [[
-        '본부로 돌아가 새 헌터 고용',
-        () => {
-          const name = h.name;
-          recordDeath(state, rng, run.killer ?? '알 수 없는 적');
-          persist();
-          this.scene.start('HQ', {
-            messages: [`${name}의 기록이 남았다.`, `새 헌터 ${state.hunter.name}와(과) 계약했다.`],
-          });
-        },
-        true,
-      ]],
-      INK.red,
+      [['본부로 돌아가기', () => this.scene.start('HQ', { messages: msgs }), true]],
+      legend ? INK.gold : INK.red,
     );
   }
 }
