@@ -1,13 +1,28 @@
 import * as Phaser from 'phaser';
-import { recordDeath, settleReturn } from '../core/agency';
+import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
 import { MAP_H, MAP_W, Tile } from '../core/dungeon';
-import { combatPower, gradeOf, hallOfFameScore } from '../core/hunter';
-import { Action, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
+import { hallOfFameScore } from '../core/hunter';
+import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
+import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
+
+// Portrait layout: status bar on top, a camera that follows the hunter, the log,
+// then a thumb area with the joystick on the left and action buttons on the right.
+const P_TOP_H = 84;
+const P_LOG_H = 60;
+const P_CTL_H = 210;
+const P_MAP_H = GH - P_TOP_H - P_LOG_H - P_CTL_H;
+const P_LOG_Y = P_TOP_H + P_MAP_H;
+const P_CTL_Y = P_LOG_Y + P_LOG_H;
+const P_BTN_X = GW - 212; // action buttons start here
+const P_ZOOM = 1.25;
+const JOY_RADIUS = 44;
+const JOY_DEADZONE = 14;
+const JOY_REPEAT_MS = 170;
 
 /** One trip up the Tower of Growth. Draws the TowerRun and turns input into actions. */
 export class TowerScene extends Phaser.Scene {
@@ -15,6 +30,18 @@ export class TowerScene extends Phaser.Scene {
   private mapLayer!: Phaser.GameObjects.Graphics;
   private dynamic: Phaser.GameObjects.GameObject[] = [];
   private overlay: Phaser.GameObjects.GameObject[] = [];
+  private joy: {
+    id: number;
+    ox: number;
+    oy: number;
+    dir: { dx: number; dy: number } | null;
+    used: boolean;
+    halted: boolean;
+    gfx: Phaser.GameObjects.Graphics;
+    timer: Phaser.Time.TimerEvent | null;
+  } | null = null;
+  /** Portrait only: a fixed camera for the HUD while the main camera follows the hunter. */
+  private uiCam: Phaser.Cameras.Scene2D.Camera | null = null;
 
   constructor() {
     super('Tower');
@@ -22,8 +49,17 @@ export class TowerScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
-    this.run = new TowerRun(state.hunter, rng);
-    this.mapLayer = this.add.graphics();
+    this.joy = null;
+    this.run = new TowerRun(activeHunter(state)!, rng, { rivals: state.rival.roster, rivalAgency: state.rival.name });
+    this.overlay = [];
+    this.dynamic = [];
+    this.uiCam = null;
+    if (PORTRAIT) {
+      const cam = this.cameras.main;
+      cam.setViewport(0, P_TOP_H, GW, P_MAP_H).setZoom(P_ZOOM).setBounds(0, 0, MAP_W * TILE, MAP_H * TILE);
+      this.uiCam = this.cameras.add(0, 0, GW, GH);
+    }
+    this.mapLayer = this.world(this.add.graphics());
 
     const keys: Record<string, Action> = {
       ArrowUp: { type: 'move', dx: 0, dy: -1 },
@@ -43,19 +79,114 @@ export class TowerScene extends Phaser.Scene {
       if (action) this.perform(action);
     });
 
-    // Tap or click on the map: step one tile toward that point.
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.y >= HUD_Y || this.overlay.length) return;
-      const tx = Math.floor(p.x / TILE);
-      const ty = Math.floor(p.y / TILE);
-      const dx = tx - this.run.pos.x;
-      const dy = ty - this.run.pos.y;
-      if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
-      if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
-      else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
-    });
+    // Touch the map: a joystick appears under the finger. Drag to walk, hold to keep walking.
+    // A quick tap without dragging still steps one tile toward the tapped point.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.joyStart(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.joyMove(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.joyEnd(p));
+    this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.joyEnd(p));
 
     this.redraw();
+  }
+
+  /** Map objects: drawn only by the main (following) camera. */
+  private world<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    this.uiCam?.ignore(o);
+    return o;
+  }
+
+  /** HUD and dialogs: drawn only by the fixed camera in portrait. */
+  private ui<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    if (this.uiCam) this.cameras.main.ignore(o);
+    return o;
+  }
+
+  /** Where a touch may start the joystick: the map, or (portrait) the left of the thumb area. */
+  private joyArea(p: Phaser.Input.Pointer) {
+    if (!PORTRAIT) return p.y < HUD_Y;
+    if (p.y >= P_TOP_H && p.y < P_LOG_Y) return true;
+    return p.y >= P_CTL_Y && p.x < P_BTN_X - 6;
+  }
+
+  private joyStart(p: Phaser.Input.Pointer) {
+    if (!this.joyArea(p) || this.overlay.length || this.joy) return;
+    const gfx = this.ui(this.add.graphics().setDepth(50));
+    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, halted: false, gfx, timer: null };
+    this.drawJoy(p.x, p.y);
+  }
+
+  private joyMove(p: Phaser.Input.Pointer) {
+    const joy = this.joy;
+    if (!joy || p.id !== joy.id) return;
+    let vx = p.x - joy.ox;
+    let vy = p.y - joy.oy;
+    const len = Math.hypot(vx, vy);
+    if (len > JOY_RADIUS) {
+      vx = (vx / len) * JOY_RADIUS;
+      vy = (vy / len) * JOY_RADIUS;
+    }
+    this.drawJoy(joy.ox + vx, joy.oy + vy);
+    if (len < JOY_DEADZONE) {
+      joy.dir = null;
+      return;
+    }
+    const dir = Math.abs(vx) >= Math.abs(vy) ? { dx: Math.sign(vx), dy: 0 } : { dx: 0, dy: Math.sign(vy) };
+    const changed = !joy.dir || joy.dir.dx !== dir.dx || joy.dir.dy !== dir.dy;
+    joy.dir = dir;
+    if (!changed) return;
+    // A new direction always takes one step right away and clears a safety stop.
+    joy.halted = false;
+    joy.used = true;
+    this.joyStep();
+    if (this.joy && !this.joy.timer) {
+      this.joy.timer = this.time.addEvent({ delay: JOY_REPEAT_MS, loop: true, callback: () => this.joyStep() });
+    }
+  }
+
+  private joyEnd(p: Phaser.Input.Pointer) {
+    const joy = this.joy;
+    if (!joy || p.id !== joy.id) return;
+    this.joyClear();
+    if (joy.used || this.overlay.length) return;
+    // Plain tap on the map: step toward the tapped tile, or wait when tapping the hunter.
+    if (PORTRAIT && (joy.oy < P_TOP_H || joy.oy >= P_LOG_Y)) return;
+    const at = this.cameras.main.getWorldPoint(joy.ox, joy.oy);
+    const dx = Math.floor(at.x / TILE) - this.run.pos.x;
+    const dy = Math.floor(at.y / TILE) - this.run.pos.y;
+    if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
+    if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
+    else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
+  }
+
+  /** One held-joystick step. Stops by itself when a new enemy comes into view. */
+  private joyStep() {
+    const joy = this.joy;
+    if (!joy || !joy.dir || joy.halted) return;
+    if (this.overlay.length || this.run.status !== 'playing') return this.joyClear();
+    const before = this.visibleEnemies();
+    this.perform({ type: 'move', dx: joy.dir.dx, dy: joy.dir.dy });
+    if (this.joy && this.visibleEnemies() > before) this.joy.halted = true;
+  }
+
+  private visibleEnemies() {
+    return this.run.monsters.filter((m) => this.run.isVisible(m.x, m.y)).length;
+  }
+
+  private drawJoy(kx: number, ky: number) {
+    const joy = this.joy;
+    if (!joy) return;
+    const g = joy.gfx.clear();
+    g.fillStyle(0x000000, 0.25).fillCircle(joy.ox, joy.oy, JOY_RADIUS + 8);
+    g.lineStyle(3, 0xe8d5b0, 0.55).strokeCircle(joy.ox, joy.oy, JOY_RADIUS + 8);
+    g.fillStyle(0xe8d5b0, 0.7).fillCircle(kx, ky, 18);
+    g.lineStyle(2, 0x2a221c, 0.8).strokeCircle(kx, ky, 18);
+  }
+
+  private joyClear() {
+    if (!this.joy) return;
+    this.joy.timer?.remove();
+    this.joy.gfx.destroy();
+    this.joy = null;
   }
 
   private perform(action: Action) {
@@ -70,6 +201,7 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private keep<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    this.world(o);
     this.dynamic.push(o);
     return o;
   }
@@ -91,7 +223,7 @@ export class TowerScene extends Phaser.Scene {
 
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
-      const color = m.kind.boss ? INK.red : m.awake ? INK.rust : '#c9a46a';
+      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.awake ? INK.rust : '#c9a46a';
       this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
@@ -103,11 +235,14 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     this.keep(this.glyph(run.pos.x, run.pos.y, '@', INK.gate, 18));
+    if (PORTRAIT) this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
 
-    this.drawHud();
+    if (PORTRAIT) this.drawHudPortrait();
+    else this.drawHud();
 
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
+    if (run.status === 'choosing' && !this.overlay.length) this.showChoice();
   }
 
   /** Stone floor with a little speckle; bricked walls. Remembered tiles are drawn dark. */
@@ -149,6 +284,7 @@ export class TowerScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
+
   private drawHud() {
     const run = this.run;
     const h = run.hunter;
@@ -158,14 +294,14 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, HUD_Y, 960, 2);
     g.fillStyle(PALETTE.shadow, 1).fillRect(0, HUD_Y + 2, 960, 2);
     const nameText = k(title(this, 16, HUD_Y + 12, h.name, 15, INK.text));
-    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, `${gradeOf(combatPower(h))}급 · Lv.${h.level}`, 12, INK.rust, true));
+    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
     k(text(this, 16, HUD_Y + 40, `체력`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 43, 150, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, 212, HUD_Y + 40, `${h.hp}/${h.maxHp}`, 12, INK.text));
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 88, `${run.floor}층  ·  수입 ${run.runGold}G  ·  포션 ${h.potions}`, 12, INK.gold));
+    k(text(this, 16, HUD_Y + 88, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -178,6 +314,49 @@ export class TowerScene extends Phaser.Scene {
     k(button(this, 700, HUD_Y + 64, 244, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
   }
 
+  private drawHudPortrait() {
+    const run = this.run;
+    const h = run.hunter;
+    const k = <T extends Phaser.GameObjects.GameObject>(o: T) => {
+      this.dynamic.push(o);
+      return this.ui(o);
+    };
+    const g = k(this.add.graphics());
+    // Top status bar
+    g.fillStyle(PALETTE.panel, 1).fillRect(0, 0, GW, P_TOP_H);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
+    const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
+    k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
+    k(text(this, GW - 14, 13, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
+    k(text(this, 14, 38, '체력', 12, INK.quiet));
+    k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
+    k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
+    k(text(this, 14, 58, '마나', 12, INK.quiet));
+    k(bar(this, 52, 61, 300, 8, h.mp / h.maxMp, PALETTE.mp));
+    k(text(this, GW - 14, 58, `${h.mp}/${h.maxMp}`, 12, INK.text).setOrigin(1, 0));
+
+    // Log strip: the last two lines
+    g.fillStyle(PALETTE.panelDark, 1).fillRect(0, P_LOG_Y, GW, P_LOG_H);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_LOG_Y, GW, 2);
+    run.log.slice(-2).forEach((line, i, arr) => {
+      const t = k(text(this, 14, P_LOG_Y + 10 + i * 22, line, 12, i === arr.length - 1 ? INK.text : INK.faint));
+      let v = line;
+      while (t.width > GW - 28 && v.length > 1) t.setText(`${(v = v.slice(0, -1))}…`);
+    });
+
+    // Thumb area: joystick pad on the left, actions on the right
+    g.fillStyle(PALETTE.panel, 1).fillRect(0, P_CTL_Y, GW, GH - P_CTL_Y);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_CTL_Y, GW, 2);
+    const cx = P_BTN_X / 2;
+    const cy = P_CTL_Y + 96;
+    g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
+    g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
+    k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
+    k(button(this, P_BTN_X, P_CTL_Y + 22, 96, 72, `${SKILL_NAME}\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' }), { enabled: h.mp >= SKILL_COST }));
+    k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `포션\n${h.potions}개`, () => this.perform({ type: 'potion' }), { enabled: h.potions > 0 }));
+    k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
+  }
+
   private closeOverlay() {
     this.overlay.forEach((o) => o.destroy());
     this.overlay = [];
@@ -185,20 +364,35 @@ export class TowerScene extends Phaser.Scene {
 
   private dialog(heading: string, lines: string[], buttons: Array<[string, () => void, boolean?]>, headingColor: string = INK.text) {
     const o = this.overlay;
-    const shade = this.add.graphics();
+    const push = <T extends Phaser.GameObjects.GameObject>(obj: T) => {
+      o.push(this.ui(obj));
+      return obj;
+    };
+    const shade = push(this.add.graphics());
     shade.fillStyle(0x000000, 0.7);
-    shade.fillRect(0, 0, 960, 720);
-    shade.setInteractive(new Phaser.Geom.Rectangle(0, 0, 960, 720), Phaser.Geom.Rectangle.Contains);
-    o.push(shade);
-    const w = 520;
-    const hgt = 100 + lines.length * 24 + buttons.length * 58;
-    const x = (960 - w) / 2;
-    const y = (720 - hgt) / 2;
-    o.push(panel(this, x, y, w, hgt));
-    o.push(title(this, 480, y + 24, heading, 23, headingColor).setOrigin(0.5, 0));
-    lines.forEach((l, i) => o.push(text(this, 480, y + 66 + i * 24, l, 12, INK.quiet).setOrigin(0.5, 0)));
+    shade.fillRect(0, 0, GW, GH);
+    shade.setInteractive(new Phaser.Geom.Rectangle(0, 0, GW, GH), Phaser.Geom.Rectangle.Contains);
+    const w = Math.min(520, GW - 24);
+    const cx = GW / 2;
+    const pad = PORTRAIT ? 20 : 40;
+    // Lay the lines out first (wrapped to the panel) so the panel can fit them.
+    const texts = lines.map((l) => push(text(this, cx, 0, l, 12, INK.quiet).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 32, true)));
+    const linesH = texts.reduce((sum, t) => sum + t.height + 7, 0);
+    const hgt = 100 + linesH + buttons.length * 58;
+    const x = (GW - w) / 2;
+    const y = (GH - hgt) / 2;
+    o.unshift(this.ui(panel(this, x, y, w, hgt)));
+    this.children.bringToTop(shade);
+    o.forEach((obj) => obj !== shade && this.children.bringToTop(obj));
+    const head = push(title(this, cx, y + 24, heading, PORTRAIT ? 20 : 23, headingColor).setOrigin(0.5, 0));
+    head.setWordWrapWidth(w - 24, true);
+    let ly = y + 66;
+    texts.forEach((t) => {
+      t.y = ly;
+      ly += t.height + 7;
+    });
     buttons.forEach(([label, fn, primary], i) => {
-      o.push(button(this, x + 40, y + 82 + lines.length * 24 + i * 58, w - 80, 48, label, fn, { primary: !!primary, size: 12 }));
+      push(button(this, x + pad, ly + 16 + i * 58, w - pad * 2, 48, label, fn, { primary: !!primary, size: 12 }));
     });
   }
 
@@ -221,16 +415,45 @@ export class TowerScene extends Phaser.Scene {
     this.dialog('계단에 도착했다', lines, buttons);
   }
 
+  private showChoice() {
+    const run = this.run;
+    const c = run.pendingChoice!;
+    const tag = c.hunter.origin === 'rival' ? '라이벌' : '옛 동료';
+    const pick = (i: number) => () => {
+      this.closeOverlay();
+      run.resolveChoice(i);
+      this.redraw();
+    };
+    this.dialog(
+      `[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`,
+      [`${state.rival.name} 소속 · Lv.${c.hunter.level}`, '보상을 받고 보내주면 더 강해져서 다시 나타난다.', '완전히 쓰러뜨리면 다시는 만나지 않는다.'],
+      [
+        [`${REWARDS[c.rewards[0]].label}: ${REWARDS[c.rewards[0]].describe(c.hunter.level)}`, pick(0), true],
+        [`${REWARDS[c.rewards[1]].label}: ${REWARDS[c.rewards[1]].describe(c.hunter.level)}`, pick(1), true],
+        [`완전한 사망: 경험치 +${c.finishExp}`, pick(2)],
+      ],
+      '#d79bff',
+    );
+  }
+
+  private newsLines(n: AfterRunNews): string[] {
+    const msgs: string[] = [];
+    for (const name of n.finished) msgs.push(`${name}은(는) 명예의 전당에 이름만 남겼다.`);
+    for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 더 강해졌다.`);
+    if (n.rivalCreated) msgs.push(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`);
+    return msgs;
+  }
+
   private finishReturn() {
     const run = this.run;
-    const r = settleReturn(state, run.runGold);
+    const r = settleReturn(state, rng, run.runGold, run.encounters);
     const msgs = [
-      `${run.floor}층에서 귀환. 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%)를 에이전시에 상납했다.`,
+      `${run.floor}층에서 귀환. 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
     ];
     if (r.promotedTo) {
-      msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급 승급! 재계약으로 상납 비율이 낮아졌다.`);
-      if (r.signingSupport > 0) msgs.push(`재계약 기념 아이템 지원금 ${r.signingSupport}G를 받았다.`);
+      msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
+    msgs.push(...this.newsLines(r));
     persist();
     this.scene.start('HQ', { messages: msgs });
   }
@@ -239,27 +462,28 @@ export class TowerScene extends Phaser.Scene {
     const run = this.run;
     const h = run.hunter;
     const score = hallOfFameScore(h);
+    const grade = gradeIn(state, h);
+    const killer = run.killer ?? '알 수 없는 적';
+    const d = settleDeath(state, rng, killer, run.encounters);
+    persist();
+    const legend = h.everSSS;
+    const fateLine = d.scouted
+      ? `지나가던 ${state.rival.name}이(가) ${h.name}을(를) 구해 데려갔다...`
+      : `${h.name}의 이름은 기록으로만 남는다.`;
+    const msgs = [
+      d.scouted ? `${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.` : `${h.name}의 기록이 남았다.`,
+      ...this.newsLines(d),
+    ];
     this.dialog(
-      '넌 주인공이 아니었네...',
+      legend ? '그래, 너였구나.' : '넌 주인공이 아니었네...',
       [
-        `${h.name} · ${gradeOf(combatPower(h))}급 · Lv.${h.level}`,
-        `${run.floor}층에서 ${run.killer}에게 쓰러졌다.`,
+        `${h.name} · ${grade}급 · Lv.${h.level}`,
+        `${run.floor}층에서 ${killer}에게 쓰러졌다.`,
         `처치 ${h.kills}마리 · 최고 ${h.bestFloor}층 · 기록 점수 ${score}`,
-        '이번 탑에서 번 돈은 모두 잃었다.',
+        fateLine,
       ],
-      [[
-        '본부로 돌아가 새 헌터 고용',
-        () => {
-          const name = h.name;
-          recordDeath(state, rng, run.killer ?? '알 수 없는 적');
-          persist();
-          this.scene.start('HQ', {
-            messages: [`${name}의 기록이 남았다.`, `새 헌터 ${state.hunter.name}와(과) 계약했다.`],
-          });
-        },
-        true,
-      ]],
-      INK.red,
+      [['본부로 돌아가기', () => this.scene.start('HQ', { messages: msgs }), true]],
+      legend ? INK.gold : INK.red,
     );
   }
 }

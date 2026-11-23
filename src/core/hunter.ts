@@ -1,9 +1,23 @@
 import { Rng } from './rng';
 
-export type Grade = 'F' | 'E' | 'D' | 'C' | 'B' | 'A';
+/** F to A come from combat power. S, SS and SSS come from the live ranking. */
+export type PowerGrade = 'F' | 'E' | 'D' | 'C' | 'B' | 'A';
+export type RankGrade = 'S' | 'SS' | 'SSS';
+export type Grade = PowerGrade | RankGrade;
+
+export const GRADE_ORDER: Grade[] = ['F', 'E', 'D', 'C', 'B', 'A', 'S', 'SS', 'SSS'];
+
+export function gradeRank(g: Grade): number {
+  return GRADE_ORDER.indexOf(g);
+}
+
+export type HunterOrigin = 'ours' | 'scouted' | 'released' | 'rival';
 
 export interface Hunter {
+  id: number;
   name: string;
+  /** Where the hunter belongs now and how they got there. */
+  origin: HunterOrigin;
   level: number;
   exp: number;
   hp: number;
@@ -21,6 +35,16 @@ export interface Hunter {
   totalTribute: number;
   /** How many times each kind of training the agent has paid for. */
   training: Record<TrainingKind, number>;
+  /** The grade the current contract was signed at. Sets the tribute rate. */
+  contractGrade: Grade;
+  /** Reached #1 in the ranking at least once. Always scouted on death. */
+  everSSS: boolean;
+  /** One-time rescues: survive a killing blow with 30% health. */
+  rescues: number;
+  /** Damage multiplier of the spin attack. */
+  skillPower: number;
+  /** For a rival hunter: the id of our hunter they shadow. */
+  rivalOf?: number;
 }
 
 export type TrainingKind = 'atk' | 'def' | 'hp' | 'mp';
@@ -30,9 +54,12 @@ const NAMES = [
   '최다온', '문시우', '신유나', '권태오', '류하늘', '남궁별', '차은호', '도민아',
 ];
 
-export function createHunter(rng: Rng): Hunter {
+export function createHunter(rng: Rng, id: number, avoidNames: string[] = []): Hunter {
+  const free = NAMES.filter((n) => !avoidNames.includes(n));
   return {
-    name: rng.pick(NAMES),
+    id,
+    name: rng.pick(free.length ? free : NAMES),
+    origin: 'ours',
     level: 1,
     exp: 0,
     hp: 30,
@@ -48,6 +75,10 @@ export function createHunter(rng: Rng): Hunter {
     bestFloor: 0,
     totalTribute: 0,
     training: { atk: 0, def: 0, hp: 0, mp: 0 },
+    contractGrade: 'F',
+    everSSS: false,
+    rescues: 0,
+    skillPower: 1.5,
   };
 }
 
@@ -57,7 +88,7 @@ export function combatPower(h: Pick<Hunter, 'maxHp' | 'maxMp' | 'atk' | 'def' | 
 }
 
 /** Lower bound of combat power for each grade, highest first. */
-export const GRADE_THRESHOLDS: ReadonlyArray<[Grade, number]> = [
+export const GRADE_THRESHOLDS: ReadonlyArray<[PowerGrade, number]> = [
   ['A', 2000],
   ['B', 1000],
   ['C', 500],
@@ -66,7 +97,7 @@ export const GRADE_THRESHOLDS: ReadonlyArray<[Grade, number]> = [
   ['F', 0],
 ];
 
-export function gradeOf(power: number): Grade {
+export function gradeOf(power: number): PowerGrade {
   for (const [grade, min] of GRADE_THRESHOLDS) {
     if (power >= min) return grade;
   }
@@ -81,10 +112,21 @@ export const TRIBUTE_RATE: Record<Grade, number> = {
   C: 0.35,
   B: 0.3,
   A: 0.25,
+  S: 0.2,
+  SS: 0.15,
+  SSS: 0.1,
 };
 
-export function hunterGrade(h: Hunter): Grade {
+export function powerGrade(h: Hunter): PowerGrade {
   return gradeOf(combatPower(h));
+}
+
+/** Grade for a ranking position (0-based): #1 SSS, #2-4 SS, #5-10 S. */
+export function rankGradeOf(index: number): RankGrade | undefined {
+  if (index === 0) return 'SSS';
+  if (index < 4) return 'SS';
+  if (index < 10) return 'S';
+  return undefined;
 }
 
 export function expToNext(level: number): number {
@@ -97,16 +139,20 @@ export function gainExp(h: Hunter, amount: number): number {
   let gained = 0;
   while (h.exp >= expToNext(h.level)) {
     h.exp -= expToNext(h.level);
-    h.level += 1;
-    h.maxHp += 5;
-    h.maxMp += 2;
-    h.atk += 1;
-    h.def += 1;
-    h.hp = h.maxHp;
-    h.mp = h.maxMp;
+    levelUp(h);
     gained += 1;
   }
   return gained;
+}
+
+export function levelUp(h: Hunter) {
+  h.level += 1;
+  h.maxHp += 5;
+  h.maxMp += 2;
+  h.atk += 1;
+  h.def += 1;
+  h.hp = h.maxHp;
+  h.mp = h.maxMp;
 }
 
 export function hallOfFameScore(h: Hunter): number {
