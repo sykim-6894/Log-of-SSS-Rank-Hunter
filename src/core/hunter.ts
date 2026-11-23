@@ -1,3 +1,4 @@
+import { Bag, emptyBag, Equipment } from './items';
 import { Rng } from './rng';
 
 /** F to A come from combat power. S, SS and SSS come from the live ranking. */
@@ -28,7 +29,10 @@ export interface Hunter {
   def: number;
   /** The hunter's own wallet, used for items. */
   gold: number;
-  potions: number;
+  /** Consumables carried into the tower. */
+  bag: Bag;
+  /** One piece per slot; its bonuses are already included in the stats above. */
+  gear: Equipment;
   kills: number;
   killScore: number;
   bestFloor: number;
@@ -69,7 +73,8 @@ export function createHunter(rng: Rng, id: number, avoidNames: string[] = []): H
     atk: 5,
     def: 2,
     gold: 20,
-    potions: 2,
+    bag: { ...emptyBag(), hp: 2 },
+    gear: {},
     kills: 0,
     killScore: 0,
     bestFloor: 0,
@@ -129,8 +134,9 @@ export function rankGradeOf(index: number): RankGrade | undefined {
   return undefined;
 }
 
+/** Quick first levels, steeper later: 6, 17, 31, 48, 67 ... 190 at level 10. */
 export function expToNext(level: number): number {
-  return 20 * level;
+  return Math.round(6 * level ** 1.5);
 }
 
 /** Adds experience and applies level ups. Returns how many levels were gained. */

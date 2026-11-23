@@ -34,7 +34,7 @@ export function stepTowards(run: TowerRun, goal: Point): Action | undefined {
 /** A simple autoplayer used to test balance: fight what it sees, then head for the stairs. */
 export function botAction(run: TowerRun): Action {
   const h = run.hunter;
-  if (h.hp < h.maxHp * 0.35 && h.potions > 0) return { type: 'potion' };
+  if (h.hp < h.maxHp * 0.35 && h.bag.hp > 0) return { type: 'use', item: 'hp' };
   const adjacent = run.monsters.filter((m) => Math.abs(m.x - run.pos.x) <= 1 && Math.abs(m.y - run.pos.y) <= 1);
   if (adjacent.length >= 2 && h.mp >= SKILL_COST) return { type: 'skill' };
   const visible = run.monsters

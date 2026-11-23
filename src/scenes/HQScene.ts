@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser';
-import { activeHunter, buyPotion, gradeIn, hire, POTION_PRICE, ranking, release, SLOT_COUNT, train, TRAINING, trainingCost } from '../core/agency';
+import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, train, TRAINING, trainingCost } from '../core/agency';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
+import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -17,12 +19,14 @@ let welcomed = false;
 type Tab = 'hunter' | 'shop' | 'ranking' | 'rival' | 'log';
 const TABS: Array<[Tab, string]> = [
   ['hunter', '헌터'],
-  ['shop', '상점'],
+  ['shop', '가방'],
   ['ranking', '순위'],
   ['rival', '라이벌'],
   ['log', '일지'],
 ];
 let tab: Tab = 'hunter';
+/** Landscape only: show the gear doll where the ranking usually is. */
+let showGear = false;
 
 /** Shortens a one-line text with an ellipsis until it fits the width. */
 function fit(t: Phaser.GameObjects.Text, width: number) {
@@ -74,7 +78,8 @@ export class HQScene extends Phaser.Scene {
     this.drawLicense(24, 146);
     this.drawTraining(24, 418);
     this.drawShop(24, 590);
-    this.drawRanking(488, 100);
+    if (showGear) this.drawGearPanel(488, 100, 448);
+    else this.drawRanking(488, 100);
     this.drawRival(488, 442);
     this.drawLog(488, 530);
 
@@ -83,7 +88,7 @@ export class HQScene extends Phaser.Scene {
       this.scene.start('Tower');
     }, { primary: true, size: 24, enabled: !!activeHunter(state) });
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E 포션   Space 대기   화면 터치로도 이동', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F 물약   B 가방   Space 대기', 12, INK.faint).setOrigin(0.5, 0);
   }
 
   private createPortrait() {
@@ -104,7 +109,7 @@ export class HQScene extends Phaser.Scene {
       this.drawLicense(x, top, w);
       this.drawTraining(x, top + 278, w);
     } else if (tab === 'shop') {
-      this.drawShop(x, top + 8, w);
+      this.drawBag(x, top + 8, w);
     } else if (tab === 'ranking') {
       this.drawRanking(x, top + 8, w);
     } else if (tab === 'rival') {
@@ -214,7 +219,7 @@ export class HQScene extends Phaser.Scene {
     const sx = x + w - 144;
     text(this, sx, y + 146, `공격 ${h.atk}`, 12, INK.ink);
     text(this, sx, y + 166, `방어 ${h.def}`, 12, INK.ink);
-    text(this, sx + 64, y + 146, `포션 ${h.potions}`, 12, INK.ink);
+    text(this, sx + 64, y + 146, `물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, 12, INK.ink);
     text(this, sx + 64, y + 166, `${h.gold}G`, 12, INK.ink);
 
     dots(this, x + 18, y + 188, w - 36, PALETTE.paperLine);
@@ -252,18 +257,67 @@ export class HQScene extends Phaser.Scene {
     });
   }
 
+  private buy(kind: ConsumableKind) {
+    const r = buyItem(state, rng, kind);
+    if (!r.ok) return;
+    const name = CONSUMABLES[kind].name;
+    const msg = r.agentPaid > 0 ? `${name}: 에이전트가 ${r.agentPaid}G를 지원했다. (헌터 부담 ${r.hunterPaid}G)` : `${name} 구매. -${r.hunterPaid}G`;
+    this.refresh([msg]);
+  }
+
+  private canBuy(kind: ConsumableKind) {
+    const h = activeHunter(state);
+    const price = CONSUMABLES[kind].price;
+    return !!h && price !== undefined && h.gold >= price && h.bag[kind] < BAG_MAX;
+  }
+
+  /** Landscape: gear and potions on one line each, with the two potions for sale. */
   private drawShop(x: number, y: number, w = 440) {
-    const hunter = activeHunter(state);
-    if (!hunter) return;
-    panel(this, x, y, w, 76, '상점');
-    text(this, x + 16, y + 22, '회복 포션', 12, INK.text, true);
-    text(this, x + 16, y + 42, '체력 40% 회복 · 헌터 소지금으로 구매', 12, INK.quiet);
-    button(this, x + w - 172, y + 16, 156, 44, `구매  ${POTION_PRICE}G`, () => {
-      const r = buyPotion(state, rng);
-      if (!r.ok) return;
-      const msg = r.agentPaid > 0 ? `에이전트가 ${r.agentPaid}G를 지원했다. (헌터 부담 ${r.hunterPaid}G)` : `포션 구매. -${r.hunterPaid}G`;
-      this.refresh([msg]);
-    }, { enabled: hunter.gold >= POTION_PRICE });
+    const h = activeHunter(state);
+    if (!h) return;
+    panel(this, x, y, w, 76, '가방 · 상점');
+    const worn = GEAR_SLOTS.filter((s) => h.gear[s]).length;
+    button(this, x + 14, y + 14, 96, 26, showGear ? '순위 보기' : '장비 보기', () => {
+      showGear = !showGear;
+      this.scene.restart({ messages: this.messages });
+    });
+    text(this, x + 120, y + 20, `장비 ${worn}/${GEAR_SLOTS.length}칸`, 12, INK.text);
+    text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, 12, INK.quiet);
+    (['hp', 'mp'] as const).forEach((kind, i) => {
+      const c = CONSUMABLES[kind];
+      button(this, x + w - 196 + i * 92, y + 16, 86, 44, `${c.name.slice(0, 2)} 물약\n${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
+    });
+  }
+
+  /** The gear doll in a panel. */
+  private drawGearPanel(x: number, y: number, w: number) {
+    const h = activeHunter(state);
+    if (!h) return;
+    panel(this, x, y, w, DOLL_H + 40, '장비');
+    text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
+    drawPaperDoll(this, x + 12, y + 32, w - 24, h);
+  }
+
+  /** Portrait bag tab: worn gear, then potions with their shop buttons. */
+  private drawBag(x: number, y: number, w: number) {
+    const h = activeHunter(state);
+    if (!h) return;
+    this.drawGearPanel(x, y, w);
+
+    const py = y + DOLL_H + 60;
+    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52, '물약 · 상점');
+    text(this, x + w - 16, py + 14, `헌터 소지금 ${h.gold}G`, 12, INK.gold).setOrigin(1, 0);
+    CONSUMABLE_KINDS.forEach((kind, i) => {
+      const c = CONSUMABLES[kind];
+      const ry = py + 32 + i * 52;
+      text(this, x + 16, ry + 4, `${c.name}  ${h.bag[kind]}/${BAG_MAX}`, 12, INK.text, true);
+      text(this, x + 16, ry + 24, c.describe, 12, INK.quiet);
+      if (c.price !== undefined) {
+        button(this, x + w - 126, ry, 110, 44, `구매 ${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
+      } else {
+        text(this, x + w - 16, ry + 14, `${c.where}에서만`, 12, INK.faint).setOrigin(1, 0);
+      }
+    });
   }
 
   /** Live association ranking: ours, the rival agency's, the fallen, and established rankers. */
