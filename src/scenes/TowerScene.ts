@@ -8,6 +8,9 @@ import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui'
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
+const JOY_RADIUS = 44;
+const JOY_DEADZONE = 14;
+const JOY_REPEAT_MS = 170;
 
 /** One trip up the Tower of Growth. Draws the TowerRun and turns input into actions. */
 export class TowerScene extends Phaser.Scene {
@@ -15,6 +18,16 @@ export class TowerScene extends Phaser.Scene {
   private mapLayer!: Phaser.GameObjects.Graphics;
   private dynamic: Phaser.GameObjects.GameObject[] = [];
   private overlay: Phaser.GameObjects.GameObject[] = [];
+  private joy: {
+    id: number;
+    ox: number;
+    oy: number;
+    dir: { dx: number; dy: number } | null;
+    used: boolean;
+    halted: boolean;
+    gfx: Phaser.GameObjects.Graphics;
+    timer: Phaser.Time.TimerEvent | null;
+  } | null = null;
 
   constructor() {
     super('Tower');
@@ -22,6 +35,7 @@ export class TowerScene extends Phaser.Scene {
 
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
+    this.joy = null;
     this.run = new TowerRun(activeHunter(state)!, rng, { rivals: state.rival.roster, rivalAgency: state.rival.name });
     this.mapLayer = this.add.graphics();
 
@@ -43,19 +57,93 @@ export class TowerScene extends Phaser.Scene {
       if (action) this.perform(action);
     });
 
-    // Tap or click on the map: step one tile toward that point.
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.y >= HUD_Y || this.overlay.length) return;
-      const tx = Math.floor(p.x / TILE);
-      const ty = Math.floor(p.y / TILE);
-      const dx = tx - this.run.pos.x;
-      const dy = ty - this.run.pos.y;
-      if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
-      if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
-      else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
-    });
+    // Touch the map: a joystick appears under the finger. Drag to walk, hold to keep walking.
+    // A quick tap without dragging still steps one tile toward the tapped point.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.joyStart(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.joyMove(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.joyEnd(p));
+    this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.joyEnd(p));
 
     this.redraw();
+  }
+
+  private joyStart(p: Phaser.Input.Pointer) {
+    if (p.y >= HUD_Y || this.overlay.length || this.joy) return;
+    const gfx = this.add.graphics().setDepth(50);
+    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, halted: false, gfx, timer: null };
+    this.drawJoy(p.x, p.y);
+  }
+
+  private joyMove(p: Phaser.Input.Pointer) {
+    const joy = this.joy;
+    if (!joy || p.id !== joy.id) return;
+    let vx = p.x - joy.ox;
+    let vy = p.y - joy.oy;
+    const len = Math.hypot(vx, vy);
+    if (len > JOY_RADIUS) {
+      vx = (vx / len) * JOY_RADIUS;
+      vy = (vy / len) * JOY_RADIUS;
+    }
+    this.drawJoy(joy.ox + vx, joy.oy + vy);
+    if (len < JOY_DEADZONE) {
+      joy.dir = null;
+      return;
+    }
+    const dir = Math.abs(vx) >= Math.abs(vy) ? { dx: Math.sign(vx), dy: 0 } : { dx: 0, dy: Math.sign(vy) };
+    const changed = !joy.dir || joy.dir.dx !== dir.dx || joy.dir.dy !== dir.dy;
+    joy.dir = dir;
+    if (!changed) return;
+    // A new direction always takes one step right away and clears a safety stop.
+    joy.halted = false;
+    joy.used = true;
+    this.joyStep();
+    if (this.joy && !this.joy.timer) {
+      this.joy.timer = this.time.addEvent({ delay: JOY_REPEAT_MS, loop: true, callback: () => this.joyStep() });
+    }
+  }
+
+  private joyEnd(p: Phaser.Input.Pointer) {
+    const joy = this.joy;
+    if (!joy || p.id !== joy.id) return;
+    this.joyClear();
+    if (joy.used || this.overlay.length) return;
+    // Plain tap: step toward the tapped tile, or wait when tapping the hunter.
+    const dx = Math.floor(joy.ox / TILE) - this.run.pos.x;
+    const dy = Math.floor(joy.oy / TILE) - this.run.pos.y;
+    if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
+    if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
+    else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
+  }
+
+  /** One held-joystick step. Stops by itself when a new enemy comes into view. */
+  private joyStep() {
+    const joy = this.joy;
+    if (!joy || !joy.dir || joy.halted) return;
+    if (this.overlay.length || this.run.status !== 'playing') return this.joyClear();
+    const before = this.visibleEnemies();
+    this.perform({ type: 'move', dx: joy.dir.dx, dy: joy.dir.dy });
+    if (this.joy && this.visibleEnemies() > before) this.joy.halted = true;
+  }
+
+  private visibleEnemies() {
+    return this.run.monsters.filter((m) => this.run.isVisible(m.x, m.y)).length;
+  }
+
+  private drawJoy(kx: number, ky: number) {
+    const joy = this.joy;
+    if (!joy) return;
+    const g = joy.gfx.clear();
+    g.fillStyle(0x000000, 0.25).fillCircle(joy.ox, joy.oy, JOY_RADIUS + 8);
+    g.lineStyle(3, 0xe8d5b0, 0.55).strokeCircle(joy.ox, joy.oy, JOY_RADIUS + 8);
+    g.fillStyle(0xe8d5b0, 0.7).fillCircle(kx, ky, 18);
+    g.lineStyle(2, 0x2a221c, 0.8).strokeCircle(kx, ky, 18);
+  }
+
+  private joyClear() {
+    if (!this.joy) return;
+    this.joy.timer?.remove();
+    this.joy.gfx.destroy();
+    this.joy = null;
   }
 
   private perform(action: Action) {
