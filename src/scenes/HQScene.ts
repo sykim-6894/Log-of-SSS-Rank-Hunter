@@ -3,6 +3,7 @@ import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, tra
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { drawLook, LOOKS, lookOf } from '../game/looks';
 import { soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
@@ -210,7 +211,15 @@ export class HQScene extends Phaser.Scene {
     const py = y + 40;
     g.fillStyle(0xcfc1a3, 1).fillRect(px, py, 72, 88);
     g.lineStyle(2, PALETTE.ink, 1).strokeRect(px, py, 72, 88);
-    g.fillStyle(PALETTE.ink, 1).fillRect(px + 26, py + 18, 20, 20).fillRect(px + 16, py + 44, 40, 34);
+    // The hunter's figure. Tap the photo to pick another look.
+    const look = lookOf(h);
+    drawLook(g, look, px + 9, py + 6, 5);
+    g.fillStyle(PALETTE.ink, 1).fillRect(px, py + 72, 72, 16);
+    text(this, px + 36, py + 74, `◀ ${LOOKS[look].name} ▶`, 12, '#e6dac0').setOrigin(0.5, 0);
+    this.add.zone(px, py, 72, 88).setOrigin(0).setInteractive({ useHandCursor: true }).on('pointerup', () => {
+      h.look = (look + 1) % LOOKS.length;
+      this.refresh(this.messages);
+    });
 
     title(this, x + 106, y + 40, h.name, 23, INK.ink);
     text(this, x + 106, y + 72, `Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, 12, INK.inkQuiet);

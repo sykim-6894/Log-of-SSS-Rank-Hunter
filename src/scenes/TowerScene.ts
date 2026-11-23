@@ -4,6 +4,7 @@ import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { lookOf, lookTexture } from '../game/looks';
 import { sfx, toggleSound } from '../game/sfx';
 import { Action, REWARDS, RunEvent, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
@@ -272,7 +273,8 @@ export class TowerScene extends Phaser.Scene {
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.awake ? INK.rust : '#c9a46a';
-      this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
+      if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
+      else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
         const hb = this.keep(this.add.graphics());
@@ -282,7 +284,7 @@ export class TowerScene extends Phaser.Scene {
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, (TILE - 5) * hpRatio, 3);
       }
     }
-    this.keep(this.glyph(run.pos.x, run.pos.y, '@', INK.gate, 18));
+    this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
     if (PORTRAIT) this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
 
     if (PORTRAIT) this.drawHudPortrait();
@@ -341,6 +343,13 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     return false;
+  }
+
+  /** A hunter's pixel figure standing on a tile. Rival hunters get a purple tint. */
+  private figure(x: number, y: number, look: number, tint?: number) {
+    const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE - 1, lookTexture(this, look)).setOrigin(0.5, 1);
+    if (tint !== undefined) img.setTint(tint);
+    return img;
   }
 
   private glyph(x: number, y: number, ch: string, color: string, size: number) {
