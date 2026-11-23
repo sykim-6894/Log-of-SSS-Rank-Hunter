@@ -6,7 +6,7 @@
 
 ## 플레이
 
-- 웹 버전: https://sykim-6894.github.io/log-of-sss-rank-hunter/ (`main`에 머지되면 자동 배포)
+- 웹 버전: https://sykim-6894.github.io/Log-of-SSS-Rank-Hunter/ (`main`에 머지되면 자동 배포)
 - 조작: 방향키/WASD 이동·공격, Q 회전베기(마나 5), E 포션, Space 대기. 화면을 누르면 그쪽으로 한 칸 이동합니다.
 
 ## 지금 들어있는 것
