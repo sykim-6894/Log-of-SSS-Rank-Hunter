@@ -4,7 +4,9 @@ import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
-import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
+import { lookOf, lookTexture } from '../game/looks';
+import { sfx, toggleSound } from '../game/sfx';
+import { Action, REWARDS, RunEvent, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -54,7 +56,7 @@ export class TowerScene extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     this.joy = null;
-    this.run = new TowerRun(activeHunter(state)!, rng, { rivals: state.rival.roster, rivalAgency: state.rival.name });
+    this.run = this.resumeOrStart();
     this.overlay = [];
     this.dynamic = [];
     this.uiCam = null;
@@ -84,6 +86,10 @@ export class TowerScene extends Phaser.Scene {
     };
     this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
       if (ev.key.toLowerCase() === 'b') return this.showBag();
+      if (ev.key.toLowerCase() === 'm') {
+        this.run.log.push(toggleSound() ? '소리를 켰다.' : '소리를 껐다.');
+        return this.redraw();
+      }
       const action = keys[ev.key] ?? keys[ev.key.toLowerCase()];
       if (action) this.perform(action);
     });
@@ -198,6 +204,31 @@ export class TowerScene extends Phaser.Scene {
     this.joy = null;
   }
 
+  /** Continue the run saved in the game state if there is one, otherwise start a new one. */
+  private resumeOrStart(): TowerRun {
+    const options = { rivals: state.rival.roster, rivalAgency: state.rival.name };
+    const saved = state.run;
+    if (saved) {
+      const slot = state.slots.findIndex((h) => h?.id === saved.hunterId);
+      const run = slot >= 0 ? TowerRun.restore(saved.data, state.slots[slot]!, rng, options) : undefined;
+      if (run) {
+        state.activeSlot = slot;
+        run.log.push('— 저장된 곳에서 이어서 진행 —');
+        return run;
+      }
+      state.run = undefined;
+    }
+    return new TowerRun(activeHunter(state)!, rng, options);
+  }
+
+  /** Save after every change, so closing the app mid-run loses nothing. A finished run clears it. */
+  private saveRun() {
+    const s = this.run.status;
+    if (s === 'dead' || s === 'returned') return;
+    state.run = { hunterId: this.run.hunter.id, data: this.run.snapshot() };
+    persist();
+  }
+
   private perform(action: Action) {
     if (this.overlay.length) return;
     this.run.act(action);
@@ -217,6 +248,7 @@ export class TowerScene extends Phaser.Scene {
 
   private redraw() {
     const run = this.run;
+    this.playEvents(run.drainEvents());
     const g = this.mapLayer;
     g.clear();
     this.clearDynamic();
@@ -241,7 +273,8 @@ export class TowerScene extends Phaser.Scene {
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.awake ? INK.rust : '#c9a46a';
-      this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
+      if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
+      else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
         const hb = this.keep(this.add.graphics());
@@ -251,7 +284,7 @@ export class TowerScene extends Phaser.Scene {
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, (TILE - 5) * hpRatio, 3);
       }
     }
-    this.keep(this.glyph(run.pos.x, run.pos.y, '@', INK.gate, 18));
+    this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
     if (PORTRAIT) this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
 
     if (PORTRAIT) this.drawHudPortrait();
@@ -261,6 +294,7 @@ export class TowerScene extends Phaser.Scene {
 
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
+    this.saveRun();
     if (run.status === 'choosing' && !this.overlay.length) this.showChoice();
     if (run.status === 'trading' && !this.overlay.length) this.showMerchant();
     if (run.status === 'returned' && !this.overlay.length) this.finishReturn();
@@ -309,6 +343,13 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     return false;
+  }
+
+  /** A hunter's pixel figure standing on a tile. Rival hunters get a purple tint. */
+  private figure(x: number, y: number, look: number, tint?: number) {
+    const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE - 1, lookTexture(this, look)).setOrigin(0.5, 1);
+    if (tint !== undefined) img.setTint(tint);
+    return img;
   }
 
   private glyph(x: number, y: number, ch: string, color: string, size: number) {
@@ -414,6 +455,107 @@ export class TowerScene extends Phaser.Scene {
       this.redraw();
     }, true]);
     this.dialog('떠돌이 상인', [`이번 수입 ${run.runGold}G로 살 수 있다.`, '거래를 끝내면 상인은 떠난다.'], buttons, INK.gold);
+  }
+
+  /** Floating numbers, flashes, shakes and sounds for what just happened. */
+  private playEvents(events: RunEvent[]) {
+    const cam = this.cameras.main;
+    const at = this.run.pos;
+    let hurt = 0;
+    for (const e of events) {
+      switch (e.type) {
+        case 'hit':
+          this.floatText(e.x, e.y, `${e.amount}`, '#fff4e2');
+          this.tileFlash(e.x, e.y);
+          sfx.hit();
+          break;
+        case 'kill':
+          this.burst(e.x, e.y, e.big);
+          if (e.big) {
+            cam.shake(220, 0.008);
+            sfx.bigKill();
+          } else sfx.kill();
+          break;
+        case 'hurt':
+          hurt += e.amount;
+          this.floatText(at.x, at.y, `-${e.amount}`, INK.red);
+          break;
+        case 'block':
+          this.floatText(at.x, at.y, '막음', INK.gate);
+          sfx.block();
+          break;
+        case 'heal':
+          this.floatText(at.x, at.y, `+${e.amount}`, '#8fdc7a');
+          sfx.heal();
+          break;
+        case 'mana':
+          this.floatText(at.x, at.y, `+${e.amount}`, '#6fc6e0');
+          sfx.mana();
+          break;
+        case 'chest':
+          if (e.cursed) {
+            cam.flash(260, 120, 40, 160);
+            sfx.curse();
+          } else sfx.chest();
+          break;
+        case 'gear':
+          sfx.gear();
+          break;
+        case 'buy':
+          sfx.buy();
+          break;
+        case 'levelup':
+          sfx.levelup();
+          break;
+        case 'rescue':
+          this.floatText(at.x, at.y, '긴급 지원!', INK.gold);
+          sfx.rescue();
+          break;
+        case 'death':
+          cam.shake(400, 0.012);
+          sfx.death();
+          break;
+        case 'floor':
+          sfx.floor();
+          break;
+      }
+    }
+    if (hurt > 0) {
+      cam.flash(140, 150, 25, 20);
+      if (hurt >= this.run.hunter.maxHp * 0.2) cam.shake(160, 0.006);
+      sfx.hurt();
+    }
+  }
+
+  /** A number that rises from a tile and fades. Several on one tile spread a little. */
+  private floatText(x: number, y: number, value: string, color: string) {
+    const t = this.world(
+      this.add
+        .text(x * TILE + TILE / 2 + Phaser.Math.Between(-4, 4), y * TILE - 2, value, {
+          fontFamily: FONT,
+          fontSize: '13px',
+          color,
+          fontStyle: 'bold',
+          stroke: '#000000',
+          strokeThickness: 3,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(30),
+    );
+    this.tweens.add({ targets: t, y: t.y - 20, alpha: 0, delay: 250, duration: 550, onComplete: () => t.destroy() });
+  }
+
+  /** A white blink over a tile that was hit. */
+  private tileFlash(x: number, y: number) {
+    const r = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, TILE, TILE, 0xffffff, 0.55).setDepth(25));
+    this.tweens.add({ targets: r, alpha: 0, duration: 120, onComplete: () => r.destroy() });
+  }
+
+  /** An outline that grows and fades where something died. */
+  private burst(x: number, y: number, big: boolean) {
+    const g = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, TILE, TILE).setDepth(25));
+    g.setStrokeStyle(2, big ? PALETTE.gold : 0xe07a45, 1);
+    this.tweens.add({ targets: g, scale: big ? 3 : 1.8, alpha: 0, duration: big ? 500 : 300, onComplete: () => g.destroy() });
   }
 
   /** A banner over the map that rises and fades: new level, full health and mana. */
@@ -575,6 +717,7 @@ export class TowerScene extends Phaser.Scene {
       msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
     msgs.push(...this.newsLines(r));
+    state.run = undefined;
     persist();
     this.scene.start('HQ', { messages: msgs });
   }
@@ -586,6 +729,7 @@ export class TowerScene extends Phaser.Scene {
     const grade = gradeIn(state, h);
     const killer = run.killer ?? '알 수 없는 적';
     const d = settleDeath(state, rng, killer, run.encounters);
+    state.run = undefined;
     persist();
     const legend = h.everSSS;
     const fateLine = d.scouted

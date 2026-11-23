@@ -3,6 +3,8 @@ import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, tra
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { drawLook, LOOKS, lookOf } from '../game/looks';
+import { soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -71,6 +73,11 @@ export class HQScene extends Phaser.Scene {
       location.reload();
       return;
     }
+    if (state.run) {
+      // A tower run was going on when the game closed: pick it up again.
+      this.scene.start('Tower');
+      return;
+    }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
@@ -88,7 +95,7 @@ export class HQScene extends Phaser.Scene {
       this.scene.start('Tower');
     }, { primary: true, size: 24, enabled: !!activeHunter(state) });
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F 물약   B 가방   Space 대기', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
   }
 
   private createPortrait() {
@@ -100,6 +107,7 @@ export class HQScene extends Phaser.Scene {
     text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
+    this.soundButton(236, 14, 70);
     this.drawSlots(x, 70, w);
 
     const top = 132;
@@ -151,6 +159,14 @@ export class HQScene extends Phaser.Scene {
     text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, `운영 자금 ${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
+    this.soundButton(676, 20, 96);
+  }
+
+  private soundButton(x: number, y: number, w: number) {
+    button(this, x, y, w, 28, soundOn() ? '소리 켬' : '소리 끔', () => {
+      toggleSound();
+      this.scene.restart({ messages: this.messages });
+    });
   }
 
   /** Three hunter slots, like save slots. Empty ones hire a new hunter. */
@@ -195,7 +211,15 @@ export class HQScene extends Phaser.Scene {
     const py = y + 40;
     g.fillStyle(0xcfc1a3, 1).fillRect(px, py, 72, 88);
     g.lineStyle(2, PALETTE.ink, 1).strokeRect(px, py, 72, 88);
-    g.fillStyle(PALETTE.ink, 1).fillRect(px + 26, py + 18, 20, 20).fillRect(px + 16, py + 44, 40, 34);
+    // The hunter's figure. Tap the photo to pick another look.
+    const look = lookOf(h);
+    drawLook(g, look, px + 9, py + 6, 5);
+    g.fillStyle(PALETTE.ink, 1).fillRect(px, py + 72, 72, 16);
+    text(this, px + 36, py + 74, `◀ ${LOOKS[look].name} ▶`, 12, '#e6dac0').setOrigin(0.5, 0);
+    this.add.zone(px, py, 72, 88).setOrigin(0).setInteractive({ useHandCursor: true }).on('pointerup', () => {
+      h.look = (look + 1) % LOOKS.length;
+      this.refresh(this.messages);
+    });
 
     title(this, x + 106, y + 40, h.name, 23, INK.ink);
     text(this, x + 106, y + 72, `Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, 12, INK.inkQuiet);

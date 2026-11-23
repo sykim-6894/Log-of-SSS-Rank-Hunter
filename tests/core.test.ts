@@ -565,6 +565,46 @@ describe('bosses and merchants', () => {
   });
 });
 
+describe('saving a run in progress', () => {
+  it('a saved run comes back the same and keeps going', () => {
+    const state = newGame(new Rng(12));
+    const h = activeHunter(state)!;
+    const rng = new Rng(12);
+    const run = new TowerRun(h, rng, { rivals: state.rival.roster, merchantChance: 1 });
+    for (let i = 0; i < 30 && run.status === 'playing'; i++) run.act(botAction(run));
+    run.drainEvents();
+    const json = JSON.parse(JSON.stringify(run.snapshot()));
+    const back = TowerRun.restore(json, h, rng, { rivals: state.rival.roster })!;
+    expect(back.snapshot()).toEqual(run.snapshot());
+    expect(back.seen).toEqual(run.seen);
+    if (back.status === 'playing') expect(back.act({ type: 'wait' })).toBe(true);
+  });
+
+  it('a rival hunter in a saved run is linked back to the roster', () => {
+    const rival = makeHunter(new Rng(4), 77);
+    rival.origin = 'rival';
+    const run = new TowerRun(createHunter(new Rng(4)), new Rng(4), { rivals: [rival], encounterChance: 1 });
+    run.enterFloor(2);
+    const before = run.monsters.find((m) => m.hunter);
+    const back = TowerRun.restore(JSON.parse(JSON.stringify(run.snapshot())), run.hunter, new Rng(1), { rivals: [rival] })!;
+    if (before) expect(back.monsters.find((m) => m.hunter)?.hunter).toBe(rival);
+    expect(TowerRun.restore({ ...run.snapshot(), pendingChoice: { hunterId: 999, rewards: ['gold', 'item'], finishExp: 1 } }, run.hunter, new Rng(1))).toBeUndefined();
+  });
+
+  it('turns report what happened for the screen', () => {
+    const run = new TowerRun(createHunter(new Rng(6)), new Rng(6));
+    expect(run.drainEvents().some((e) => e.type === 'floor')).toBe(true);
+    run.monsters = [];
+    run.map.tiles[run.pos.y][run.pos.x + 1] = Tile.Floor;
+    run.monsters.push({ id: 1, kind: { id: 'brute', name: '거인', glyph: 'G', hp: 999, atk: 50, def: 0, exp: 0, gold: 0, score: 0 }, x: run.pos.x + 1, y: run.pos.y, hp: 999, maxHp: 999, atk: 50, def: 0, awake: true });
+    run.act({ type: 'move', dx: 1, dy: 0 });
+    const types = run.drainEvents().map((e) => e.type);
+    expect(types).toContain('hit');
+    expect(types).toContain('hurt');
+    expect(run.drainEvents()).toEqual([]);
+  });
+});
+
 describe('balance (autoplayer)', () => {
   it('a fresh hunter usually clears floor 1 but rarely reaches floor 10', () => {
     let clearedFirst = 0;

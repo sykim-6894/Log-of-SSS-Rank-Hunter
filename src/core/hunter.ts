@@ -49,6 +49,8 @@ export interface Hunter {
   skillPower: number;
   /** For a rival hunter: the id of our hunter they shadow. */
   rivalOf?: number;
+  /** Which pixel figure to draw. Defaults from the id when missing. */
+  look?: number;
 }
 
 export type TrainingKind = 'atk' | 'def' | 'hp' | 'mp';
