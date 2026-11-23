@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
 import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
+import { CONSUMABLE_KINDS, CONSUMABLES, describeGear, GEAR_SLOT_NAMES, GEAR_SLOTS } from '../core/items';
 import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
@@ -71,10 +72,13 @@ export class TowerScene extends Phaser.Scene {
       a: { type: 'move', dx: -1, dy: 0 },
       d: { type: 'move', dx: 1, dy: 0 },
       q: { type: 'skill' },
-      e: { type: 'potion' },
+      e: { type: 'use', item: 'hp' },
+      r: { type: 'use', item: 'mp' },
+      f: { type: 'use', item: 'guard' },
       ' ': { type: 'wait' },
     };
     this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
+      if (ev.key.toLowerCase() === 'b') return this.showBag();
       const action = keys[ev.key] ?? keys[ev.key.toLowerCase()];
       if (action) this.perform(action);
     });
@@ -220,6 +224,7 @@ export class TowerScene extends Phaser.Scene {
         this.drawTile(g, x, y, tile, run.isVisible(x, y));
       }
     }
+    for (const c of run.chests) if (run.seen[c.y][c.x]) this.drawChest(g, c.x, c.y, run.isVisible(c.x, c.y));
 
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
@@ -268,6 +273,18 @@ export class TowerScene extends Phaser.Scene {
     }
   }
 
+  /** A small wooden chest with a gold band. Cursed ones look the same. */
+  private drawChest(g: Phaser.GameObjects.Graphics, x: number, y: number, visible: boolean) {
+    const px = x * TILE;
+    const py = y * TILE;
+    const a = visible ? 1 : 0.45;
+    g.fillStyle(0x000000, 0.4 * a).fillRect(px + 5, py + 18, 16, 3);
+    g.fillStyle(0x8a5a2b, a).fillRect(px + 4, py + 8, 16, 11);
+    g.fillStyle(0x5e3b1c, a).fillRect(px + 4, py + 12, 16, 2);
+    g.fillStyle(0xa8703a, a).fillRect(px + 5, py + 8, 14, 3);
+    g.fillStyle(PALETTE.gold, a).fillRect(px + 11, py + 8, 2, 11).fillRect(px + 10, py + 13, 4, 3);
+  }
+
   private touchesFloor(x: number, y: number): boolean {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -301,7 +318,7 @@ export class TowerScene extends Phaser.Scene {
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 88, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    k(text(this, 16, HUD_Y + 88, `${run.floor}층 · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -310,7 +327,8 @@ export class TowerScene extends Phaser.Scene {
     );
 
     k(button(this, 700, HUD_Y + 12, 120, 46, `${SKILL_NAME} Q\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' })));
-    k(button(this, 828, HUD_Y + 12, 116, 46, `포션 E`, () => this.perform({ type: 'potion' })));
+    k(button(this, 828, HUD_Y + 12, 116, 46, `가방 B\n물약 E·R·F`, () => this.showBag()));
+    if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
     k(button(this, 700, HUD_Y + 64, 244, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
   }
 
@@ -327,7 +345,7 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
     const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
     k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
-    k(text(this, GW - 14, 13, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
+    k(text(this, GW - 14, 13, `${run.floor}층 · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
     k(text(this, 14, 38, '체력', 12, INK.quiet));
     k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
@@ -353,8 +371,39 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
     k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
     k(button(this, P_BTN_X, P_CTL_Y + 22, 96, 72, `${SKILL_NAME}\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' }), { enabled: h.mp >= SKILL_COST }));
-    k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `포션\n${h.potions}개`, () => this.perform({ type: 'potion' }), { enabled: h.potions > 0 }));
+    k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
+    if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
     k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
+  }
+
+  /** Health / mana / guard potion counts. */
+  private bagLine() {
+    const b = this.run.hunter.bag;
+    return `${b.hp}/${b.mp}/${b.guard}`;
+  }
+
+  /** Bag: worn gear, and potions to drink (each use takes a turn). */
+  private showBag() {
+    if (this.overlay.length || this.run.status !== 'playing') return;
+    this.joyClear();
+    const h = this.run.hunter;
+    const keys = { hp: 'E', mp: 'R', guard: 'F' } as const;
+    const lines = GEAR_SLOTS.map((slot) => {
+      const g = h.gear[slot];
+      return `${GEAR_SLOT_NAMES[slot]}: ${g ? `${g.name} (${describeGear(g)})` : '없음'}`;
+    });
+    lines.push('물약을 마시면 한 턴이 지나갑니다.');
+    const buttons: Array<[string, () => void, boolean?, boolean?]> = CONSUMABLE_KINDS.map((kind) => [
+      `${CONSUMABLES[kind].name} ${h.bag[kind]}개 · ${CONSUMABLES[kind].describe}` + (PORTRAIT ? '' : ` (${keys[kind]})`),
+      () => {
+        this.closeOverlay();
+        this.perform({ type: 'use', item: kind });
+      },
+      false,
+      h.bag[kind] > 0,
+    ]);
+    buttons.push(['닫기', () => { this.closeOverlay(); this.redraw(); }, true]);
+    this.dialog('가방', lines, buttons);
   }
 
   private closeOverlay() {
@@ -362,7 +411,7 @@ export class TowerScene extends Phaser.Scene {
     this.overlay = [];
   }
 
-  private dialog(heading: string, lines: string[], buttons: Array<[string, () => void, boolean?]>, headingColor: string = INK.text) {
+  private dialog(heading: string, lines: string[], buttons: Array<[string, () => void, boolean?, boolean?]>, headingColor: string = INK.text) {
     const o = this.overlay;
     const push = <T extends Phaser.GameObjects.GameObject>(obj: T) => {
       o.push(this.ui(obj));
@@ -391,8 +440,8 @@ export class TowerScene extends Phaser.Scene {
       t.y = ly;
       ly += t.height + 7;
     });
-    buttons.forEach(([label, fn, primary], i) => {
-      push(button(this, x + pad, ly + 16 + i * 58, w - pad * 2, 48, label, fn, { primary: !!primary, size: 12 }));
+    buttons.forEach(([label, fn, primary, enabled], i) => {
+      push(button(this, x + pad, ly + 16 + i * 58, w - pad * 2, 48, label, fn, { primary: !!primary, size: 12, enabled: enabled ?? true }));
     });
   }
 
@@ -401,7 +450,7 @@ export class TowerScene extends Phaser.Scene {
     const h = run.hunter;
     const lines = [
       `${run.floor}층 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.floor}G)`,
-      `체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 포션 ${h.potions}개`,
+      `체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`,
       '죽으면 이번 수입은 모두 잃습니다.',
     ];
     const buttons: Array<[string, () => void, boolean?]> = [];

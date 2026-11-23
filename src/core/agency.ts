@@ -2,6 +2,7 @@ import {
   combatPower, createHunter, Grade, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
+import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
 import { Rng } from './rng';
 
 export interface Agent {
@@ -58,7 +59,7 @@ export function worldRankers(): WorldRanker[] {
 
 /** Everything that survives between runs. */
 export interface GameState {
-  version: 2;
+  version: 3;
   agent: Agent;
   slots: Array<Hunter | null>;
   activeSlot: number;
@@ -75,7 +76,7 @@ const RIVAL_NAMES = ['적월 길드', '흑철 헌터스', '마그나 에이전�
 
 export function newGame(rng: Rng): GameState {
   const state: GameState = {
-    version: 2,
+    version: 3,
     agent: { name: rng.pick(AGENCY_NAMES), gold: 100 },
     slots: [null, null, null],
     activeSlot: 0,
@@ -204,7 +205,6 @@ export function train(state: GameState, kind: TrainingKind): boolean {
   return true;
 }
 
-export const POTION_PRICE = 15;
 /** Agent must hold at least this much before it helps with item purchases. */
 export const SUPPORT_MIN_AGENT_GOLD = 100;
 export const SUPPORT_CHANCE = 0.3;
@@ -217,19 +217,21 @@ export interface PurchaseResult {
 }
 
 /** The active hunter buys a potion. Sometimes the agent covers part of the price. */
-export function buyPotion(state: GameState, rng: Rng): PurchaseResult {
+export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): PurchaseResult {
   const { agent } = state;
   const hunter = activeHunter(state);
-  if (!hunter) return { ok: false, hunterPaid: 0, agentPaid: 0 };
+  const price = CONSUMABLES[kind].price;
+  const fail = { ok: false, hunterPaid: 0, agentPaid: 0 };
+  if (!hunter || price === undefined || hunter.bag[kind] >= BAG_MAX) return fail;
   let agentPaid = 0;
   if (agent.gold >= SUPPORT_MIN_AGENT_GOLD && rng.chance(SUPPORT_CHANCE)) {
-    agentPaid = Math.floor(POTION_PRICE * SUPPORT_SHARE);
+    agentPaid = Math.floor(price * SUPPORT_SHARE);
   }
-  const hunterPaid = POTION_PRICE - agentPaid;
-  if (hunter.gold < hunterPaid) return { ok: false, hunterPaid: 0, agentPaid: 0 };
+  const hunterPaid = price - agentPaid;
+  if (hunter.gold < hunterPaid) return fail;
   hunter.gold -= hunterPaid;
   agent.gold -= agentPaid;
-  hunter.potions += 1;
+  hunter.bag[kind] += 1;
   return { ok: true, hunterPaid, agentPaid };
 }
 

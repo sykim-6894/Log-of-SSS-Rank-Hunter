@@ -2,6 +2,22 @@ import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, Point, Tile, center 
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { bossFor, floorScale, MonsterKind, monsterPool, TOP_FLOOR } from './monsters';
+import {
+  addToBag,
+  ChestContent,
+  CONSUMABLES,
+  ConsumableKind,
+  CURSES,
+  describeGear,
+  equipIfBetter,
+  Gear,
+  GEAR_SLOT_NAMES,
+  GUARD_TURNS,
+  HP_POTION_HEAL,
+  MP_POTION_RESTORE,
+  rollChest,
+  rollGear,
+} from './items';
 import { Rng } from './rng';
 
 export interface Monster {
@@ -22,14 +38,14 @@ export type Action =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'wait' }
   | { type: 'skill' }
-  | { type: 'potion' };
+  | { type: 'use'; item: ConsumableKind };
 
 export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'dead' | 'returned';
 
 export type RewardKind = 'item' | 'gold' | 'skill' | 'rescue';
 
 export const REWARDS: Record<RewardKind, { label: string; describe: (level: number) => string }> = {
-  item: { label: '아이템', describe: () => '포션 3개' },
+  item: { label: '아이템', describe: () => '높은 층 수준의 장비 1개' },
   gold: { label: '골드', describe: (lv) => `${lv * 15}G (헌터 소지금)` },
   skill: { label: '스킬', describe: () => '회전베기 위력 +25%' },
   rescue: { label: '위기 시 1회 지원', describe: () => '쓰러질 때 한 번 체력 30%로 버팀' },
@@ -53,7 +69,6 @@ export interface RunOptions {
 export const SIGHT = 7;
 export const SKILL_NAME = '회전베기';
 export const SKILL_COST = 5;
-export const POTION_HEAL = 0.4;
 const MP_REGEN_EVERY = 4;
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -70,6 +85,10 @@ export class TowerRun {
   log: string[] = [];
   killer?: string;
   pendingChoice?: PendingChoice;
+  /** Unopened treasure chests on this floor. */
+  chests: Point[] = [];
+  /** Turns left on a guard potion: enemy hits do nothing. */
+  guardTurns = 0;
   /** Rival hunters beaten this run and whether they were finished for good. */
   encounters: EncounterOutcome[] = [];
   private nextId = 1;
@@ -117,6 +136,7 @@ export class TowerRun {
     }
 
     this.maybeSpawnRival(n);
+    this.placeChests(n);
 
     const boss = bossFor(n);
     if (boss) {
@@ -163,6 +183,78 @@ export class TowerRun {
     this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
     const tag = h.origin === 'rival' ? '라이벌' : '옛 동료';
     this.say(`[${tag}] ${h.name}의 기척이 느껴진다...`);
+  }
+
+  /** One or two chests per floor (one more from floor 6), in rooms other than the start. */
+  private placeChests(floor: number) {
+    this.chests = [];
+    const count = this.rng.int(1, 2) + (floor >= 6 ? 1 : 0);
+    const rooms = this.map.rooms.slice(1);
+    for (let tries = 0; this.chests.length < count && tries < 30; tries++) {
+      const room = this.rng.pick(rooms);
+      const x = this.rng.int(room.x, room.x + room.w - 1);
+      const y = this.rng.int(room.y, room.y + room.h - 1);
+      if (this.blocked(x, y) || this.map.tiles[y][x] !== Tile.Floor || this.chestAt(x, y) >= 0) continue;
+      this.chests.push({ x, y });
+    }
+  }
+
+  chestAt(x: number, y: number): number {
+    return this.chests.findIndex((c) => c.x === x && c.y === y);
+  }
+
+  private openChest(index: number) {
+    this.chests.splice(index, 1);
+    this.applyChest(rollChest(this.rng, this.floor));
+  }
+
+  /** Public so tests can force a result. */
+  applyChest(c: ChestContent) {
+    const h = this.hunter;
+    switch (c.type) {
+      case 'gold':
+        this.runGold += c.amount;
+        this.say(`보물상자: ${c.amount}G!`);
+        return;
+      case 'consumable': {
+        const got = addToBag(h, c.kind);
+        this.say(got ? `보물상자: ${CONSUMABLES[c.kind].name}!` : `보물상자: ${CONSUMABLES[c.kind].name}... 가방이 가득 차서 두고 왔다.`);
+        return;
+      }
+      case 'gear':
+        this.say(`보물상자: ${c.gear.name}!`);
+        this.takeGear(c.gear);
+        return;
+      case 'curse':
+        this.say(`저주받은 상자였다! ${CURSES[c.curse]}`);
+        if (c.curse === 'drain') h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
+        if (c.curse === 'mana') h.mp = 0;
+        if (c.curse === 'greed') this.runGold = Math.floor(this.runGold * 0.7);
+        if (c.curse === 'ambush') this.ambush();
+        return;
+    }
+  }
+
+  private takeGear(g: Gear) {
+    const r = equipIfBetter(this.hunter, g);
+    const slot = GEAR_SLOT_NAMES[g.slot];
+    if (r.equipped) {
+      this.say(`${slot} 장착: ${g.name} (${describeGear(g)})` + (r.discarded ? `. ${r.discarded.name}은(는) 버렸다.` : ''));
+    } else {
+      this.say(`지금 ${slot}이(가) 더 좋다. ${g.name}은(는) 버렸다.`);
+    }
+  }
+
+  /** Two awake monsters of this floor appear next to the hunter. */
+  private ambush() {
+    const pool = monsterPool(this.floor);
+    const spots = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]
+      .map(([dx, dy]) => ({ x: this.pos.x + dx, y: this.pos.y + dy }))
+      .filter((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y) && this.map.tiles[p.y][p.x] !== Tile.Stairs);
+    for (const p of spots.slice(0, 2)) {
+      this.spawn(this.rng.pick(pool), p.x, p.y, this.floor);
+      this.monsters[this.monsters.length - 1].awake = true;
+    }
   }
 
   private spawn(kind: MonsterKind, x: number, y: number, floor: number) {
@@ -215,6 +307,7 @@ export class TowerRun {
     if (this.status === 'playing' || this.status === 'onStairs') this.monstersAct();
     // While a choice is pending the world waits; enemies act once it is made.
     this.turn += 1;
+    if (this.guardTurns > 0) this.guardTurns -= 1;
     if (this.turn % MP_REGEN_EVERY === 0) this.hunter.mp = Math.min(this.hunter.maxMp, this.hunter.mp + 1);
     this.updateSight();
     return true;
@@ -225,21 +318,8 @@ export class TowerRun {
     switch (action.type) {
       case 'wait':
         return true;
-      case 'potion': {
-        if (h.potions <= 0) {
-          this.say('포션이 없다.');
-          return false;
-        }
-        if (h.hp >= h.maxHp) {
-          this.say('체력이 가득 차 있다.');
-          return false;
-        }
-        const heal = Math.ceil(h.maxHp * POTION_HEAL);
-        h.potions -= 1;
-        h.hp = Math.min(h.maxHp, h.hp + heal);
-        this.say(`포션을 마셨다. 체력 +${heal}`);
-        return true;
-      }
+      case 'use':
+        return this.useItem(action.item);
       case 'skill': {
         const targets = this.monsters.filter(
           (m) => Math.abs(m.x - this.pos.x) <= 1 && Math.abs(m.y - this.pos.y) <= 1,
@@ -267,6 +347,8 @@ export class TowerRun {
         }
         if (!isWalkable(this.map, nx, ny)) return false;
         this.pos = { x: nx, y: ny };
+        const chest = this.chestAt(nx, ny);
+        if (chest >= 0) this.openChest(chest);
         if (this.map.tiles[ny][nx] === Tile.Stairs) {
           if (this.bossAlive) {
             this.say('수호자가 살아있는 한 계단은 열리지 않는다.');
@@ -277,6 +359,38 @@ export class TowerRun {
         return true;
       }
     }
+  }
+
+  private useItem(kind: ConsumableKind): boolean {
+    const h = this.hunter;
+    const name = CONSUMABLES[kind].name;
+    if (h.bag[kind] <= 0) {
+      this.say(`${name}이 없다.`);
+      return false;
+    }
+    if (kind === 'hp') {
+      if (h.hp >= h.maxHp) {
+        this.say('체력이 가득 차 있다.');
+        return false;
+      }
+      const heal = Math.ceil(h.maxHp * HP_POTION_HEAL);
+      h.hp = Math.min(h.maxHp, h.hp + heal);
+      this.say(`${name}을 마셨다. 체력 +${heal}`);
+    } else if (kind === 'mp') {
+      if (h.mp >= h.maxMp) {
+        this.say('마나가 가득 차 있다.');
+        return false;
+      }
+      const gain = Math.ceil(h.maxMp * MP_POTION_RESTORE);
+      h.mp = Math.min(h.maxMp, h.mp + gain);
+      this.say(`${name}을 마셨다. 마나 +${gain}`);
+    } else {
+      // +1 because the turn spent drinking it also counts down.
+      this.guardTurns = GUARD_TURNS + 1;
+      this.say(`${name}을 마셨다. ${GUARD_TURNS}턴 동안 무적!`);
+    }
+    h.bag[kind] -= 1;
+    return true;
   }
 
   private hitMonster(m: Monster, dmg: number) {
@@ -318,7 +432,7 @@ export class TowerRun {
       msg = `${c.hunter.name}을(를) 완전히 쓰러뜨렸다. 경험치 +${c.finishExp}`;
     } else {
       const kind = c.rewards[index];
-      if (kind === 'item') h.potions += 3;
+      if (kind === 'item') this.takeGear(rollGear(this.rng, this.floor + 3));
       if (kind === 'gold') h.gold += c.hunter.level * 15;
       if (kind === 'skill') h.skillPower = Math.round((h.skillPower + 0.25) * 100) / 100;
       if (kind === 'rescue') h.rescues += 1;
@@ -339,6 +453,10 @@ export class TowerRun {
       if (!m.awake && dx * dx + dy * dy <= SIGHT * SIGHT) m.awake = true;
       if (!m.awake) continue;
       if (Math.abs(dx) + Math.abs(dy) === 1) {
+        if (this.guardTurns > 0) {
+          this.say(`${m.kind.name}의 공격! 무적이라 피해가 없다.`);
+          continue;
+        }
         const dmg = this.damage(m.atk, this.hunter.def);
         this.hunter.hp -= dmg;
         this.say(`${m.kind.name}의 공격! ${dmg} 피해.`);
