@@ -8,8 +8,8 @@ export function stepTowards(run: TowerRun, goal: Point): Action | undefined {
   const key = (x: number, y: number) => y * MAP_W + x;
   const queue: Point[] = [start];
   prev.set(key(start.x, start.y), -1);
-  while (queue.length) {
-    const p = queue.shift()!;
+  for (let head = 0; head < queue.length; head++) {
+    const p = queue[head];
     if (p.x === goal.x && p.y === goal.y) break;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = p.x + dx;

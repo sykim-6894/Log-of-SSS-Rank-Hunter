@@ -207,5 +207,5 @@ describe('balance (autoplayer)', () => {
     }
     expect(clearedFirst / runs).toBeGreaterThan(0.5);
     expect(reachedTop / runs).toBeLessThan(0.2);
-  });
+  }, 30_000); // 200 full autoplayed runs; slower CI machines need more than the 5s default
 });
