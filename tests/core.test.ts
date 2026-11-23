@@ -391,12 +391,12 @@ describe('items and chests', () => {
     expect(h.gear.weapon?.atk).toBe(6);
   });
 
-  it('a better trinket swaps health bonus without overhealing', () => {
+  it('a better ring swaps health bonus without overhealing', () => {
     const h = createHunter(new Rng(1));
     const base = h.maxHp;
-    equipIfBetter(h, { slot: 'trinket', name: 'a', tier: 1, atk: 0, def: 0, hp: 10, mp: 0 });
+    equipIfBetter(h, { slot: 'ring', name: 'a', tier: 1, atk: 0, def: 0, hp: 10, mp: 0 });
     expect(h.maxHp).toBe(base + 10);
-    equipIfBetter(h, { slot: 'trinket', name: 'b', tier: 2, atk: 0, def: 0, hp: 0, mp: 12 });
+    equipIfBetter(h, { slot: 'ring', name: 'b', tier: 2, atk: 0, def: 0, hp: 0, mp: 12 });
     expect(h.maxHp).toBe(base);
     expect(h.hp).toBeLessThanOrEqual(h.maxHp);
   });

@@ -1,7 +1,8 @@
 import * as Phaser from 'phaser';
 import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, train, TRAINING, trainingCost } from '../core/agency';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GEAR_SLOT_NAMES, GEAR_SLOTS } from '../core/items';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
+import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -24,6 +25,8 @@ const TABS: Array<[Tab, string]> = [
   ['log', '일지'],
 ];
 let tab: Tab = 'hunter';
+/** Landscape only: show the gear doll where the ranking usually is. */
+let showGear = false;
 
 /** Shortens a one-line text with an ellipsis until it fits the width. */
 function fit(t: Phaser.GameObjects.Text, width: number) {
@@ -75,7 +78,8 @@ export class HQScene extends Phaser.Scene {
     this.drawLicense(24, 146);
     this.drawTraining(24, 418);
     this.drawShop(24, 590);
-    this.drawRanking(488, 100);
+    if (showGear) this.drawGearPanel(488, 100, 448);
+    else this.drawRanking(488, 100);
     this.drawRival(488, 442);
     this.drawLog(488, 530);
 
@@ -272,35 +276,40 @@ export class HQScene extends Phaser.Scene {
     const h = activeHunter(state);
     if (!h) return;
     panel(this, x, y, w, 76, '가방 · 상점');
-    const gear = GEAR_SLOTS.map((slot) => `${GEAR_SLOT_NAMES[slot]} ${h.gear[slot]?.name ?? '-'}`).join(' · ');
-    fit(text(this, x + 16, y + 22, gear, 12, INK.text), w - 220);
-    text(this, x + 16, y + 44, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard}`, 12, INK.quiet);
+    const worn = GEAR_SLOTS.filter((s) => h.gear[s]).length;
+    button(this, x + 14, y + 14, 96, 26, showGear ? '순위 보기' : '장비 보기', () => {
+      showGear = !showGear;
+      this.scene.restart({ messages: this.messages });
+    });
+    text(this, x + 120, y + 20, `장비 ${worn}/${GEAR_SLOTS.length}칸`, 12, INK.text);
+    text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard}`, 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
       button(this, x + w - 196 + i * 92, y + 16, 86, 44, `${c.name.slice(0, 2)} 물약\n${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
     });
   }
 
+  /** The gear doll in a panel. */
+  private drawGearPanel(x: number, y: number, w: number) {
+    const h = activeHunter(state);
+    if (!h) return;
+    panel(this, x, y, w, DOLL_H + 40, '장비');
+    text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
+    drawPaperDoll(this, x + 12, y + 32, w - 24, h);
+  }
+
   /** Portrait bag tab: worn gear, then potions with their shop buttons. */
   private drawBag(x: number, y: number, w: number) {
     const h = activeHunter(state);
     if (!h) return;
-    panel(this, x, y, w, 148, '장비');
-    text(this, x + w - 16, y + 14, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
-    GEAR_SLOTS.forEach((slot, i) => {
-      const g = h.gear[slot];
-      const ry = y + 40 + i * 34;
-      text(this, x + 16, ry, GEAR_SLOT_NAMES[slot], 12, INK.quiet);
-      text(this, x + 76, ry, g ? g.name : '없음', 12, g ? INK.text : INK.faint, !!g);
-      if (g) text(this, x + w - 16, ry, describeGear(g), 12, INK.gate).setOrigin(1, 0);
-    });
+    this.drawGearPanel(x, y, w);
 
-    const py = y + 172;
-    panel(this, x, py, w, 40 + CONSUMABLE_KINDS.length * 56, '물약 · 상점');
+    const py = y + DOLL_H + 60;
+    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52, '물약 · 상점');
     text(this, x + w - 16, py + 14, `헌터 소지금 ${h.gold}G`, 12, INK.gold).setOrigin(1, 0);
     CONSUMABLE_KINDS.forEach((kind, i) => {
       const c = CONSUMABLES[kind];
-      const ry = py + 36 + i * 56;
+      const ry = py + 32 + i * 52;
       text(this, x + 16, ry + 4, `${c.name}  ${h.bag[kind]}/${BAG_MAX}`, 12, INK.text, true);
       text(this, x + 16, ry + 24, c.describe, 12, INK.quiet);
       if (c.price !== undefined) {

@@ -33,9 +33,17 @@ export function addToBag(h: Hunter, kind: ConsumableKind, count = 1): number {
 
 // ---------- Equipment: one piece per slot, a better find replaces the old one ----------
 
-export type GearSlot = 'weapon' | 'armor' | 'trinket';
-export const GEAR_SLOTS: GearSlot[] = ['weapon', 'armor', 'trinket'];
-export const GEAR_SLOT_NAMES: Record<GearSlot, string> = { weapon: '무기', armor: '갑옷', trinket: '장신구' };
+export type GearSlot = 'weapon' | 'shield' | 'helmet' | 'armor' | 'boots' | 'ring' | 'earring';
+export const GEAR_SLOTS: GearSlot[] = ['weapon', 'shield', 'helmet', 'armor', 'boots', 'ring', 'earring'];
+export const GEAR_SLOT_NAMES: Record<GearSlot, string> = {
+  weapon: '무기',
+  shield: '방패',
+  helmet: '투구',
+  armor: '갑옷',
+  boots: '신발',
+  ring: '반지',
+  earring: '귀걸이',
+};
 
 export interface Gear {
   slot: GearSlot;
@@ -51,8 +59,12 @@ export type Equipment = Partial<Record<GearSlot, Gear>>;
 
 const GEAR_NAMES: Record<GearSlot, string[]> = {
   weapon: ['녹슨 단검', '철검', '강철 장검', '기사의 검', '게이트 결정검', '마력의 대검', '균열의 검'],
+  shield: ['나무 방패', '철 방패', '강철 방패', '기사의 방패', '결정 방패', '마력의 방벽', '균열의 방패'],
+  helmet: ['가죽 두건', '철 투구', '강철 투구', '기사의 투구', '결정 투구', '마력의 관', '균열의 투구'],
   armor: ['가죽 조끼', '사슬 갑옷', '강철 흉갑', '기사의 갑주', '결정 갑주', '마력의 판금', '균열의 갑주'],
-  trinket: ['나무 부적', '구리 반지', '은 목걸이', '금 팔찌', '결정 귀걸이', '마력의 보주', '균열의 눈'],
+  boots: ['짚신', '가죽 장화', '강철 장화', '기사의 장화', '결정 장화', '마력의 장화', '균열의 장화'],
+  ring: ['구리 반지', '은 반지', '금 반지', '루비 반지', '결정 반지', '마력의 반지', '균열의 반지'],
+  earring: ['나무 귀걸이', '구리 귀걸이', '은 귀걸이', '금 귀걸이', '결정 귀걸이', '마력의 귀걸이', '균열의 귀걸이'],
 };
 export const MAX_TIER = 7;
 
@@ -74,11 +86,33 @@ export function describeGear(g: Gear): string {
 export function rollGear(rng: Rng, floor: number, slot: GearSlot = rng.pick(GEAR_SLOTS)): Gear {
   const tier = Math.max(1, Math.min(MAX_TIER, Math.ceil(floor / 2) + rng.int(-1, 1)));
   const g: Gear = { slot, name: GEAR_NAMES[slot][tier - 1], tier, atk: 0, def: 0, hp: 0, mp: 0 };
-  if (slot === 'weapon') g.atk = tier * 2 + rng.int(0, 1);
-  if (slot === 'armor') g.def = tier + rng.int(0, 1);
-  if (slot === 'trinket') {
-    if (rng.chance(0.5)) g.hp = tier * 6 + rng.int(0, 3);
-    else g.mp = tier * 3 + rng.int(0, 2);
+  const half = Math.ceil(tier / 2);
+  switch (slot) {
+    case 'weapon': // attack
+      g.atk = tier * 2 + rng.int(0, 1);
+      break;
+    case 'shield': // defense
+      g.def = tier + rng.int(0, 1);
+      break;
+    case 'helmet': // health, a little defense
+      g.hp = tier * 4 + rng.int(0, 2);
+      g.def = tier >= 3 ? 1 : 0;
+      break;
+    case 'armor': // defense and health
+      g.def = half + rng.int(0, 1);
+      g.hp = tier * 3;
+      break;
+    case 'boots': // health, a little defense
+      g.hp = tier * 3 + rng.int(0, 2);
+      g.def = half - 1;
+      break;
+    case 'ring': // attack and mana
+      g.atk = half + rng.int(0, 1);
+      g.mp = tier;
+      break;
+    case 'earring': // mana
+      g.mp = tier * 3 + rng.int(0, 2);
+      break;
   }
   return g;
 }

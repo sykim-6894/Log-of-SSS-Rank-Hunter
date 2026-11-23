@@ -2,7 +2,8 @@ import * as Phaser from 'phaser';
 import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
 import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { CONSUMABLE_KINDS, CONSUMABLES, describeGear, GEAR_SLOT_NAMES, GEAR_SLOTS } from '../core/items';
+import { CONSUMABLE_KINDS, CONSUMABLES } from '../core/items';
+import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
@@ -388,22 +389,38 @@ export class TowerScene extends Phaser.Scene {
     this.joyClear();
     const h = this.run.hunter;
     const keys = { hp: 'E', mp: 'R', guard: 'F' } as const;
-    const lines = GEAR_SLOTS.map((slot) => {
-      const g = h.gear[slot];
-      return `${GEAR_SLOT_NAMES[slot]}: ${g ? `${g.name} (${describeGear(g)})` : '없음'}`;
-    });
-    lines.push('물약을 마시면 한 턴이 지나갑니다.');
-    const buttons: Array<[string, () => void, boolean?, boolean?]> = CONSUMABLE_KINDS.map((kind) => [
-      `${CONSUMABLES[kind].name} ${h.bag[kind]}개 · ${CONSUMABLES[kind].describe}` + (PORTRAIT ? '' : ` (${keys[kind]})`),
-      () => {
+    const o = this.overlay;
+    const push = <T extends Phaser.GameObjects.GameObject>(obj: T) => {
+      o.push(this.ui(obj));
+      return obj;
+    };
+    const shade = push(this.add.graphics());
+    shade.fillStyle(0x000000, 0.7).fillRect(0, 0, GW, GH);
+    shade.setInteractive(new Phaser.Geom.Rectangle(0, 0, GW, GH), Phaser.Geom.Rectangle.Contains);
+    const w = Math.min(540, GW - 20);
+    const btnH = 46;
+    const hgt = 58 + DOLL_H + 24 + (CONSUMABLE_KINDS.length + 1) * (btnH + 8) + 10;
+    const x = (GW - w) / 2;
+    const y = Math.max(4, (GH - hgt) / 2);
+    push(panel(this, x, y, w, hgt));
+    push(title(this, GW / 2, y + 16, '가방', 20, INK.text).setOrigin(0.5, 0));
+    drawPaperDoll(this, x + 14, y + 52, w - 28, h).forEach((d) => push(d));
+    let by = y + 52 + DOLL_H + 10;
+    push(text(this, GW / 2, by, '물약을 마시면 한 턴이 지나갑니다.', 12, INK.faint).setOrigin(0.5, 0));
+    by += 22;
+    const pad = PORTRAIT ? 14 : 40;
+    CONSUMABLE_KINDS.forEach((kind) => {
+      const label = `${CONSUMABLES[kind].name} ${h.bag[kind]}개 · ${CONSUMABLES[kind].describe}` + (PORTRAIT ? '' : ` (${keys[kind]})`);
+      push(button(this, x + pad, by, w - pad * 2, btnH, label, () => {
         this.closeOverlay();
         this.perform({ type: 'use', item: kind });
-      },
-      false,
-      h.bag[kind] > 0,
-    ]);
-    buttons.push(['닫기', () => { this.closeOverlay(); this.redraw(); }, true]);
-    this.dialog('가방', lines, buttons);
+      }, { enabled: h.bag[kind] > 0 }));
+      by += btnH + 8;
+    });
+    push(button(this, x + pad, by, w - pad * 2, btnH, '닫기', () => {
+      this.closeOverlay();
+      this.redraw();
+    }, { primary: true }));
   }
 
   private closeOverlay() {
