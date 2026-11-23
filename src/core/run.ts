@@ -125,7 +125,7 @@ export class TowerRun {
     this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
 
     const pool = monsterPool(n);
-    const count = 3 + n;
+    const count = 4 + n;
     const rooms = this.map.rooms.slice(1);
     for (let i = 0; i < count; i++) {
       const room = this.rng.pick(rooms);
@@ -408,7 +408,7 @@ export class TowerRun {
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
     const levels = gainExp(this.hunter, Math.round(m.kind.exp * scale));
-    if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level}`);
+    if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
     if (m.hunter) this.offerChoice(m.hunter);
   }
 

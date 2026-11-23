@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { activeHunter, buyItem, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, train, trainingCost } from '../src/core/agency';
 import { botAction, stepTowards } from '../src/core/bot';
 import { generateFloor, isWalkable, MAP_W, Tile } from '../src/core/dungeon';
-import { combatPower, createHunter as makeHunter, gainExp, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
+import { combatPower, createHunter as makeHunter, expToNext, gainExp, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
 import { Rng } from '../src/core/rng';
 import { TowerRun } from '../src/core/run';
 import { loadGame, SAVE_KEY, saveGame } from '../src/core/save';
@@ -371,6 +371,20 @@ describe('rival hunters', () => {
     expect(run.status).toBe('playing');
     expect(run.hunter.rescues).toBe(0);
     expect(run.hunter.hp).toBe(Math.ceil(run.hunter.maxHp * 0.3));
+  });
+});
+
+describe('levels', () => {
+  it('first levels come quickly and refill health and mana', () => {
+    const h = createHunter(new Rng(1));
+    h.hp = 3;
+    h.mp = 0;
+    expect(gainExp(h, expToNext(1))).toBe(1);
+    expect(h.level).toBe(2);
+    expect(h.hp).toBe(h.maxHp);
+    expect(h.mp).toBe(h.maxMp);
+    expect(expToNext(1)).toBeLessThan(10);
+    expect(expToNext(10)).toBeGreaterThan(expToNext(9));
   });
 });
 

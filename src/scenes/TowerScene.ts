@@ -42,6 +42,8 @@ export class TowerScene extends Phaser.Scene {
     gfx: Phaser.GameObjects.Graphics;
     timer: Phaser.Time.TimerEvent | null;
   } | null = null;
+  /** Level when the screen was last drawn, to notice level ups. */
+  private shownLevel = 0;
   /** Portrait only: a fixed camera for the HUD while the main camera follows the hunter. */
   private uiCam: Phaser.Cameras.Scene2D.Camera | null = null;
 
@@ -62,6 +64,7 @@ export class TowerScene extends Phaser.Scene {
       this.uiCam = this.cameras.add(0, 0, GW, GH);
     }
     this.mapLayer = this.world(this.add.graphics());
+    this.shownLevel = this.run.hunter.level;
 
     const keys: Record<string, Action> = {
       ArrowUp: { type: 'move', dx: 0, dy: -1 },
@@ -245,6 +248,8 @@ export class TowerScene extends Phaser.Scene {
 
     if (PORTRAIT) this.drawHudPortrait();
     else this.drawHud();
+    if (run.hunter.level > this.shownLevel) this.showLevelUp(run.hunter.level);
+    this.shownLevel = run.hunter.level;
 
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
@@ -375,6 +380,22 @@ export class TowerScene extends Phaser.Scene {
     k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
     k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
+  }
+
+  /** A banner over the map that rises and fades: new level, full health and mana. */
+  private showLevelUp(level: number) {
+    const cx = GW / 2;
+    const cy = PORTRAIT ? P_TOP_H + P_MAP_H * 0.18 : HUD_Y * 0.2; // above the hunter, who sits mid-map in portrait
+    const banner = this.ui(this.add.container(cx, cy).setDepth(40));
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.shadow, 0.85).fillRect(-150, -34, 300, 70);
+    g.lineStyle(2, PALETTE.gold, 1).strokeRect(-150, -34, 300, 70);
+    banner.add(g);
+    banner.add(title(this, 0, -24, `레벨 업!  Lv.${level}`, 23, INK.gold).setOrigin(0.5, 0));
+    banner.add(text(this, 0, 10, '체력·마나 모두 회복', 12, INK.gate, true).setOrigin(0.5, 0));
+    banner.setScale(0.6);
+    this.tweens.add({ targets: banner, scale: 1, duration: 160, ease: 'Back.Out' });
+    this.tweens.add({ targets: banner, y: cy - 30, alpha: 0, delay: 1200, duration: 500, onComplete: () => banner.destroy() });
   }
 
   /** Health / mana / guard potion counts. */

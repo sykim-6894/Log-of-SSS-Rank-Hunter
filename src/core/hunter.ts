@@ -134,8 +134,9 @@ export function rankGradeOf(index: number): RankGrade | undefined {
   return undefined;
 }
 
+/** Quick first levels, steeper later: 6, 17, 31, 48, 67 ... 190 at level 10. */
 export function expToNext(level: number): number {
-  return 20 * level;
+  return Math.round(6 * level ** 1.5);
 }
 
 /** Adds experience and applies level ups. Returns how many levels were gained. */
