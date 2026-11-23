@@ -86,6 +86,44 @@ export const SKILL_NAME = '회전베기';
 export const SKILL_COST = 5;
 const MP_REGEN_EVERY = 4;
 
+/** Things that happened during a turn, for the screen to show and play sounds for. */
+export type RunEvent =
+  | { type: 'hit'; x: number; y: number; amount: number }
+  | { type: 'hurt'; amount: number }
+  | { type: 'block' }
+  | { type: 'kill'; x: number; y: number; big: boolean }
+  | { type: 'heal'; amount: number }
+  | { type: 'mana'; amount: number }
+  | { type: 'chest'; cursed: boolean }
+  | { type: 'gear' }
+  | { type: 'buy' }
+  | { type: 'levelup' }
+  | { type: 'rescue' }
+  | { type: 'death' }
+  | { type: 'floor' };
+
+/** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
+export interface RunSnapshot {
+  floor: number;
+  map: FloorMap;
+  monsters: Array<Omit<Monster, 'hunter'> & { hunterId?: number }>;
+  pos: Point;
+  runGold: number;
+  turn: number;
+  status: RunStatus;
+  /** One string of 0/1 per row. */
+  seen: string[];
+  log: string[];
+  killer?: string;
+  pendingChoice?: Omit<PendingChoice, 'hunter'> & { hunterId: number };
+  chests: Point[];
+  guardTurns: number;
+  merchant?: Merchant;
+  encounters: EncounterOutcome[];
+  nextId: number;
+  met: number[];
+}
+
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
 export class TowerRun {
   floor = 0;
@@ -108,6 +146,8 @@ export class TowerRun {
   merchant?: Merchant;
   /** Rival hunters beaten this run and whether they were finished for good. */
   encounters: EncounterOutcome[] = [];
+  /** Drained by the screen after each action. Not saved. */
+  events: RunEvent[] = [];
   private nextId = 1;
   private met = new Set<number>();
 
@@ -115,8 +155,70 @@ export class TowerRun {
     public hunter: Hunter,
     private rng: Rng,
     private options: RunOptions = {},
+    start = true,
   ) {
-    this.enterFloor(1);
+    if (start) this.enterFloor(1);
+  }
+
+  drainEvents(): RunEvent[] {
+    const e = this.events;
+    this.events = [];
+    return e;
+  }
+
+  snapshot(): RunSnapshot {
+    return {
+      floor: this.floor,
+      map: this.map,
+      monsters: this.monsters.map(({ hunter, ...m }) => ({ ...m, hunterId: hunter?.id })),
+      pos: { ...this.pos },
+      runGold: this.runGold,
+      turn: this.turn,
+      status: this.status,
+      seen: this.seen.map((row) => row.map((v) => (v ? '1' : '0')).join('')),
+      log: this.log.slice(-12),
+      killer: this.killer,
+      pendingChoice: this.pendingChoice && {
+        rewards: this.pendingChoice.rewards,
+        finishExp: this.pendingChoice.finishExp,
+        hunterId: this.pendingChoice.hunter.id,
+      },
+      chests: this.chests.map((c) => ({ ...c })),
+      guardTurns: this.guardTurns,
+      merchant: this.merchant,
+      encounters: this.encounters,
+      nextId: this.nextId,
+      met: [...this.met],
+    };
+  }
+
+  /** Picks a saved run back up. Returns undefined if the save no longer fits the game state. */
+  static restore(s: RunSnapshot, hunter: Hunter, rng: Rng, options: RunOptions = {}): TowerRun | undefined {
+    const rivals = options.rivals ?? [];
+    const rival = (id: number) => rivals.find((h) => h.id === id);
+    const run = new TowerRun(hunter, rng, options, false);
+    run.floor = s.floor;
+    run.map = s.map;
+    run.monsters = s.monsters.map(({ hunterId, ...m }) => ({ ...m, hunter: hunterId === undefined ? undefined : rival(hunterId) }));
+    run.pos = s.pos;
+    run.runGold = s.runGold;
+    run.turn = s.turn;
+    run.status = s.status;
+    run.seen = s.seen.map((row) => [...row].map((c) => c === '1'));
+    run.log = s.log;
+    run.killer = s.killer;
+    if (s.pendingChoice) {
+      const h = rival(s.pendingChoice.hunterId);
+      if (!h) return undefined;
+      run.pendingChoice = { hunter: h, rewards: s.pendingChoice.rewards, finishExp: s.pendingChoice.finishExp };
+    }
+    run.chests = s.chests;
+    run.guardTurns = s.guardTurns;
+    run.merchant = s.merchant;
+    run.encounters = s.encounters;
+    run.nextId = s.nextId;
+    run.met = new Set(s.met);
+    return run;
   }
 
   get bossAlive(): boolean {
@@ -172,6 +274,7 @@ export class TowerRun {
       }
     }
     this.say(`성장의 탑 ${n}층에 들어섰다.`);
+    this.events.push({ type: 'floor' });
     this.updateSight();
   }
 
@@ -255,6 +358,7 @@ export class TowerRun {
     }
     this.runGold -= o.price;
     m.sold[index] = true;
+    this.events.push({ type: 'buy' });
     const msg = `${offerLabel(o)} 구매. -${o.price}G`;
     this.say(msg);
     if (o.type === 'gear') this.takeGear(o.gear);
@@ -294,7 +398,9 @@ export class TowerRun {
 
   private openChest(index: number) {
     this.chests.splice(index, 1);
-    this.applyChest(rollChest(this.rng, this.floor));
+    const c = rollChest(this.rng, this.floor);
+    this.events.push({ type: 'chest', cursed: c.type === 'curse' });
+    this.applyChest(c);
   }
 
   /** Public so tests can force a result. */
@@ -326,6 +432,7 @@ export class TowerRun {
 
   private takeGear(g: Gear) {
     const r = equipIfBetter(this.hunter, g);
+    if (r.equipped) this.events.push({ type: 'gear' });
     const slot = GEAR_SLOT_NAMES[g.slot];
     if (r.equipped) {
       this.say(`${slot} 장착: ${g.name} (${describeGear(g)})` + (r.discarded ? `. ${r.discarded.name}은(는) 버렸다.` : ''));
@@ -470,6 +577,7 @@ export class TowerRun {
       }
       const heal = Math.ceil(h.maxHp * HP_POTION_HEAL);
       h.hp = Math.min(h.maxHp, h.hp + heal);
+      this.events.push({ type: 'heal', amount: heal });
       this.say(`${name}을 마셨다. 체력 +${heal}`);
     } else if (kind === 'mp') {
       if (h.mp >= h.maxMp) {
@@ -478,6 +586,7 @@ export class TowerRun {
       }
       const gain = Math.ceil(h.maxMp * MP_POTION_RESTORE);
       h.mp = Math.min(h.maxMp, h.mp + gain);
+      this.events.push({ type: 'mana', amount: gain });
       this.say(`${name}을 마셨다. 마나 +${gain}`);
     } else if (kind === 'escape') {
       this.status = 'returned';
@@ -494,11 +603,13 @@ export class TowerRun {
   private hitMonster(m: Monster, dmg: number) {
     m.hp -= dmg;
     m.awake = true;
+    this.events.push({ type: 'hit', x: m.x, y: m.y, amount: dmg });
     if (m.hp > 0) {
       this.say(`${m.kind.name}에게 ${dmg} 피해.`);
       return;
     }
     this.monsters = this.monsters.filter((o) => o !== m);
+    this.events.push({ type: 'kill', x: m.x, y: m.y, big: !!(m.kind.boss || m.kind.elite || m.hunter) });
     const scale = m.hunter ? 1 : floorScale(this.floor);
     const gold = Math.round(m.kind.gold * scale);
     this.runGold += gold;
@@ -506,6 +617,7 @@ export class TowerRun {
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
     const levels = gainExp(this.hunter, Math.round(m.kind.exp * scale));
+    if (levels > 0) this.events.push({ type: 'levelup' });
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
     if (m.kind.elite) {
       this.say('중간보스가 장비를 떨어뜨렸다!');
@@ -557,15 +669,18 @@ export class TowerRun {
       if (Math.abs(dx) + Math.abs(dy) === 1) {
         if (this.guardTurns > 0) {
           this.say(`${m.kind.name}의 공격! 무적이라 피해가 없다.`);
+          this.events.push({ type: 'block' });
           continue;
         }
         const dmg = this.damage(m.atk, this.hunter.def);
         this.hunter.hp -= dmg;
+        this.events.push({ type: 'hurt', amount: dmg });
         this.say(`${m.kind.name}의 공격! ${dmg} 피해.`);
         if (this.hunter.hp <= 0 && this.hunter.rescues > 0) {
           this.hunter.rescues -= 1;
           this.hunter.hp = Math.ceil(this.hunter.maxHp * 0.3);
           this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
+          this.events.push({ type: 'rescue' });
           continue;
         }
         if (this.hunter.hp <= 0) {
@@ -574,6 +689,7 @@ export class TowerRun {
           this.killer = m.kind.name;
           this.runGold = 0;
           this.say(`${this.hunter.name}은(는) ${m.kind.name}에게 쓰러졌다...`);
+          this.events.push({ type: 'death' });
         }
         continue;
       }

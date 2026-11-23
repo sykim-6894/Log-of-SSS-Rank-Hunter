@@ -3,6 +3,7 @@ import './style.css';
 import { HQScene } from './scenes/HQScene';
 import { TowerScene } from './scenes/TowerScene';
 import { GH, GW, layoutStale } from './game/layout';
+import { unlockAudio } from './game/sfx';
 
 async function start() {
   // Pixel fonts must be ready before Phaser draws any text.
@@ -23,6 +24,11 @@ async function start() {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: [HQScene, TowerScene],
   });
+
+  // Browsers only start audio after a touch or key press.
+  const unlock = () => unlockAudio();
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('keydown', unlock);
 
   // After a rotation, switch layouts the next time the player is back at the office
   // (a reload is safe there because everything is saved; a tower run is not).

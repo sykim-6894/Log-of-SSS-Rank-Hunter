@@ -4,6 +4,7 @@ import {
 } from './hunter';
 import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
 import { Rng } from './rng';
+import type { RunSnapshot } from './run';
 
 export interface Agent {
   name: string;
@@ -69,6 +70,8 @@ export interface GameState {
   nextHunterId: number;
   /** How many hunters this agency has ever signed. */
   hunterNumber: number;
+  /** A tower run that was still going when the game was last saved. */
+  run?: { hunterId: number; data: RunSnapshot };
 }
 
 const AGENCY_NAMES = ['새벽 에이전시', '청람 헌터스', '북극성 매니지먼트', '흑요 에이전시', '은하 헌터 협회'];

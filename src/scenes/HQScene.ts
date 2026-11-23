@@ -3,6 +3,7 @@ import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, tra
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -71,6 +72,11 @@ export class HQScene extends Phaser.Scene {
       location.reload();
       return;
     }
+    if (state.run) {
+      // A tower run was going on when the game closed: pick it up again.
+      this.scene.start('Tower');
+      return;
+    }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
@@ -88,7 +94,7 @@ export class HQScene extends Phaser.Scene {
       this.scene.start('Tower');
     }, { primary: true, size: 24, enabled: !!activeHunter(state) });
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F 물약   B 가방   Space 대기', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
   }
 
   private createPortrait() {
@@ -100,6 +106,7 @@ export class HQScene extends Phaser.Scene {
     text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
+    this.soundButton(236, 14, 70);
     this.drawSlots(x, 70, w);
 
     const top = 132;
@@ -151,6 +158,14 @@ export class HQScene extends Phaser.Scene {
     text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, `운영 자금 ${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
+    this.soundButton(676, 20, 96);
+  }
+
+  private soundButton(x: number, y: number, w: number) {
+    button(this, x, y, w, 28, soundOn() ? '소리 켬' : '소리 끔', () => {
+      toggleSound();
+      this.scene.restart({ messages: this.messages });
+    });
   }
 
   /** Three hunter slots, like save slots. Empty ones hire a new hunter. */
