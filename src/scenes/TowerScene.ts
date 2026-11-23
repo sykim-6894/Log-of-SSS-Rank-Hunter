@@ -27,6 +27,8 @@ const P_ZOOM = 1.25;
 const JOY_RADIUS = 44;
 const JOY_DEADZONE = 14;
 const JOY_REPEAT_MS = 170;
+/** How long held walking pauses when a new enemy comes into view, before it carries on. */
+const JOY_SIGHT_PAUSE_MS = 600;
 
 /** One trip up the Tower of Growth. Draws the TowerRun and turns input into actions. */
 export class TowerScene extends Phaser.Scene {
@@ -40,7 +42,8 @@ export class TowerScene extends Phaser.Scene {
     oy: number;
     dir: { dx: number; dy: number } | null;
     used: boolean;
-    halted: boolean;
+    /** Held walking waits until this time (a short pause when an enemy shows up). */
+    pauseUntil: number;
     gfx: Phaser.GameObjects.Graphics;
     timer: Phaser.Time.TimerEvent | null;
   } | null = null;
@@ -126,7 +129,7 @@ export class TowerScene extends Phaser.Scene {
   private joyStart(p: Phaser.Input.Pointer) {
     if (!this.joyArea(p) || this.overlay.length || this.joy) return;
     const gfx = this.ui(this.add.graphics().setDepth(50));
-    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, halted: false, gfx, timer: null };
+    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, pauseUntil: 0, gfx, timer: null };
     this.drawJoy(p.x, p.y);
   }
 
@@ -150,7 +153,7 @@ export class TowerScene extends Phaser.Scene {
     joy.dir = dir;
     if (!changed) return;
     // A new direction always takes one step right away and clears a safety stop.
-    joy.halted = false;
+    joy.pauseUntil = 0;
     joy.used = true;
     this.joyStep();
     if (this.joy && !this.joy.timer) {
@@ -173,14 +176,20 @@ export class TowerScene extends Phaser.Scene {
     else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
   }
 
-  /** One held-joystick step. Stops by itself when a new enemy comes into view. */
+  /**
+   * One held-joystick step. When a new enemy comes into view, walking pauses briefly
+   * (with a "!" over the hunter) so the player can react, then carries on while held.
+   */
   private joyStep() {
     const joy = this.joy;
-    if (!joy || !joy.dir || joy.halted) return;
+    if (!joy || !joy.dir || this.time.now < joy.pauseUntil) return;
     if (this.overlay.length || this.run.status !== 'playing') return this.joyClear();
     const before = this.visibleEnemies();
     this.perform({ type: 'move', dx: joy.dir.dx, dy: joy.dir.dy });
-    if (this.joy && this.visibleEnemies() > before) this.joy.halted = true;
+    if (this.joy && this.visibleEnemies() > before) {
+      this.joy.pauseUntil = this.time.now + JOY_SIGHT_PAUSE_MS;
+      this.floatText(this.run.pos.x, this.run.pos.y, '!', INK.gold);
+    }
   }
 
   private visibleEnemies() {
