@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { activeHunter, buyPotion, gradeIn, hire, POTION_PRICE, ranking, release, SLOT_COUNT, train, TRAINING, trainingCost } from '../core/agency';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { isNewAgency, persist, rng, state } from '../game/store';
+import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
 
 export interface HQData {
@@ -11,6 +12,17 @@ export interface HQData {
 }
 
 let welcomed = false;
+
+/** Portrait only: the office is split into tabs along the bottom. */
+type Tab = 'hunter' | 'shop' | 'ranking' | 'rival' | 'log';
+const TABS: Array<[Tab, string]> = [
+  ['hunter', '헌터'],
+  ['shop', '상점'],
+  ['ranking', '순위'],
+  ['rival', '라이벌'],
+  ['log', '일지'],
+];
+let tab: Tab = 'hunter';
 
 /** Shortens a one-line text with an ellipsis until it fits the width. */
 function fit(t: Phaser.GameObjects.Text, width: number) {
@@ -49,7 +61,14 @@ export class HQScene extends Phaser.Scene {
   }
 
   create() {
+    if (layoutStale()) {
+      // The device was rotated during a run: switch layouts now that everything is saved.
+      persist();
+      location.reload();
+      return;
+    }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
+    if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
     this.drawLicense(24, 146);
@@ -67,6 +86,59 @@ export class HQScene extends Phaser.Scene {
     text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E 포션   Space 대기   화면 터치로도 이동', 12, INK.faint).setOrigin(0.5, 0);
   }
 
+  private createPortrait() {
+    const { agent } = state;
+    const x = 14;
+    const w = GW - 28;
+    title(this, x, 12, 'SSS급 헌터의 성장기', 20, INK.text);
+    text(this, x + 2, 38, '— 과연 너일까', 12, INK.rust);
+    text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
+    title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
+    dots(this, x, 60, w);
+    this.drawSlots(x, 70, w);
+
+    const top = 132;
+    const tabsY = GH - 66;
+    const departY = tabsY - 70;
+    if (tab === 'hunter') {
+      this.drawLicense(x, top, w);
+      this.drawTraining(x, top + 278, w);
+    } else if (tab === 'shop') {
+      this.drawShop(x, top + 8, w);
+    } else if (tab === 'ranking') {
+      this.drawRanking(x, top + 8, w);
+    } else if (tab === 'rival') {
+      this.drawRival(x, top + 8, w);
+    } else {
+      this.drawLog(x, top + 8, w, Math.min(12, Math.floor((departY - top - 70) / 40)), true);
+    }
+
+    // Latest news above the depart button, unless the log tab already shows it.
+    if (this.messages.length && tab !== 'log') {
+      fit(text(this, x, departY - 26, `· ${this.messages[0]}`, 12, INK.text), w);
+    }
+    button(this, x, departY, w, 56, '▶  성장의 탑 입장', () => {
+      persist();
+      this.scene.start('Tower');
+    }, { primary: true, size: 20, enabled: !!activeHunter(state) });
+
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.panelDark, 1).fillRect(0, tabsY, GW, GH - tabsY);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, tabsY, GW, 2);
+    const tw = GW / TABS.length;
+    TABS.forEach(([id, label], i) => {
+      const on = id === tab;
+      if (on) g.fillStyle(PALETTE.panel, 1).fillRect(i * tw, tabsY + 2, tw, GH - tabsY).fillStyle(PALETTE.rustLight, 1).fillRect(i * tw, tabsY, tw, 3);
+      text(this, i * tw + tw / 2, tabsY + 24, label, 12, on ? INK.rust : INK.faint, on).setOrigin(0.5, 0);
+      if (!on) {
+        this.add.zone(i * tw, tabsY, tw, GH - tabsY).setOrigin(0).setInteractive({ useHandCursor: true }).on('pointerup', () => {
+          tab = id;
+          this.scene.restart({ messages: this.messages });
+        });
+      }
+    });
+  }
+
   private drawHeader() {
     const { agent } = state;
     title(this, 24, 18, 'SSS급 헌터의 성장기', 30, INK.text);
@@ -77,8 +149,8 @@ export class HQScene extends Phaser.Scene {
   }
 
   /** Three hunter slots, like save slots. Empty ones hire a new hunter. */
-  private drawSlots(x: number, y: number) {
-    const w = (440 - 2 * 10) / SLOT_COUNT;
+  private drawSlots(x: number, y: number, total = 440) {
+    const w = (total - 2 * 10) / SLOT_COUNT;
     for (let i = 0; i < SLOT_COUNT; i++) {
       const h = state.slots[i];
       const bx = x + i * (w + 10);
@@ -97,10 +169,9 @@ export class HQScene extends Phaser.Scene {
   }
 
   /** The active hunter as a paper license card with a stamped grade. */
-  private drawLicense(x: number, y: number) {
+  private drawLicense(x: number, y: number, w = 440) {
     const h = activeHunter(state);
     if (!h) return;
-    const w = 440;
     const ht = 258;
     const power = combatPower(h);
     const grade = gradeIn(state, h);
@@ -137,19 +208,20 @@ export class HQScene extends Phaser.Scene {
 
     dots(this, x + 18, y + 136, w - 36, PALETTE.paperLine);
     text(this, x + 18, y + 146, `체력 ${h.hp}/${h.maxHp}`, 12, INK.ink);
-    bar(this, x + 120, y + 148, 150, 8, h.hp / h.maxHp, PALETTE.hp);
+    bar(this, x + 120, y + 148, w - 290, 8, h.hp / h.maxHp, PALETTE.hp);
     text(this, x + 18, y + 166, `마나 ${h.mp}/${h.maxMp}`, 12, INK.ink);
-    bar(this, x + 120, y + 168, 150, 8, h.mp / h.maxMp, PALETTE.mp);
-    text(this, x + 296, y + 146, `공격 ${h.atk}`, 12, INK.ink);
-    text(this, x + 296, y + 166, `방어 ${h.def}`, 12, INK.ink);
-    text(this, x + 360, y + 146, `포션 ${h.potions}`, 12, INK.ink);
-    text(this, x + 360, y + 166, `${h.gold}G`, 12, INK.ink);
+    bar(this, x + 120, y + 168, w - 290, 8, h.mp / h.maxMp, PALETTE.mp);
+    const sx = x + w - 144;
+    text(this, sx, y + 146, `공격 ${h.atk}`, 12, INK.ink);
+    text(this, sx, y + 166, `방어 ${h.def}`, 12, INK.ink);
+    text(this, sx + 64, y + 146, `포션 ${h.potions}`, 12, INK.ink);
+    text(this, sx + 64, y + 166, `${h.gold}G`, 12, INK.ink);
 
     dots(this, x + 18, y + 188, w - 36, PALETTE.paperLine);
     title(this, x + 18, y + 198, `전투력 ${power}`, 15, INK.ink);
     text(this, x + w - 18, y + 201, next ? `다음 ${next[0]}급까지 ${next[1] - power}` : '최고 등급', 12, INK.inkQuiet).setOrigin(1, 0);
     const extras = [h.rescues ? `위기 지원 ${h.rescues}` : '', h.skillPower > 1.5 ? `회전베기 ×${h.skillPower}` : ''].filter(Boolean).join(' · ');
-    text(this, x + 18, y + 228, `처치 ${h.kills} · 최고 ${h.bestFloor}층 · 상납 ${h.totalTribute}G` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet);
+    fit(text(this, x + 18, y + 228, `처치 ${h.kills} · 최고 ${h.bestFloor}층 · 상납 ${h.totalTribute}G` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
     const others = state.slots.filter(Boolean).length > 1;
     button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? '정말?' : '방출', () => {
       if (!this.releaseArmed) {
@@ -161,31 +233,32 @@ export class HQScene extends Phaser.Scene {
     }, { enabled: others });
   }
 
-  private drawTraining(x: number, y: number) {
+  private drawTraining(x: number, y: number, w = 440) {
     const { agent } = state;
     const hunter = activeHunter(state);
     if (!hunter) return;
-    panel(this, x, y, 440, 158, '에이전시 투자');
-    text(this, x + 426, y + 16, '운영 자금에서 지출', 12, INK.faint).setOrigin(1, 0);
+    const bw = (w - 40) / 2;
+    panel(this, x, y, w, 158, '에이전시 투자');
+    text(this, x + w - 14, y + 16, '운영 자금에서 지출', 12, INK.faint).setOrigin(1, 0);
     const kinds: TrainingKind[] = ['atk', 'def', 'hp', 'mp'];
     kinds.forEach((kind, i) => {
       const cost = trainingCost(hunter, kind);
       const t = TRAINING[kind];
-      const bx = x + 16 + (i % 2) * 208;
+      const bx = x + 16 + (i % 2) * (bw + 8);
       const by = y + 36 + Math.floor(i / 2) * 56;
-      button(this, bx, by, 200, 48, `${t.label}  ${cost}G\n${t.describe}`, () => {
+      button(this, bx, by, bw, 48, `${t.label}  ${cost}G\n${t.describe}`, () => {
         if (train(state, kind)) this.refresh([`${t.label} 완료. ${t.describe}`]);
       }, { enabled: agent.gold >= cost });
     });
   }
 
-  private drawShop(x: number, y: number) {
+  private drawShop(x: number, y: number, w = 440) {
     const hunter = activeHunter(state);
     if (!hunter) return;
-    panel(this, x, y, 440, 76, '상점');
+    panel(this, x, y, w, 76, '상점');
     text(this, x + 16, y + 22, '회복 포션', 12, INK.text, true);
     text(this, x + 16, y + 42, '체력 40% 회복 · 헌터 소지금으로 구매', 12, INK.quiet);
-    button(this, x + 268, y + 16, 156, 44, `구매  ${POTION_PRICE}G`, () => {
+    button(this, x + w - 172, y + 16, 156, 44, `구매  ${POTION_PRICE}G`, () => {
       const r = buyPotion(state, rng);
       if (!r.ok) return;
       const msg = r.agentPaid > 0 ? `에이전트가 ${r.agentPaid}G를 지원했다. (헌터 부담 ${r.hunterPaid}G)` : `포션 구매. -${r.hunterPaid}G`;
@@ -194,8 +267,7 @@ export class HQScene extends Phaser.Scene {
   }
 
   /** Live association ranking: ours, the rival agency's, the fallen, and established rankers. */
-  private drawRanking(x: number, y: number) {
-    const w = 448;
+  private drawRanking(x: number, y: number, w = 448) {
     panel(this, x, y, w, 326, '헌터 순위 · 명예의 전당');
     const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 162, floor: x + 196, score: x + 238, note: x + w - 18 };
     const hy = y + 20;
@@ -224,24 +296,40 @@ export class HQScene extends Phaser.Scene {
     if (gone > 0) text(this, x + w - 18, y + 304, `기록으로 남은 헌터 ${gone}명`, 12, INK.faint).setOrigin(1, 0);
   }
 
-  private drawRival(x: number, y: number) {
+  private drawRival(x: number, y: number, w = 448) {
     const { rival } = state;
-    panel(this, x, y, 448, 72, '경쟁 에이전시');
+    panel(this, x, y, w, 72, '경쟁 에이전시');
     const former = rival.roster.filter((h) => h.origin !== 'rival').length;
     title(this, x + 18, y + 18, rival.name, 15, '#d79bff');
-    text(this, x + 430, y + 20, `옛 동료 ${former}명 · 라이벌 ${rival.roster.length - former}명`, 12, INK.quiet).setOrigin(1, 0);
+    text(this, x + w - 18, y + 20, `옛 동료 ${former}명 · 라이벌 ${rival.roster.length - former}명`, 12, INK.quiet).setOrigin(1, 0);
     const me = activeHunter(state);
     const mine = me && rival.roster.find((h) => h.origin === 'rival' && h.rivalOf === me.id);
     const line = mine
       ? `${me!.name}의 라이벌: ${mine.name} · 전투력 ${combatPower(mine)} (${gradeIn(state, mine)}급)`
       : '우리 헌터가 S급이 되면 라이벌을 내세운다.';
-    text(this, x + 18, y + 44, line, 12, mine ? INK.text : INK.faint);
+    fit(text(this, x + 18, y + 44, line, 12, mine ? INK.text : INK.faint), w - 36);
   }
 
-  private drawLog(x: number, y: number) {
-    panel(this, x, y, 448, 76, '업무 일지');
-    const lines = this.messages.slice(0, 3);
-    if (lines.length === 0) text(this, x + 18, y + 22, '특이사항 없음.', 12, INK.faint);
-    lines.forEach((m, i) => fit(text(this, x + 18, y + 16 + i * 18, `· ${m}`, 12, i === 0 ? INK.text : INK.quiet), 412));
+  private drawLog(x: number, y: number, w = 448, count = 3, wrap = false) {
+    const lines = this.messages.slice(0, count);
+    if (!wrap) {
+      panel(this, x, y, w, 76, '업무 일지');
+      if (lines.length === 0) text(this, x + 18, y + 22, '특이사항 없음.', 12, INK.faint);
+      lines.forEach((m, i) => fit(text(this, x + 18, y + 16 + i * 18, `· ${m}`, 12, i === 0 ? INK.text : INK.quiet), w - 36));
+      return;
+    }
+    // Portrait log tab: wrapped lines in a panel that grows to fit them.
+    const box = panel(this, x, y, w, 10, '업무 일지');
+    let ly = y + 20;
+    if (lines.length === 0) {
+      text(this, x + 18, ly, '특이사항 없음.', 12, INK.faint);
+      ly += 20;
+    }
+    lines.forEach((m, i) => {
+      const t = text(this, x + 18, ly, `· ${m}`, 12, i === 0 ? INK.text : INK.quiet).setWordWrapWidth(w - 36, true);
+      ly += t.height + 6;
+    });
+    box.destroy();
+    this.children.sendToBack(panel(this, x, y, w, ly - y + 12, '업무 일지'));
   }
 }

@@ -4,10 +4,22 @@ import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
+import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
+
+// Portrait layout: status bar on top, a camera that follows the hunter, the log,
+// then a thumb area with the joystick on the left and action buttons on the right.
+const P_TOP_H = 84;
+const P_LOG_H = 60;
+const P_CTL_H = 210;
+const P_MAP_H = GH - P_TOP_H - P_LOG_H - P_CTL_H;
+const P_LOG_Y = P_TOP_H + P_MAP_H;
+const P_CTL_Y = P_LOG_Y + P_LOG_H;
+const P_BTN_X = GW - 212; // action buttons start here
+const P_ZOOM = 1.25;
 const JOY_RADIUS = 44;
 const JOY_DEADZONE = 14;
 const JOY_REPEAT_MS = 170;
@@ -28,6 +40,8 @@ export class TowerScene extends Phaser.Scene {
     gfx: Phaser.GameObjects.Graphics;
     timer: Phaser.Time.TimerEvent | null;
   } | null = null;
+  /** Portrait only: a fixed camera for the HUD while the main camera follows the hunter. */
+  private uiCam: Phaser.Cameras.Scene2D.Camera | null = null;
 
   constructor() {
     super('Tower');
@@ -37,7 +51,15 @@ export class TowerScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     this.joy = null;
     this.run = new TowerRun(activeHunter(state)!, rng, { rivals: state.rival.roster, rivalAgency: state.rival.name });
-    this.mapLayer = this.add.graphics();
+    this.overlay = [];
+    this.dynamic = [];
+    this.uiCam = null;
+    if (PORTRAIT) {
+      const cam = this.cameras.main;
+      cam.setViewport(0, P_TOP_H, GW, P_MAP_H).setZoom(P_ZOOM).setBounds(0, 0, MAP_W * TILE, MAP_H * TILE);
+      this.uiCam = this.cameras.add(0, 0, GW, GH);
+    }
+    this.mapLayer = this.world(this.add.graphics());
 
     const keys: Record<string, Action> = {
       ArrowUp: { type: 'move', dx: 0, dy: -1 },
@@ -67,9 +89,28 @@ export class TowerScene extends Phaser.Scene {
     this.redraw();
   }
 
+  /** Map objects: drawn only by the main (following) camera. */
+  private world<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    this.uiCam?.ignore(o);
+    return o;
+  }
+
+  /** HUD and dialogs: drawn only by the fixed camera in portrait. */
+  private ui<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    if (this.uiCam) this.cameras.main.ignore(o);
+    return o;
+  }
+
+  /** Where a touch may start the joystick: the map, or (portrait) the left of the thumb area. */
+  private joyArea(p: Phaser.Input.Pointer) {
+    if (!PORTRAIT) return p.y < HUD_Y;
+    if (p.y >= P_TOP_H && p.y < P_LOG_Y) return true;
+    return p.y >= P_CTL_Y && p.x < P_BTN_X - 6;
+  }
+
   private joyStart(p: Phaser.Input.Pointer) {
-    if (p.y >= HUD_Y || this.overlay.length || this.joy) return;
-    const gfx = this.add.graphics().setDepth(50);
+    if (!this.joyArea(p) || this.overlay.length || this.joy) return;
+    const gfx = this.ui(this.add.graphics().setDepth(50));
     this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, halted: false, gfx, timer: null };
     this.drawJoy(p.x, p.y);
   }
@@ -107,9 +148,11 @@ export class TowerScene extends Phaser.Scene {
     if (!joy || p.id !== joy.id) return;
     this.joyClear();
     if (joy.used || this.overlay.length) return;
-    // Plain tap: step toward the tapped tile, or wait when tapping the hunter.
-    const dx = Math.floor(joy.ox / TILE) - this.run.pos.x;
-    const dy = Math.floor(joy.oy / TILE) - this.run.pos.y;
+    // Plain tap on the map: step toward the tapped tile, or wait when tapping the hunter.
+    if (PORTRAIT && (joy.oy < P_TOP_H || joy.oy >= P_LOG_Y)) return;
+    const at = this.cameras.main.getWorldPoint(joy.ox, joy.oy);
+    const dx = Math.floor(at.x / TILE) - this.run.pos.x;
+    const dy = Math.floor(at.y / TILE) - this.run.pos.y;
     if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
     if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
     else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
@@ -158,6 +201,7 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private keep<T extends Phaser.GameObjects.GameObject>(o: T): T {
+    this.world(o);
     this.dynamic.push(o);
     return o;
   }
@@ -191,8 +235,10 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     this.keep(this.glyph(run.pos.x, run.pos.y, '@', INK.gate, 18));
+    if (PORTRAIT) this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
 
-    this.drawHud();
+    if (PORTRAIT) this.drawHudPortrait();
+    else this.drawHud();
 
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
@@ -238,6 +284,7 @@ export class TowerScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
+
   private drawHud() {
     const run = this.run;
     const h = run.hunter;
@@ -267,6 +314,49 @@ export class TowerScene extends Phaser.Scene {
     k(button(this, 700, HUD_Y + 64, 244, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
   }
 
+  private drawHudPortrait() {
+    const run = this.run;
+    const h = run.hunter;
+    const k = <T extends Phaser.GameObjects.GameObject>(o: T) => {
+      this.dynamic.push(o);
+      return this.ui(o);
+    };
+    const g = k(this.add.graphics());
+    // Top status bar
+    g.fillStyle(PALETTE.panel, 1).fillRect(0, 0, GW, P_TOP_H);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
+    const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
+    k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
+    k(text(this, GW - 14, 13, `${run.floor}층 · 수입 ${run.runGold}G · 포션 ${h.potions}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
+    k(text(this, 14, 38, '체력', 12, INK.quiet));
+    k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
+    k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
+    k(text(this, 14, 58, '마나', 12, INK.quiet));
+    k(bar(this, 52, 61, 300, 8, h.mp / h.maxMp, PALETTE.mp));
+    k(text(this, GW - 14, 58, `${h.mp}/${h.maxMp}`, 12, INK.text).setOrigin(1, 0));
+
+    // Log strip: the last two lines
+    g.fillStyle(PALETTE.panelDark, 1).fillRect(0, P_LOG_Y, GW, P_LOG_H);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_LOG_Y, GW, 2);
+    run.log.slice(-2).forEach((line, i, arr) => {
+      const t = k(text(this, 14, P_LOG_Y + 10 + i * 22, line, 12, i === arr.length - 1 ? INK.text : INK.faint));
+      let v = line;
+      while (t.width > GW - 28 && v.length > 1) t.setText(`${(v = v.slice(0, -1))}…`);
+    });
+
+    // Thumb area: joystick pad on the left, actions on the right
+    g.fillStyle(PALETTE.panel, 1).fillRect(0, P_CTL_Y, GW, GH - P_CTL_Y);
+    g.fillStyle(PALETTE.line, 1).fillRect(0, P_CTL_Y, GW, 2);
+    const cx = P_BTN_X / 2;
+    const cy = P_CTL_Y + 96;
+    g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
+    g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
+    k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
+    k(button(this, P_BTN_X, P_CTL_Y + 22, 96, 72, `${SKILL_NAME}\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' }), { enabled: h.mp >= SKILL_COST }));
+    k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `포션\n${h.potions}개`, () => this.perform({ type: 'potion' }), { enabled: h.potions > 0 }));
+    k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
+  }
+
   private closeOverlay() {
     this.overlay.forEach((o) => o.destroy());
     this.overlay = [];
@@ -274,20 +364,35 @@ export class TowerScene extends Phaser.Scene {
 
   private dialog(heading: string, lines: string[], buttons: Array<[string, () => void, boolean?]>, headingColor: string = INK.text) {
     const o = this.overlay;
-    const shade = this.add.graphics();
+    const push = <T extends Phaser.GameObjects.GameObject>(obj: T) => {
+      o.push(this.ui(obj));
+      return obj;
+    };
+    const shade = push(this.add.graphics());
     shade.fillStyle(0x000000, 0.7);
-    shade.fillRect(0, 0, 960, 720);
-    shade.setInteractive(new Phaser.Geom.Rectangle(0, 0, 960, 720), Phaser.Geom.Rectangle.Contains);
-    o.push(shade);
-    const w = 520;
-    const hgt = 100 + lines.length * 24 + buttons.length * 58;
-    const x = (960 - w) / 2;
-    const y = (720 - hgt) / 2;
-    o.push(panel(this, x, y, w, hgt));
-    o.push(title(this, 480, y + 24, heading, 23, headingColor).setOrigin(0.5, 0));
-    lines.forEach((l, i) => o.push(text(this, 480, y + 66 + i * 24, l, 12, INK.quiet).setOrigin(0.5, 0)));
+    shade.fillRect(0, 0, GW, GH);
+    shade.setInteractive(new Phaser.Geom.Rectangle(0, 0, GW, GH), Phaser.Geom.Rectangle.Contains);
+    const w = Math.min(520, GW - 24);
+    const cx = GW / 2;
+    const pad = PORTRAIT ? 20 : 40;
+    // Lay the lines out first (wrapped to the panel) so the panel can fit them.
+    const texts = lines.map((l) => push(text(this, cx, 0, l, 12, INK.quiet).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 32, true)));
+    const linesH = texts.reduce((sum, t) => sum + t.height + 7, 0);
+    const hgt = 100 + linesH + buttons.length * 58;
+    const x = (GW - w) / 2;
+    const y = (GH - hgt) / 2;
+    o.unshift(this.ui(panel(this, x, y, w, hgt)));
+    this.children.bringToTop(shade);
+    o.forEach((obj) => obj !== shade && this.children.bringToTop(obj));
+    const head = push(title(this, cx, y + 24, heading, PORTRAIT ? 20 : 23, headingColor).setOrigin(0.5, 0));
+    head.setWordWrapWidth(w - 24, true);
+    let ly = y + 66;
+    texts.forEach((t) => {
+      t.y = ly;
+      ly += t.height + 7;
+    });
     buttons.forEach(([label, fn, primary], i) => {
-      o.push(button(this, x + 40, y + 82 + lines.length * 24 + i * 58, w - 80, 48, label, fn, { primary: !!primary, size: 12 }));
+      push(button(this, x + pad, ly + 16 + i * 58, w - pad * 2, 48, label, fn, { primary: !!primary, size: 12 }));
     });
   }
 
