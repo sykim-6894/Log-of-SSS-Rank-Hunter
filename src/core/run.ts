@@ -1,7 +1,7 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
-import { bossFor, floorScale, MonsterKind, monsterPool, TOP_FLOOR } from './monsters';
+import { bossFor, eliteOf, floorScale, MonsterKind, monsterPool, TOP_FLOOR } from './monsters';
 import {
   addToBag,
   ChestContent,
@@ -15,6 +15,9 @@ import {
   GUARD_TURNS,
   HP_POTION_HEAL,
   MP_POTION_RESTORE,
+  Offer,
+  offerLabel,
+  rollOffers,
   rollChest,
   rollGear,
 } from './items';
@@ -40,7 +43,7 @@ export type Action =
   | { type: 'skill' }
   | { type: 'use'; item: ConsumableKind };
 
-export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'dead' | 'returned';
+export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'trading' | 'dead' | 'returned';
 
 export type RewardKind = 'item' | 'gold' | 'skill' | 'rescue';
 
@@ -64,6 +67,18 @@ export interface RunOptions {
   rivalAgency?: string;
   /** Chance per floor (from floor 2) that one of them appears. */
   encounterChance?: number;
+  /** Chance per floor (from floor 3, not boss floors) of a mid-boss. */
+  eliteChance?: number;
+  /** Chance per floor (from floor 2) of a wandering merchant. */
+  merchantChance?: number;
+}
+
+export interface Merchant {
+  x: number;
+  y: number;
+  offers: Offer[];
+  /** Index of each offer already bought. */
+  sold: boolean[];
 }
 
 export const SIGHT = 7;
@@ -89,6 +104,8 @@ export class TowerRun {
   chests: Point[] = [];
   /** Turns left on a guard potion: enemy hits do nothing. */
   guardTurns = 0;
+  /** A wandering merchant on this floor, gone once the hunter has traded. */
+  merchant?: Merchant;
   /** Rival hunters beaten this run and whether they were finished for good. */
   encounters: EncounterOutcome[] = [];
   private nextId = 1;
@@ -137,6 +154,8 @@ export class TowerRun {
 
     this.maybeSpawnRival(n);
     this.placeChests(n);
+    this.maybeSpawnElite(n);
+    this.maybePlaceMerchant(n);
 
     const boss = bossFor(n);
     if (boss) {
@@ -183,6 +202,76 @@ export class TowerRun {
     this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
     const tag = h.origin === 'rival' ? '라이벌' : '옛 동료';
     this.say(`[${tag}] ${h.name}의 기척이 느껴진다...`);
+  }
+
+  private randomFreeSpot(): Point | undefined {
+    const rooms = this.map.rooms.slice(1);
+    for (let tries = 0; tries < 30; tries++) {
+      const room = this.rng.pick(rooms);
+      const x = this.rng.int(room.x, room.x + room.w - 1);
+      const y = this.rng.int(room.y, room.y + room.h - 1);
+      if (this.blocked(x, y) || this.map.tiles[y][x] !== Tile.Floor || this.chestAt(x, y) >= 0 || this.merchantAt(x, y)) continue;
+      return { x, y };
+    }
+    return undefined;
+  }
+
+  private maybeSpawnElite(floor: number) {
+    if (floor < 3 || bossFor(floor) || !this.rng.chance(this.options.eliteChance ?? 0.35)) return;
+    const spot = this.randomFreeSpot();
+    if (!spot) return;
+    const kind = eliteOf(this.rng.pick(monsterPool(floor)));
+    this.spawn(kind, spot.x, spot.y, floor);
+    this.say(`강한 기척이 느껴진다... ${kind.name}!`);
+  }
+
+  private maybePlaceMerchant(floor: number) {
+    this.merchant = undefined;
+    if (floor < 2 || !this.rng.chance(this.options.merchantChance ?? 0.35)) return;
+    const spot = this.randomFreeSpot();
+    if (!spot) return;
+    const offers = rollOffers(this.rng, floor);
+    this.merchant = { ...spot, offers, sold: offers.map(() => false) };
+    this.say('어딘가에서 떠돌이 상인의 방울 소리가 들린다.');
+  }
+
+  merchantAt(x: number, y: number): boolean {
+    return !!this.merchant && this.merchant.x === x && this.merchant.y === y;
+  }
+
+  /** Buy one offer with this run's earnings. Returns a message, or '' if it could not. */
+  buyOffer(index: number): string {
+    const m = this.merchant;
+    const o = m?.offers[index];
+    if (!m || !o || this.status !== 'trading' || m.sold[index]) return '';
+    if (this.runGold < o.price) {
+      this.say('이번 수입이 모자라다.');
+      return '';
+    }
+    const h = this.hunter;
+    if (o.type === 'item' && h.bag[o.item] >= 5) {
+      this.say('가방에 더 넣을 자리가 없다.');
+      return '';
+    }
+    this.runGold -= o.price;
+    m.sold[index] = true;
+    const msg = `${offerLabel(o)} 구매. -${o.price}G`;
+    this.say(msg);
+    if (o.type === 'gear') this.takeGear(o.gear);
+    if (o.type === 'item') addToBag(h, o.item);
+    if (o.type === 'heal') {
+      h.hp = h.maxHp;
+      h.mp = h.maxMp;
+    }
+    return msg;
+  }
+
+  /** End the trade. The merchant packs up and leaves. */
+  leaveMerchant() {
+    if (this.status !== 'trading') return;
+    this.merchant = undefined;
+    this.status = 'playing';
+    this.say('상인은 다음 손님을 찾아 떠났다.');
   }
 
   /** One or two chests per floor (one more from floor 6), in rooms other than the start. */
@@ -278,7 +367,7 @@ export class TowerRun {
   }
 
   private blocked(x: number, y: number): boolean {
-    return !!this.monsterAt(x, y) || (this.pos.x === x && this.pos.y === y);
+    return !!this.monsterAt(x, y) || (this.pos.x === x && this.pos.y === y) || this.merchantAt(x, y);
   }
 
   isVisible(x: number, y: number): boolean {
@@ -340,6 +429,12 @@ export class TowerRun {
       case 'move': {
         const nx = this.pos.x + action.dx;
         const ny = this.pos.y + action.dy;
+        if (this.merchantAt(nx, ny)) {
+          // Talking to the merchant takes no time; the world waits.
+          this.status = 'trading';
+          this.say('떠돌이 상인: "골라 보시오. 거래가 끝나면 난 떠나네."');
+          return false;
+        }
         const target = this.monsterAt(nx, ny);
         if (target) {
           this.hitMonster(target, this.damage(h.atk, target.def));
@@ -384,6 +479,9 @@ export class TowerRun {
       const gain = Math.ceil(h.maxMp * MP_POTION_RESTORE);
       h.mp = Math.min(h.maxMp, h.mp + gain);
       this.say(`${name}을 마셨다. 마나 +${gain}`);
+    } else if (kind === 'escape') {
+      this.status = 'returned';
+      this.say(`${name}을 펼쳤다. 빛에 휩싸여 탑을 빠져나간다.`);
     } else {
       // +1 because the turn spent drinking it also counts down.
       this.guardTurns = GUARD_TURNS + 1;
@@ -409,6 +507,10 @@ export class TowerRun {
     this.say(`${m.kind.name} 처치! +${gold}G`);
     const levels = gainExp(this.hunter, Math.round(m.kind.exp * scale));
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
+    if (m.kind.elite) {
+      this.say('중간보스가 장비를 떨어뜨렸다!');
+      this.takeGear(rollGear(this.rng, this.floor + 2));
+    }
     if (m.hunter) this.offerChoice(m.hunter);
   }
 

@@ -6,6 +6,7 @@ import { combatPower, createHunter as makeHunter, expToNext, gainExp, gradeOf, H
 import { Rng } from '../src/core/rng';
 import { TowerRun } from '../src/core/run';
 import { loadGame, SAVE_KEY, saveGame } from '../src/core/save';
+import { bossFor, MONSTERS, TOP_FLOOR } from '../src/core/monsters';
 import { BAG_MAX, CURSE_FROM_FLOOR, equipIfBetter, Gear, rollChest, rollGear } from '../src/core/items';
 
 const createHunter = (rng: Rng) => makeHunter(rng, 1);
@@ -195,7 +196,7 @@ describe('agency economy', () => {
     }));
     const state = loadGame(storage)!;
     expect(state.version).toBe(3);
-    expect(activeHunter(state)!.bag).toEqual({ hp: 4, mp: 0, guard: 0 });
+    expect(activeHunter(state)!.bag).toEqual({ hp: 4, mp: 0, guard: 0, escape: 0 });
     expect(activeHunter(state)!.gear).toEqual({});
     expect(state.agent.gold).toBe(77);
     expect(activeHunter(state)!.contractGrade).toBe('E');
@@ -463,7 +464,7 @@ describe('items and chests', () => {
   it('potions heal, restore mana, and guard blocks hits', () => {
     const run = new TowerRun(createHunter(new Rng(4)), new Rng(4));
     const h = run.hunter;
-    h.bag = { hp: 1, mp: 1, guard: 1 };
+    h.bag = { hp: 1, mp: 1, guard: 1, escape: 0 };
     h.hp = 5;
     expect(run.act({ type: 'use', item: 'hp' })).toBe(true);
     expect(h.hp).toBeGreaterThan(5);
@@ -497,6 +498,73 @@ describe('items and chests', () => {
   });
 });
 
+describe('bosses and merchants', () => {
+  it('a boss guards every fifth floor up to the top', () => {
+    expect(TOP_FLOOR).toBe(20);
+    for (let f = 1; f <= TOP_FLOOR; f++) expect(!!bossFor(f)).toBe(f % 5 === 0);
+    expect(bossFor(5)).toBe(MONSTERS.warden);
+    expect(bossFor(20)?.boss).toBe(true);
+  });
+
+  it('mid-bosses turn up on some ordinary floors and drop gear', () => {
+    let seen = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const run = new TowerRun(createHunter(new Rng(seed)), new Rng(seed), { eliteChance: 1 });
+      run.enterFloor(3);
+      if (run.monsters.some((m) => m.kind.elite)) seen++;
+      run.enterFloor(5);
+      expect(run.monsters.some((m) => m.kind.elite)).toBe(false);
+    }
+    expect(seen).toBeGreaterThan(50);
+
+    const run = new TowerRun(createHunter(new Rng(3)), new Rng(3), { eliteChance: 1 });
+    run.enterFloor(3);
+    const elite = run.monsters.find((m) => m.kind.elite)!;
+    run.monsters = [elite];
+    elite.hp = 1;
+    elite.def = 0;
+    run.map.tiles[run.pos.y][run.pos.x + 1] = Tile.Floor;
+    elite.x = run.pos.x + 1;
+    elite.y = run.pos.y;
+    run.act({ type: 'move', dx: 1, dy: 0 });
+    expect(Object.values(run.hunter.gear).length).toBe(1);
+  });
+
+  it('the merchant sells from this run\'s gold, then leaves', () => {
+    const run = new TowerRun(createHunter(new Rng(7)), new Rng(7), { merchantChance: 1 });
+    run.enterFloor(2);
+    const m = run.merchant!;
+    expect(m.offers).toHaveLength(3);
+    run.monsters = [];
+    run.map.tiles[run.pos.y][run.pos.x + 1] = Tile.Floor;
+    m.x = run.pos.x + 1;
+    m.y = run.pos.y;
+    const turn = run.turn;
+    expect(run.act({ type: 'move', dx: 1, dy: 0 })).toBe(false);
+    expect(run.status).toBe('trading');
+    expect(run.turn).toBe(turn);
+    run.runGold = 0;
+    expect(run.buyOffer(0)).toBe('');
+    run.runGold = 1000;
+    expect(run.buyOffer(0)).not.toBe('');
+    expect(run.runGold).toBe(1000 - m.offers[0].price);
+    expect(run.buyOffer(0)).toBe('');
+    run.leaveMerchant();
+    expect(run.merchant).toBeUndefined();
+    expect(run.status).toBe('playing');
+  });
+
+  it('a return scroll leaves the tower at once', () => {
+    const run = new TowerRun(createHunter(new Rng(9)), new Rng(9));
+    run.hunter.bag.escape = 1;
+    run.runGold = 40;
+    expect(run.act({ type: 'use', item: 'escape' })).toBe(true);
+    expect(run.status).toBe('returned');
+    expect(run.runGold).toBe(40);
+    expect(run.hunter.bag.escape).toBe(0);
+  });
+});
+
 describe('balance (autoplayer)', () => {
   it('a fresh hunter usually clears floor 1 but rarely reaches floor 10', () => {
     let clearedFirst = 0;
@@ -507,6 +575,10 @@ describe('balance (autoplayer)', () => {
       for (let steps = 0; steps < 5000 && run.status !== 'dead'; steps++) {
         if (run.status === 'choosing') {
           run.resolveChoice(0);
+          continue;
+        }
+        if (run.status === 'trading') {
+          run.leaveMerchant();
           continue;
         }
         if (run.status === 'onStairs') {

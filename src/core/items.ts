@@ -3,13 +3,15 @@ import { Rng } from './rng';
 
 // ---------- Consumables: kept in the bag, used in the tower ----------
 
-export type ConsumableKind = 'hp' | 'mp' | 'guard';
-export const CONSUMABLE_KINDS: ConsumableKind[] = ['hp', 'mp', 'guard'];
+export type ConsumableKind = 'hp' | 'mp' | 'guard' | 'escape';
+export const CONSUMABLE_KINDS: ConsumableKind[] = ['hp', 'mp', 'guard', 'escape'];
 
-export const CONSUMABLES: Record<ConsumableKind, { name: string; describe: string; price?: number }> = {
+/** price: sold at the office. where: how to get the ones that are not. */
+export const CONSUMABLES: Record<ConsumableKind, { name: string; describe: string; price?: number; where?: string }> = {
   hp: { name: '체력 물약', describe: '체력 40% 회복', price: 15 },
   mp: { name: '마나 물약', describe: '마나 60% 회복', price: 15 },
-  guard: { name: '무적 물약', describe: '3턴 동안 피해 무시' },
+  guard: { name: '무적 물약', describe: '3턴 동안 피해 무시', where: '보물상자·상인' },
+  escape: { name: '귀환 주문서', describe: '바로 귀환, 돌파 보상 없음', where: '탑 속 상인' },
 };
 
 export const HP_POTION_HEAL = 0.4;
@@ -21,7 +23,7 @@ export const BAG_MAX = 5;
 export type Bag = Record<ConsumableKind, number>;
 
 export function emptyBag(): Bag {
-  return { hp: 0, mp: 0, guard: 0 };
+  return { hp: 0, mp: 0, guard: 0, escape: 0 };
 }
 
 /** Puts items in the bag. Returns how many fit; the rest are left behind. */
@@ -144,6 +146,41 @@ export function equipIfBetter(h: Hunter, g: Gear): EquipResult {
   h.gear[g.slot] = g;
   applyGear(h, g, 1);
   return { equipped: true, discarded: current };
+}
+
+// ---------- Wandering merchant ----------
+
+export type Offer =
+  | { type: 'gear'; gear: Gear; price: number }
+  | { type: 'item'; item: ConsumableKind; price: number }
+  | { type: 'heal'; price: number };
+
+export type OfferCategory = 'gear' | 'supply' | 'recovery' | 'escape';
+
+/** Three of the four categories at random: gear, supplies, recovery, a way home. */
+export function rollOffers(rng: Rng, floor: number): Offer[] {
+  const cats: OfferCategory[] = ['gear', 'supply', 'recovery', 'escape'];
+  const skip = rng.int(0, cats.length - 1);
+  return cats.filter((_, i) => i !== skip).map((cat): Offer => {
+    switch (cat) {
+      case 'gear': {
+        const gear = rollGear(rng, floor + 1);
+        return { type: 'gear', gear, price: 20 + gear.tier * 15 };
+      }
+      case 'supply':
+        return rng.chance(0.5) ? { type: 'item', item: 'guard', price: 35 } : { type: 'item', item: 'mp', price: 12 };
+      case 'recovery':
+        return rng.chance(0.5) ? { type: 'item', item: 'hp', price: 12 } : { type: 'heal', price: 20 + floor * 3 };
+      case 'escape':
+        return { type: 'item', item: 'escape', price: 25 + floor * 2 };
+    }
+  });
+}
+
+export function offerLabel(o: Offer): string {
+  if (o.type === 'gear') return `${GEAR_SLOT_NAMES[o.gear.slot]} ${o.gear.name} (${describeGear(o.gear)})`;
+  if (o.type === 'item') return `${CONSUMABLES[o.item].name} (${CONSUMABLES[o.item].describe})`;
+  return '응급 치료 (체력·마나 모두 회복)';
 }
 
 // ---------- Treasure chests ----------

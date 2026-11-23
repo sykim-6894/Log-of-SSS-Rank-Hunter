@@ -282,7 +282,7 @@ export class HQScene extends Phaser.Scene {
       this.scene.restart({ messages: this.messages });
     });
     text(this, x + 120, y + 20, `장비 ${worn}/${GEAR_SLOTS.length}칸`, 12, INK.text);
-    text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard}`, 12, INK.quiet);
+    text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
       button(this, x + w - 196 + i * 92, y + 16, 86, 44, `${c.name.slice(0, 2)} 물약\n${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
@@ -315,7 +315,7 @@ export class HQScene extends Phaser.Scene {
       if (c.price !== undefined) {
         button(this, x + w - 126, ry, 110, 44, `구매 ${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
       } else {
-        text(this, x + w - 16, ry + 14, '보물상자에서만', 12, INK.faint).setOrigin(1, 0);
+        text(this, x + w - 16, ry + 14, `${c.where}에서만`, 12, INK.faint).setOrigin(1, 0);
       }
     });
   }

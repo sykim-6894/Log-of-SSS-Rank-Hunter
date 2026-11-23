@@ -2,7 +2,7 @@ import * as Phaser from 'phaser';
 import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
 import { MAP_H, MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { CONSUMABLE_KINDS, CONSUMABLES } from '../core/items';
+import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { Action, REWARDS, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
@@ -79,6 +79,7 @@ export class TowerScene extends Phaser.Scene {
       e: { type: 'use', item: 'hp' },
       r: { type: 'use', item: 'mp' },
       f: { type: 'use', item: 'guard' },
+      x: { type: 'use', item: 'escape' },
       ' ': { type: 'wait' },
     };
     this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
@@ -230,10 +231,17 @@ export class TowerScene extends Phaser.Scene {
     }
     for (const c of run.chests) if (run.seen[c.y][c.x]) this.drawChest(g, c.x, c.y, run.isVisible(c.x, c.y));
 
+    const mer = run.merchant;
+    if (mer && run.seen[mer.y][mer.x]) {
+      const mg = this.keep(this.add.graphics());
+      mg.fillStyle(0x3d5a3a, run.isVisible(mer.x, mer.y) ? 1 : 0.45).fillRect(mer.x * TILE + 3, mer.y * TILE + 3, TILE - 6, TILE - 6);
+      this.keep(this.glyph(mer.x, mer.y, '$', INK.gold, 16));
+    }
+
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
-      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.awake ? INK.rust : '#c9a46a';
-      this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : 15));
+      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.awake ? INK.rust : '#c9a46a';
+      this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
         const hb = this.keep(this.add.graphics());
@@ -254,6 +262,8 @@ export class TowerScene extends Phaser.Scene {
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
     if (run.status === 'choosing' && !this.overlay.length) this.showChoice();
+    if (run.status === 'trading' && !this.overlay.length) this.showMerchant();
+    if (run.status === 'returned' && !this.overlay.length) this.finishReturn();
   }
 
   /** Stone floor with a little speckle; bricked walls. Remembered tiles are drawn dark. */
@@ -382,6 +392,30 @@ export class TowerScene extends Phaser.Scene {
     k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
   }
 
+  /** The wandering merchant's wares, paid from this run's earnings. */
+  private showMerchant() {
+    const run = this.run;
+    const m = run.merchant;
+    if (!m) return;
+    this.joyClear();
+    const buttons: Array<[string, () => void, boolean?, boolean?]> = m.offers.map((o, i) => [
+      m.sold[i] ? `${offerLabel(o)} · 판매 완료` : `${offerLabel(o)} · ${o.price}G`,
+      () => {
+        run.buyOffer(i);
+        this.closeOverlay();
+        this.redraw();
+      },
+      false,
+      !m.sold[i] && run.runGold >= o.price,
+    ]);
+    buttons.push(['거래 끝내기 (상인이 떠남)', () => {
+      run.leaveMerchant();
+      this.closeOverlay();
+      this.redraw();
+    }, true]);
+    this.dialog('떠돌이 상인', [`이번 수입 ${run.runGold}G로 살 수 있다.`, '거래를 끝내면 상인은 떠난다.'], buttons, INK.gold);
+  }
+
   /** A banner over the map that rises and fades: new level, full health and mana. */
   private showLevelUp(level: number) {
     const cx = GW / 2;
@@ -409,7 +443,7 @@ export class TowerScene extends Phaser.Scene {
     if (this.overlay.length || this.run.status !== 'playing') return;
     this.joyClear();
     const h = this.run.hunter;
-    const keys = { hp: 'E', mp: 'R', guard: 'F' } as const;
+    const keys: Record<string, string> = { hp: 'E', mp: 'R', guard: 'F', escape: 'X' };
     const o = this.overlay;
     const push = <T extends Phaser.GameObjects.GameObject>(obj: T) => {
       o.push(this.ui(obj));
