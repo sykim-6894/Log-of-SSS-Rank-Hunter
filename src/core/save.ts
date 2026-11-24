@@ -1,5 +1,5 @@
 import { GameState, HallOfFameEntry, refreshWorldRankers, SLOT_COUNT, worldRankers } from './agency';
-import { Grade, Hunter, powerGrade } from './hunter';
+import { baseRegen, Grade, Hunter, powerGrade } from './hunter';
 import { CLASS_IDS, CLASSES, classSkills } from './classes';
 import { emptyBag } from './items';
 import { TOP_FLOOR } from './monsters';
@@ -97,6 +97,11 @@ export function loadGame(storage: Storage): GameState | undefined {
       for (const h of [...state.slots, ...state.rival.roster]) {
         if (!h) continue;
         giveClass(h);
+        if (h.hpRegen === undefined || h.mpRegen === undefined) {
+          const r = baseRegen(h.cls, h.level);
+          h.hpRegen = r.hp;
+          h.mpRegen = r.mp;
+        }
         // Rivals used to be able to pass the top floor by one.
         h.bestFloor = Math.min(TOP_FLOOR, h.bestFloor);
       }

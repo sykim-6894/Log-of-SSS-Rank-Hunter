@@ -8,7 +8,7 @@ import { DOLL_H, drawPaperDoll, TIER_COLORS } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
-import { recommendedLevel } from '../core/monsters';
+import { recommendedLevel, TRAITS } from '../core/monsters';
 import { Action, REWARDS, RunEvent, TowerRun } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
@@ -166,7 +166,7 @@ export class TowerScene extends Phaser.Scene {
     }
     for (const c of run.chests) if (run.seen[c.y][c.x]) dot(c.x, c.y, 0xc98a3a);
     if (run.merchant && run.seen[run.merchant.y][run.merchant.x]) dot(run.merchant.x, run.merchant.y, 0x7fd67a);
-    for (const m of run.monsters) if (run.isVisible(m.x, m.y)) dot(m.x, m.y, m.kind.boss || m.kind.elite ? 0xff5040 : 0xd0603a);
+    for (const m of run.monsters) if (run.canSee(m)) dot(m.x, m.y, m.kind.stalker ? 0xb05cff : m.kind.boss || m.kind.elite ? 0xff5040 : 0xd0603a);
     dot(run.pos.x, run.pos.y, 0xffffff);
   }
 
@@ -268,8 +268,10 @@ export class TowerScene extends Phaser.Scene {
   private noteNewKinds(): boolean {
     let fresh = false;
     for (const m of this.run.monsters) {
-      if (!this.run.isVisible(m.x, m.y) || this.metKinds.has(m.kind.id)) continue;
+      if (!this.run.canSee(m) || this.metKinds.has(m.kind.id)) continue;
       this.metKinds.add(m.kind.id);
+      const trait = m.kind.trait ? TRAITS[m.kind.trait] : undefined;
+      if (trait) this.run.log.push(`[${trait.name}] ${m.kind.name}: ${trait.text}`);
       fresh = true;
     }
     return fresh;
@@ -372,7 +374,7 @@ export class TowerScene extends Phaser.Scene {
     }
 
     for (const m of run.monsters) {
-      if (!run.isVisible(m.x, m.y)) continue;
+      if (!run.canSee(m)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
       if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
       else if (hasMonsterArt(m.kind.id)) {
@@ -380,11 +382,12 @@ export class TowerScene extends Phaser.Scene {
         const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE - 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
         if (m.kind.elite) img.setScale(1.3).setTint(0xffd27a);
         if (m.kind.boss) img.setScale(1.35);
+        if (m.kind.stalker) img.setScale(1.45);
         if (!m.awake) img.setAlpha(0.75);
         if (m.stun) img.setTint(0x9fd8ff);
       } else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
-      if (hpRatio < 1) {
+      if (hpRatio < 1 && !m.kind.stalker) {
         const hb = this.keep(this.add.graphics());
         hb.fillStyle(0x000000, 1);
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, TILE - 5, 3);
@@ -399,6 +402,7 @@ export class TowerScene extends Phaser.Scene {
       this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
       this.drawMinimap();
     }
+    this.drawStalkerClock();
 
     if (PORTRAIT) this.drawHudPortrait();
     else this.drawHud();
@@ -737,6 +741,27 @@ export class TowerScene extends Phaser.Scene {
         case 'floor':
           sfx.floor();
           break;
+        case 'monsterHeal':
+          if (this.run.isVisible(e.x, e.y)) this.floatText(e.x, e.y, `+${e.amount}`, '#8fdc7a');
+          break;
+        case 'immune':
+          this.floatText(e.x, e.y, '무효', INK.faint);
+          sfx.block();
+          break;
+        case 'stalker':
+          cam.shake(500, 0.01);
+          cam.flash(400, 90, 30, 140);
+          sfx.curse();
+          this.notice({
+            heading: e.nth > 1 ? `심연의 추적자 ${e.nth} 출현!` : '심연의 추적자 출현!',
+            color: '#c98bff',
+            lines: [
+              ['쓰러뜨릴 수 없는 적이 당신을 찾아 나섰다.', INK.text],
+              ['계단을 찾아 이 층을 떠나라!', INK.red, 15],
+            ],
+            ms: 3200,
+          });
+          break;
         case 'gateClear':
           this.clearPending = true;
           cam.flash(300, 229, 174, 70);
@@ -872,6 +897,23 @@ export class TowerScene extends Phaser.Scene {
     this.tweens.add({ targets: box, scale: 1, duration: 160, ease: 'Back.Out' });
     this.time.delayedCall(n.ms ?? 2400, close);
     this.noticeUp = box;
+  }
+
+  /**
+   * Corner of the map: turns until the abyss stalker comes for a hunter who lingers.
+   * Under the minimap in portrait, top right of the map in landscape.
+   */
+  private drawStalkerClock() {
+    const run = this.run;
+    const r = this.minimapRect();
+    const x = r ? r.x + r.w : GW - 10;
+    const y = r ? r.y + r.h + 4 : 8;
+    const left = run.stalkerIn;
+    const label = run.stalkers > 0 ? `추적자 ${run.stalkers} · 다음 ${left}턴` : `추적자까지 ${left}턴`;
+    const color = run.stalkers > 0 || left <= 30 ? '#e0574f' : INK.quiet;
+    const t = this.ui(text(this, x, y, label, 12, color).setOrigin(1, 0).setDepth(30));
+    t.setBackgroundColor('#000000aa').setPadding(4, 2, 4, 2);
+    this.dynamic.push(t);
   }
 
   /** Health / mana / guard potion counts. */

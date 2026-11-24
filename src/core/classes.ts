@@ -14,6 +14,8 @@ export interface ClassInfo {
   base: { hp: number; mp: number; atk: number; def: number };
   /** Gains per level. Mages gain defense only on odd levels. */
   growth: { hp: number; mp: number; atk: number; def: number };
+  /** Health and mana won back each turn at level 1 (fractions add up over turns). */
+  regen: { hp: number; mp: number };
   passive: string;
   passiveText: string;
 }
@@ -21,22 +23,22 @@ export interface ClassInfo {
 export const CLASSES: Record<ClassId, ClassInfo> = {
   sword: {
     name: '검사', role: '근접 광역', look: 0,
-    base: { hp: 29, mp: 10, atk: 6, def: 2 }, growth: { hp: 5, mp: 2, atk: 1, def: 1 },
+    base: { hp: 29, mp: 10, atk: 6, def: 2 }, growth: { hp: 5, mp: 2, atk: 1, def: 1 }, regen: { hp: 0.2, mp: 0.25 },
     passive: '혈기', passiveText: '적을 처치하면 체력 3 회복',
   },
   mage: {
     name: '마법사', role: '원거리 폭딜', look: 1,
-    base: { hp: 24, mp: 20, atk: 5, def: 1 }, growth: { hp: 3, mp: 4, atk: 1, def: 0 },
+    base: { hp: 24, mp: 20, atk: 5, def: 1 }, growth: { hp: 3, mp: 4, atk: 1, def: 0 }, regen: { hp: 0.1, mp: 0.5 },
     passive: '마력 순환', passiveText: '마나가 2배 빨리 찬다',
   },
   archer: {
     name: '궁수', role: '원거리 견제', look: 2,
-    base: { hp: 26, mp: 12, atk: 6, def: 1 }, growth: { hp: 4, mp: 2, atk: 1, def: 1 },
+    base: { hp: 26, mp: 12, atk: 6, def: 1 }, growth: { hp: 4, mp: 2, atk: 1, def: 1 }, regen: { hp: 0.15, mp: 0.3 },
     passive: '날렵함', passiveText: '15% 확률로 공격을 피한다 · 기본 공격이 3칸까지 닿는다',
   },
   knight: {
     name: '기사', role: '탱커', look: 3,
-    base: { hp: 36, mp: 8, atk: 4, def: 3 }, growth: { hp: 7, mp: 1, atk: 1, def: 1 },
+    base: { hp: 36, mp: 8, atk: 4, def: 3 }, growth: { hp: 7, mp: 1, atk: 1, def: 1 }, regen: { hp: 0.3, mp: 0.2 },
     passive: '불굴', passiveText: '체력 30% 이하일 때 방어 +3',
   },
 };

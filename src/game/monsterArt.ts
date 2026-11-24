@@ -212,6 +212,27 @@ const SPRITES: Record<string, Sprite> = {
       '................',
     ],
   },
+  stalker: {
+    colors: { c: 0x2a1838, d: 0x4a2a66, p: 0x8a5cc0, r: 0xff4040 },
+    rows: [
+      '......dddd......',
+      '.....dccccd.....',
+      '....dccccccd....',
+      '....dcrccrcd....',
+      '....dccccccd....',
+      '...ddcccccccd...',
+      '..dcccpcccpccd..',
+      '.dcccccpcpcccd..',
+      '.dccccccpccccd..',
+      'dccdcccccccdccd.',
+      'dc.dcccccccd.cd.',
+      'p..dcccccccd..p.',
+      '...dccccccccd...',
+      '..dcccccccccd...',
+      '.dcc.dcc.dcccd..',
+      'd...d...d....d..',
+    ],
+  },
   master: {
     colors: { o: 0xf0e060, h: 0x2a2a2a, e: 0xf0e060, a: 0xe0e0e8, g: 0xe5ae46 },
     rows: [
