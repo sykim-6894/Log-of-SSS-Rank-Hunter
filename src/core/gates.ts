@@ -26,7 +26,7 @@ export const GATE_INFO: Record<GateGrade, { danger: number; floors: number; gold
 /** Magic stones for clearing a gate. */
 export function gateClearStones(g: Gate): number {
   const info = GATE_INFO[g.grade];
-  return Math.round((2 + Math.floor(gateDanger(g, gateFloors(g)) / 4)) * (info.stones ?? 1));
+  return Math.round((2 + Math.floor(gateDanger(g, gateFloors(g)) / 4)) * (g.rift ? RIFT.stones : info.stones ?? 1));
 }
 
 export type GateThemeId = 'goblin' | 'wolf' | 'orc' | 'swamp' | 'shadow';
@@ -71,6 +71,35 @@ export interface Gate {
   closesOn: number;
   /** A rival agency's team went in on this day. It tries to clear the gate when the next day comes. */
   rival?: RivalRaid;
+  /** The great rift: a rare, harder gate sized to the agency's best hunter. */
+  rift?: boolean;
+  /** Overrides for the rift: the tower floor its first floor matches, and its floor count. */
+  danger?: number;
+  floors?: number;
+  /** Our hunter went in: settled when they come back. */
+  entered?: boolean;
+}
+
+/** Great rift: how often it opens, how long it stays, how much harder and richer it is. */
+export const RIFT = {
+  firstDay: 4,
+  gapMin: 5,
+  gapMax: 7,
+  days: 3,
+  floors: 5,
+  /** Floors above the best hunter's comfortable floor. */
+  extraDanger: 2,
+  gold: 2.5,
+  stones: 3,
+  /** Levels the rival agency's best hunter gains when they close it instead of us. */
+  rivalLevels: 3,
+};
+
+/** The grade that matches a tower floor, for showing a rift's grade. */
+export function gradeForDanger(danger: number): GateGrade {
+  let best: GateGrade = 'E';
+  for (const gr of GATE_GRADES) if (GATE_INFO[gr].danger <= danger) best = gr;
+  return best;
 }
 
 /** A rival agency's team working on a gate. */
@@ -87,26 +116,28 @@ export interface RivalRaid {
 export const INTERCEPT_BONUS = 1.3;
 
 export function gateName(g: Gate): string {
+  if (g.rift) return `대균열 · ${GATE_THEMES[g.theme].name}`;
   return `${g.grade}급 ${GATE_THEMES[g.theme].name}`;
 }
 
 export function gateFloors(g: Gate): number {
-  return GATE_INFO[g.grade].floors;
+  return g.floors ?? GATE_INFO[g.grade].floors;
 }
 
 /** The tower floor a gate floor (counted from 1) is as dangerous as. */
 export function gateDanger(g: Gate, depth: number): number {
-  return GATE_INFO[g.grade].danger + depth - 1;
+  return (g.danger ?? GATE_INFO[g.grade].danger) + depth - 1;
 }
 
 export function gateLevel(g: Gate): number {
-  return recommendedLevel(GATE_INFO[g.grade].danger);
+  return recommendedLevel(g.danger ?? GATE_INFO[g.grade].danger);
 }
 
 /** Gold for clearing the gate, on top of what was picked up inside. */
 export function gateClearGold(g: Gate): number {
   const base = 40 * gateDanger(g, gateFloors(g));
-  return Math.round(base * (GATE_INFO[g.grade].gold ?? 1) * (g.rule ? 1.5 : 1) * (g.rival ? INTERCEPT_BONUS : 1));
+  const grade = g.rift ? RIFT.gold : GATE_INFO[g.grade].gold ?? 1;
+  return Math.round(base * grade * (g.rule ? 1.5 : 1) * (g.rival ? INTERCEPT_BONUS : 1));
 }
 
 /** The grade that suits a hunter of this level best. */
@@ -119,6 +150,21 @@ export function gradeForLevel(level: number): GateGrade {
 /** Chance a rival team at this level clears the gate. */
 export function raidSuccess(g: Gate, level: number): number {
   return Math.max(0.25, Math.min(0.9, 0.6 + 0.1 * (level - gateLevel(g))));
+}
+
+/** A great rift for a hunter of this level: a few floors above what they handle comfortably, always swarming. */
+export function rollRift(rng: Rng, id: number, bestLevel: number, day: number): Gate {
+  const danger = Math.max(3, bestLevel - 2 + RIFT.extraDanger);
+  return {
+    id,
+    grade: gradeForDanger(danger),
+    theme: rng.pick(THEME_IDS),
+    rule: 'swarm',
+    closesOn: day + RIFT.days - 1,
+    rift: true,
+    danger,
+    floors: RIFT.floors,
+  };
 }
 
 export function rollGate(rng: Rng, id: number, grade: GateGrade, day: number): Gate {
@@ -177,8 +223,8 @@ export function gateBoss(g: Gate, danger: number): MonsterKind {
   const e = eliteOf(base);
   return {
     ...e,
-    name: `[게이트 주인] ${base.name}`,
-    hp: Math.round(e.hp * 1.25),
+    name: g.rift ? `[대균열의 군주] ${base.name}` : `[게이트 주인] ${base.name}`,
+    hp: Math.round(e.hp * (g.rift ? 1.5 : 1.25)),
     exp: Math.round(e.exp * 1.5),
     score: e.score * 2,
     elite: false,
