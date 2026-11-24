@@ -1,3 +1,4 @@
+import { ClassId, CLASS_IDS, CLASSES, classSkills, LevelCard, OwnedSkill, SkillId } from './classes';
 import { Bag, emptyBag, Equipment } from './items';
 import { Rng } from './rng';
 
@@ -49,8 +50,16 @@ export interface Hunter {
   skillPower: number;
   /** For a rival hunter: the id of our hunter they shadow. */
   rivalOf?: number;
-  /** Which pixel figure to draw. Defaults from the id when missing. */
+  /** Which pixel figure to draw. Always the class's look. */
   look?: number;
+  /** Class, chosen at hiring. Fixed for life. */
+  cls: ClassId;
+  /** Skills in their slots, in order. At most slotCount(level). */
+  skills: OwnedSkill[];
+  /** Level-up cards still to pick. */
+  picks: number;
+  /** The three cards on offer for the next pick, once rolled. */
+  cards?: LevelCard[];
 }
 
 export type TrainingKind = 'atk' | 'def' | 'hp' | 'mp';
@@ -60,20 +69,27 @@ const NAMES = [
   '최다온', '문시우', '신유나', '권태오', '류하늘', '남궁별', '차은호', '도민아',
 ];
 
-export function createHunter(rng: Rng, id: number, avoidNames: string[] = []): Hunter {
+export function createHunter(
+  rng: Rng,
+  id: number,
+  avoidNames: string[] = [],
+  cls: ClassId = rng.pick(CLASS_IDS),
+  firstSkill: SkillId = classSkills(cls)[0],
+): Hunter {
   const free = NAMES.filter((n) => !avoidNames.includes(n));
+  const c = CLASSES[cls];
   return {
     id,
     name: rng.pick(free.length ? free : NAMES),
     origin: 'ours',
     level: 1,
     exp: 0,
-    hp: 30,
-    maxHp: 30,
-    mp: 10,
-    maxMp: 10,
-    atk: 5,
-    def: 2,
+    hp: c.base.hp,
+    maxHp: c.base.hp,
+    mp: c.base.mp,
+    maxMp: c.base.mp,
+    atk: c.base.atk,
+    def: c.base.def,
     gold: 20,
     bag: { ...emptyBag(), hp: 2 },
     gear: {},
@@ -86,6 +102,10 @@ export function createHunter(rng: Rng, id: number, avoidNames: string[] = []): H
     everSSS: false,
     rescues: 0,
     skillPower: 1.5,
+    look: c.look,
+    cls,
+    skills: [{ id: firstSkill, lv: 1 }],
+    picks: 0,
   };
 }
 
@@ -155,14 +175,18 @@ export function gainExp(h: Hunter, amount: number): number {
   return gained;
 }
 
+/** One level: the class's stat gains, full health and mana, and one level-up card to pick. */
 export function levelUp(h: Hunter) {
+  const g = CLASSES[h.cls ?? 'sword'].growth;
   h.level += 1;
-  h.maxHp += 5;
-  h.maxMp += 2;
-  h.atk += 1;
-  h.def += 1;
+  h.maxHp += g.hp;
+  h.maxMp += g.mp;
+  h.atk += g.atk;
+  // Mages gain defense only on odd levels.
+  h.def += h.cls === 'mage' ? h.level % 2 : g.def;
   h.hp = h.maxHp;
   h.mp = h.maxMp;
+  h.picks = (h.picks ?? 0) + 1;
 }
 
 export function hallOfFameScore(h: Hunter): number {

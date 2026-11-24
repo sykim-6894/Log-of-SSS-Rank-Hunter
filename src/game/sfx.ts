@@ -79,6 +79,10 @@ export const sfx = {
     noise(0.1, 0.1);
     tone(160, 0.14, { type: 'sawtooth', to: 60, vol: 0.07 });
   },
+  skill: () => {
+    tone(520, 0.12, { type: 'sawtooth', to: 1040, vol: 0.05 });
+    noise(0.08, 0.05, 0.04);
+  },
   block: () => tone(900, 0.08, { type: 'triangle', to: 1200, vol: 0.05 }),
   kill: () => {
     tone(330, 0.07, { vol: 0.05 });

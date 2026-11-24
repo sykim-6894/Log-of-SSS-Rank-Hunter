@@ -1,5 +1,6 @@
 import { GameState, HallOfFameEntry, refreshWorldRankers, SLOT_COUNT, worldRankers } from './agency';
 import { Grade, Hunter, powerGrade } from './hunter';
+import { CLASS_IDS, CLASSES, classSkills } from './classes';
 import { emptyBag } from './items';
 
 export const SAVE_KEY = 'sss-hunter-save-v1';
@@ -75,13 +76,25 @@ export function migrateV2(v2: SaveV2): GameState {
   };
 }
 
+/** Hunters from before classes: the look they had becomes their class, with its signature skill. */
+export function giveClass(h: Hunter) {
+  if (h.cls) return;
+  h.cls = CLASS_IDS[(h.look ?? h.id) % CLASS_IDS.length];
+  h.look = CLASSES[h.cls].look;
+  h.skills = [{ id: classSkills(h.cls)[0], lv: 1 }];
+  h.picks = 0;
+}
+
 export function loadGame(storage: Storage): GameState | undefined {
   const raw = storage.getItem(SAVE_KEY);
   if (!raw) return undefined;
   try {
     const data = JSON.parse(raw) as GameState | SaveV2 | SaveV1;
     const state = data.version === 1 ? migrateV1(data) : data.version === 2 ? migrateV2(data) : data.version === 3 ? data : undefined;
-    if (state) refreshWorldRankers(state);
+    if (state) {
+      refreshWorldRankers(state);
+      for (const h of [...state.slots, ...state.rival.roster]) if (h) giveClass(h);
+    }
     return state;
   } catch {
     return undefined;

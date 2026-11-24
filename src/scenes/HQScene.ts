@@ -1,9 +1,10 @@
 import * as Phaser from 'phaser';
-import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost } from '../core/agency';
+import { activeHunter, buyItem, changeClass, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
-import { drawLook, LOOKS, lookOf } from '../game/looks';
+import { drawLook, lookOf } from '../game/looks';
 import { soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
@@ -15,6 +16,8 @@ export interface HQData {
   armRelease?: boolean;
   /** Show the start floor choices instead of the depart button. */
   pickStart?: boolean;
+  /** Hiring screen: the slot being filled, and whether it re-signs an untouched hunter in another class. */
+  hire?: { slot: number; change?: boolean; cls?: ClassId; skills?: SkillId[] };
 }
 
 let welcomed = false;
@@ -47,6 +50,7 @@ export class HQScene extends Phaser.Scene {
   private messages: string[] = [];
   private releaseArmed = false;
   private pickingStart = false;
+  private hiring?: HQData['hire'];
 
   constructor() {
     super('HQ');
@@ -56,10 +60,12 @@ export class HQScene extends Phaser.Scene {
     this.messages = data.messages ?? [];
     this.releaseArmed = !!data.armRelease;
     this.pickingStart = !!data.pickStart;
+    this.hiring = data.hire;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
       this.messages = [
         `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
         '훈련으로 키우고, 성장의 탑에 보내 돈을 벌어오게 하자.',
+        '첫 탑에 가기 전에는 자격증의 [직업 바꾸기]로 직업을 다시 고를 수 있다.',
       ];
     }
     welcomed = true;
@@ -83,6 +89,7 @@ export class HQScene extends Phaser.Scene {
       return;
     }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
+    if (this.hiring) return this.drawHiring(this.hiring);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -96,7 +103,56 @@ export class HQScene extends Phaser.Scene {
 
     this.departButton(488, 618, 448, 58, 24);
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, '방향키·WASD 이동/공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
+  }
+
+  /**
+   * Hiring screen in two steps: pick a class, then one of two first skills.
+   * Also used to re-sign an untouched hunter in another class.
+   */
+  private drawHiring(hr: NonNullable<HQData['hire']>) {
+    const x = 14;
+    const w = GW - 28;
+    const back = () => this.scene.restart({ messages: this.messages });
+    title(this, GW / 2, 18, hr.change ? '직업 바꾸기' : '새 헌터 고용', 23, INK.text).setOrigin(0.5, 0);
+    if (!hr.cls) {
+      text(this, GW / 2, 52, '직업을 고르세요. 외형과 성장이 직업을 따릅니다.', 12, INK.quiet).setOrigin(0.5, 0);
+      const cardH = PORTRAIT ? 128 : 112;
+      const cols = PORTRAIT ? 1 : 2;
+      const cw = (w - (cols - 1) * 12) / cols;
+      CLASS_IDS.forEach((id, i) => {
+        const c = CLASSES[id];
+        const cx = x + (i % cols) * (cw + 12);
+        const cy = 82 + Math.floor(i / cols) * (cardH + 10);
+        panel(this, cx, cy, cw, cardH);
+        const g = this.add.graphics();
+        drawLook(g, c.look, cx + 14, cy + 14, 6);
+        title(this, cx + 96, cy + 12, `${c.name}  ·  ${c.role}`, 15, INK.gold);
+        text(this, cx + 96, cy + 38, `체력 ${c.base.hp} 마나 ${c.base.mp} 공격 ${c.base.atk} 방어 ${c.base.def}`, 12, INK.text);
+        text(this, cx + 96, cy + 56, `${c.passive}: ${c.passiveText}`, 12, INK.quiet).setWordWrapWidth(cw - 110, true).setLineSpacing(-2);
+        button(this, cx + 96, cy + cardH - 44, cw - 110, 34, `${c.name} 고르기`, () =>
+          this.scene.restart({ messages: this.messages, hire: { ...hr, cls: id, skills: firstSkillChoices(id, rng) } }), { primary: true, size: 12 });
+      });
+      button(this, x, GH - 70, w, 50, '취소', back);
+      return;
+    }
+    const c = CLASSES[hr.cls];
+    text(this, GW / 2, 52, `${c.name}의 첫 스킬을 하나 고르세요. 나머지는 레벨업 카드로 배웁니다.`, 12, INK.quiet).setOrigin(0.5, 0).setWordWrapWidth(w, true);
+    (hr.skills ?? []).forEach((id, i) => {
+      const sk = SKILLS[id];
+      const cy = 96 + i * 120;
+      panel(this, x, cy, w, 108);
+      title(this, x + 16, cy + 12, `${sk.name}  ·  마나 ${sk.mp}`, 15, INK.gold);
+      fit(text(this, x + 16, cy + 38, sk.text, 12, INK.text), w - 32);
+      fit(text(this, x + 16, cy + 56, `5단계: ${sk.max}`, 12, INK.quiet), w - 32);
+      button(this, x + 16, cy + 74, w - 32, 28, `${sk.name}(으)로 시작`, () => {
+        const h = hr.change ? changeClass(state, rng, hr.slot, hr.cls!, id) : hire(state, rng, hr.slot, hr.cls, id);
+        const msg = h ? (hr.change ? `${h.name}의 직업을 ${c.name}(으)로 바꿨다.` : `새 ${c.name} ${h.name}와(과) 계약했다.`) : '계약하지 못했다.';
+        this.refresh([msg]);
+      }, { primary: true, size: 12 });
+    });
+    button(this, x, GH - 130, w, 50, '직업 다시 고르기', () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change } }));
+    button(this, x, GH - 70, w, 50, '취소', back);
   }
 
   /**
@@ -206,10 +262,7 @@ export class HQScene extends Phaser.Scene {
           this.refresh();
         }, { primary: i === state.activeSlot });
       } else {
-        button(this, bx, y, w, 44, '+ 새 헌터 고용', () => {
-          const n = hire(state, rng, i);
-          if (n) this.refresh([`새 헌터 ${n.name}와(과) 계약했다.`]);
-        });
+        button(this, bx, y, w, 44, '+ 새 헌터 고용', () => this.scene.restart({ messages: this.messages, hire: { slot: i } }));
       }
     }
   }
@@ -243,19 +296,14 @@ export class HQScene extends Phaser.Scene {
     const py = y + 40;
     g.fillStyle(0xcfc1a3, 1).fillRect(px, py, 72, 88);
     g.lineStyle(2, PALETTE.ink, 1).strokeRect(px, py, 72, 88);
-    // The hunter's figure. Tap the photo to pick another look.
-    const look = lookOf(h);
-    drawLook(g, look, px + 9, py + 6, 5);
+    // The hunter's figure, fixed by class.
+    drawLook(g, lookOf(h), px + 9, py + 6, 5);
     g.fillStyle(PALETTE.ink, 1).fillRect(px, py + 72, 72, 16);
-    text(this, px + 36, py + 74, `◀ ${LOOKS[look].name} ▶`, 12, '#e6dac0').setOrigin(0.5, 0);
-    this.add.zone(px, py, 72, 88).setOrigin(0).setInteractive({ useHandCursor: true }).on('pointerup', () => {
-      h.look = (look + 1) % LOOKS.length;
-      this.refresh(this.messages);
-    });
+    text(this, px + 36, py + 74, CLASSES[h.cls].name, 12, '#e6dac0').setOrigin(0.5, 0);
 
     title(this, x + 106, y + 40, h.name, 23, INK.ink);
     text(this, x + 106, y + 72, `Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, 12, INK.inkQuiet);
-    text(this, x + 106, y + 92, `소속 ${state.agent.name}`, 12, INK.inkQuiet);
+    fit(text(this, x + 106, y + 92, `${CLASSES[h.cls].passive}: ${CLASSES[h.cls].passiveText}`, 12, INK.inkQuiet), w - 260);
     text(this, x + 106, y + 112, `계약 ${h.contractGrade}급 · 상납 ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`, 12, INK.inkQuiet);
 
     // Grade stamp
@@ -281,8 +329,14 @@ export class HQScene extends Phaser.Scene {
     dots(this, x + 18, y + 188, w - 36, PALETTE.paperLine);
     title(this, x + 18, y + 198, `전투력 ${power}`, 15, INK.ink);
     text(this, x + w - 18, y + 201, goal, 12, INK.inkQuiet).setOrigin(1, 0);
-    const extras = [h.rescues ? `위기 지원 ${h.rescues}` : '', h.skillPower > 1.5 ? `회전베기 ×${h.skillPower}` : ''].filter(Boolean).join(' · ');
-    fit(text(this, x + 18, y + 228, `처치 ${h.kills} · 최고 ${h.bestFloor}층 · 상납 ${h.totalTribute}G` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
+    const skills = h.skills.map((sk) => `${SKILLS[sk.id].name} ${sk.lv}`).join(' · ');
+    if (untouched(h)) {
+      button(this, x + 18, y + 222, 104, 26, '직업 바꾸기', () => this.scene.restart({ messages: this.messages, hire: { slot: state.activeSlot, change: true } }), { size: 12 });
+      fit(text(this, x + 130, y + 228, `스킬 ${skills}`, 12, INK.inkQuiet), w - 236);
+    } else {
+      const extras = [h.rescues ? `위기 지원 ${h.rescues}` : ''].filter(Boolean).join(' · ');
+      fit(text(this, x + 18, y + 228, `스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
+    }
     const others = state.slots.filter(Boolean).length > 1;
     button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? '정말?' : '방출', () => {
       if (!this.releaseArmed) {
@@ -400,7 +454,8 @@ export class HQScene extends Phaser.Scene {
       text(this, cols.lv, ry, `${r.level}`, 12, INK.quiet);
       text(this, cols.floor, ry, `${r.bestFloor}`, 12, INK.quiet);
       text(this, cols.score, ry, `${r.score}`, 12, INK.quiet);
-      text(this, cols.note, ry, r.note, 12, r.status === 'gone' ? INK.faint : c).setOrigin(1, 0);
+      const note = r.cls ? `${CLASSES[r.cls].name} · ${r.note}` : r.note;
+      fit(text(this, cols.note, ry, note, 12, r.status === 'gone' ? INK.faint : c), cols.note - cols.score - 50).setOrigin(1, 0);
     });
     const gone = state.hallOfFame.length;
     if (gone > 0) text(this, x + w - 18, y + 304, `기록으로 남은 헌터 ${gone}명`, 12, INK.faint).setOrigin(1, 0);

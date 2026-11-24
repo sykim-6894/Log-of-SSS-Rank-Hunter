@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { CLASSES } from '../core/classes';
 import type { Hunter } from '../core/hunter';
 
 /**
@@ -92,6 +93,7 @@ export const LOOK_W = 10;
 export const LOOK_H = 12;
 
 export function lookOf(h: Hunter): number {
+  if (h.cls) return CLASSES[h.cls].look;
   return (h.look ?? h.id) % LOOKS.length;
 }
 

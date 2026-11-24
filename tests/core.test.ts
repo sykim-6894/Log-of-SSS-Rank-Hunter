@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { activeHunter, buyItem, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, startFloors, train, trainingCost, worldRankers } from '../src/core/agency';
+import { activeHunter, buyItem, changeClass, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, startFloors, train, trainingCost, worldRankers } from '../src/core/agency';
 import { botAction, stepTowards } from '../src/core/bot';
 import { generateFloor, isWalkable, MAP_W, TALL_MAP_H, TALL_MAP_W, Tile } from '../src/core/dungeon';
-import { combatPower, createHunter as makeHunter, expToNext, gainExp, GRADE_A_POWER, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
+import { combatPower, createHunter as makeHunter, expToNext, gainExp, GRADE_A_POWER, gradeOf, Hunter, levelUp, TRIBUTE_RATE } from '../src/core/hunter';
+import { autoPick, chooseCard, ClassId, CLASS_IDS, CLASSES, classSkills, rollCards, SKILLS, slotCount, SWORD_KILL_HEAL } from '../src/core/classes';
 import { Rng } from '../src/core/rng';
-import { TowerRun } from '../src/core/run';
+import { Monster, TowerRun } from '../src/core/run';
 import { loadGame, SAVE_KEY, saveGame } from '../src/core/save';
 import { bossFor, floorExpScale, MONSTERS, overLevelFactor, recommendedLevel, TOP_FLOOR } from '../src/core/monsters';
 import { BAG_MAX, CURSE_FROM_FLOOR, equipIfBetter, Gear, rollChest, rollGear } from '../src/core/items';
 
-const createHunter = (rng: Rng) => makeHunter(rng, 1);
+const createHunter = (rng: Rng) => makeHunter(rng, 1, [], 'sword');
 
 function reachable(seed: number): boolean {
   const map = generateFloor(new Rng(seed));
@@ -167,8 +168,9 @@ describe('agency economy', () => {
     const state = newGame(new Rng(1));
     const h = activeHunter(state)!;
     expect(trainingCost(h, 'atk')).toBe(20);
+    const atk = h.atk;
     expect(train(state, 'atk')).toBe(true);
-    expect(h.atk).toBe(6);
+    expect(h.atk).toBe(atk + 1);
     expect(state.agent.gold).toBe(80);
     expect(trainingCost(h, 'atk')).toBe(35);
   });
@@ -722,4 +724,204 @@ describe('balance (autoplayer)', () => {
     expect(clearedFirst / runs).toBeGreaterThan(0.5);
     expect(reachedTop / runs).toBeLessThan(0.2);
   }, 30_000); // 200 full autoplayed runs; slower CI machines need more than the 5s default
+});
+
+// ---------- Classes and skills ----------
+
+/** A run on an open 40×25 floor with nothing in it, the hunter in the middle. */
+function arena(cls: ClassId, seed = 1) {
+  const h = makeHunter(new Rng(seed), 1, [], cls);
+  const run = new TowerRun(h, new Rng(seed));
+  for (let y = 1; y < 24; y++) for (let x = 1; x < 39; x++) run.map.tiles[y][x] = Tile.Floor;
+  run.monsters = [];
+  run.chests = [];
+  run.merchant = undefined;
+  run.pos = { x: 20, y: 12 };
+  return run;
+}
+
+function dummy(run: TowerRun, x: number, y: number, hp = 500, atk = 0): Monster {
+  const m: Monster = { id: 100 + x * 50 + y, kind: { ...MONSTERS.goblin, exp: 0 }, x, y, hp, maxHp: hp, atk, def: 0, awake: true };
+  run.monsters.push(m);
+  return m;
+}
+
+describe('classes', () => {
+  it('each class starts with its own stats, look and signature skill', () => {
+    for (const id of CLASS_IDS) {
+      const h = makeHunter(new Rng(1), 1, [], id);
+      expect(h.maxHp).toBe(CLASSES[id].base.hp);
+      expect(h.look).toBe(CLASSES[id].look);
+      expect(h.skills).toEqual([{ id: classSkills(id)[0], lv: 1 }]);
+      expect(gradeOf(combatPower(h))).toBe('F');
+    }
+  });
+
+  it('grows by class; mages gain defense every other level', () => {
+    const k = makeHunter(new Rng(1), 1, [], 'knight');
+    const m = makeHunter(new Rng(1), 1, [], 'mage');
+    levelUp(k);
+    levelUp(m);
+    levelUp(m);
+    expect(k.maxHp).toBe(CLASSES.knight.base.hp + 7);
+    expect(m.def).toBe(CLASSES.mage.base.def + 1);
+    expect(m.picks).toBe(2);
+  });
+
+  it('hiring takes a chosen class and first skill; untouched hunters can change class', () => {
+    const rng = new Rng(3);
+    const state = newGame(rng);
+    const h = hire(state, rng, 1, 'archer', 'trap')!;
+    expect(h.cls).toBe('archer');
+    expect(h.skills[0].id).toBe('trap');
+    const changed = changeClass(state, rng, 1, 'knight', 'block')!;
+    expect(changed.name).toBe(h.name);
+    expect(changed.cls).toBe('knight');
+    changed.bestFloor = 1;
+    expect(changeClass(state, rng, 1, 'mage', 'fireball')).toBeUndefined();
+  });
+
+  it('old saves turn each look into a class', () => {
+    const rng = new Rng(4);
+    const state = newGame(rng);
+    const h = activeHunter(state)!;
+    const old = h as Partial<Hunter>;
+    delete old.cls;
+    delete old.skills;
+    h.look = 2;
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    saveGame(storage, state);
+    const back = activeHunter(loadGame(storage)!)!;
+    expect(back.cls).toBe('archer');
+    expect(back.skills).toEqual([{ id: 'pierce', lv: 1 }]);
+  });
+});
+
+describe('level-up cards', () => {
+  it('offers three cards, no big skills before level 8, and opens slots at 5 and 10', () => {
+    expect([1, 4, 5, 9, 10].map(slotCount)).toEqual([1, 1, 2, 2, 3]);
+    const h = makeHunter(new Rng(1), 1, [], 'sword');
+    for (let seed = 1; seed <= 30; seed++) {
+      const cards = rollCards(h, new Rng(seed));
+      expect(cards).toHaveLength(3);
+      expect(cards.some((c) => c.type !== 'stat' && SKILLS[c.skill].ultimate)).toBe(false);
+    }
+  });
+
+  it('learns, upgrades, and swaps a skill when the slots are full', () => {
+    const h = makeHunter(new Rng(1), 1, [], 'mage', 'fireball');
+    h.picks = 3;
+    h.cards = [{ type: 'upgrade', skill: 'fireball' }, { type: 'learn', skill: 'chain' }, { type: 'stat', stat: 'atk' }];
+    expect(chooseCard(h, 0)).toContain('2단계');
+    expect(h.skills[0].lv).toBe(2);
+    h.cards = [{ type: 'learn', skill: 'chain' }];
+    expect(chooseCard(h, 0)).toBeUndefined(); // one slot at level 1, full: needs a skill to replace
+    expect(chooseCard(h, 0, 0)).toContain('번개 사슬');
+    expect(h.skills).toEqual([{ id: 'chain', lv: 1 }]);
+    h.level = 5;
+    h.cards = [{ type: 'learn', skill: 'blink' }];
+    chooseCard(h, 0);
+    expect(h.skills.map((s) => s.id)).toEqual(['chain', 'blink']);
+    expect(h.picks).toBe(0);
+  });
+
+  it('rival hunters pick their own cards', () => {
+    const h = makeHunter(new Rng(1), 1, [], 'knight');
+    for (let i = 0; i < 12; i++) levelUp(h);
+    autoPick(h, new Rng(2));
+    expect(h.picks).toBe(0);
+    expect(h.skills.length).toBe(3);
+  });
+});
+
+describe('skills in the tower', () => {
+  it('a skill with nothing to hit costs no mana and no turn', () => {
+    const run = arena('sword');
+    const mp = run.hunter.mp;
+    expect(run.act({ type: 'skill', slot: 0 })).toBe(false);
+    expect(run.hunter.mp).toBe(mp);
+    expect(run.turn).toBe(0);
+    expect(run.act({ type: 'skill', slot: 2 })).toBe(false); // empty slot
+  });
+
+  it('spin hits everything around; upgrades make it stronger', () => {
+    const run = arena('sword');
+    const a = dummy(run, 21, 12);
+    const b = dummy(run, 19, 11);
+    const far = dummy(run, 23, 12);
+    run.act({ type: 'skill', slot: 0 });
+    expect(a.hp).toBeLessThan(500);
+    expect(b.hp).toBeLessThan(500);
+    expect(far.hp).toBe(500);
+  });
+
+  it('ice bolt freezes the first enemy in the facing line', () => {
+    const run = arena('mage');
+    run.hunter.skills = [{ id: 'icebolt', lv: 1 }];
+    run.act({ type: 'move', dx: 1, dy: 0 }); // face right
+    const m = dummy(run, 25, 12, 500, 5);
+    run.act({ type: 'skill', slot: 0 });
+    expect(m.hp).toBeLessThan(500);
+    expect(m.stun).toBeGreaterThan(0);
+  });
+
+  it('a trap holds the monster that walks into it', () => {
+    const run = arena('archer');
+    run.hunter.skills = [{ id: 'trap', lv: 1 }];
+    run.act({ type: 'skill', slot: 0 });
+    run.act({ type: 'move', dx: -1, dy: 0 });
+    const m = dummy(run, 22, 12);
+    m.kind.range = undefined;
+    run.act({ type: 'wait' }); // the goblin steps to 21
+    run.act({ type: 'wait' }); // and onto the trap at 20, next to the hunter at 19
+    expect(m.hp).toBeLessThan(500);
+    expect(run.traps).toHaveLength(0);
+  });
+
+  it('shield block stops hits and strikes back', () => {
+    const run = arena('knight');
+    const m = dummy(run, 21, 12, 500, 50);
+    run.act({ type: 'skill', slot: 0 });
+    const hp = run.hunter.hp;
+    run.act({ type: 'wait' });
+    expect(run.hunter.hp).toBe(hp);
+    expect(m.hp).toBeLessThan(500);
+  });
+
+  it('the archer shoots from three tiles, sometimes missing', () => {
+    let hits = 0;
+    let misses = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const run = arena('archer', seed);
+      const m = dummy(run, 23, 12);
+      run.act({ type: 'move', dx: 1, dy: 0 });
+      expect(run.pos.x).toBe(20); // shot instead of walking
+      if (m.hp < 500) hits++;
+      else misses++;
+    }
+    expect(hits).toBeGreaterThan(misses);
+    expect(misses).toBeGreaterThan(0);
+  });
+
+  it('passives: sword heals on a kill, mage regains mana faster, knight hardens when low', () => {
+    const sword = arena('sword');
+    sword.hunter.hp = 10;
+    dummy(sword, 21, 12, 1);
+    sword.act({ type: 'move', dx: 1, dy: 0 });
+    expect(sword.hunter.hp).toBe(10 + SWORD_KILL_HEAL);
+
+    const mage = arena('mage');
+    mage.hunter.mp = 0;
+    for (let i = 0; i < 4; i++) mage.act({ type: 'wait' });
+    expect(mage.hunter.mp).toBe(2);
+
+    const knight = arena('knight');
+    knight.hunter.def = 0;
+    knight.hunter.hp = 5;
+    knight.hunter.maxHp = 100;
+    dummy(knight, 21, 12, 500, 3);
+    knight.act({ type: 'wait' });
+    expect(knight.hunter.hp).toBeGreaterThanOrEqual(3); // 3-5 damage less 3 defense from the passive
+  });
 });
