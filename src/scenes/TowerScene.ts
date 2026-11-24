@@ -6,6 +6,7 @@ import { hallOfFameScore } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
+import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
@@ -47,6 +48,8 @@ export class TowerScene extends Phaser.Scene {
     oy: number;
     dir: { dx: number; dy: number } | null;
     used: boolean;
+    /** Held on a cross button rather than a floating stick. */
+    fixed?: boolean;
     /** Held walking waits until this time (a short pause when an enemy shows up). */
     pauseUntil: number;
     gfx: Phaser.GameObjects.Graphics;
@@ -188,6 +191,11 @@ export class TowerScene extends Phaser.Scene {
 
   /** Where a touch may start the joystick: the map, or (portrait) the left of the thumb area. */
   private joyArea(p: Phaser.Input.Pointer) {
+    if (moveControl() === 'dpad') {
+      // Fixed cross buttons: the map only takes taps (one step toward the tapped tile).
+      if (!PORTRAIT) return p.y < HUD_Y && !this.inDpad(p);
+      return p.y >= P_TOP_H && p.y < P_LOG_Y;
+    }
     if (!PORTRAIT) return p.y < HUD_Y;
     if (p.y >= P_TOP_H && p.y < P_LOG_Y) return true;
     return p.y >= P_CTL_Y && p.x < P_BTN_X - 6;
@@ -208,7 +216,7 @@ export class TowerScene extends Phaser.Scene {
 
   private joyMove(p: Phaser.Input.Pointer) {
     const joy = this.joy;
-    if (!joy || p.id !== joy.id) return;
+    if (!joy || p.id !== joy.id || joy.fixed) return;
     let vx = p.x - joy.ox;
     let vy = p.y - joy.oy;
     const len = Math.hypot(vx, vy);
@@ -289,6 +297,65 @@ export class TowerScene extends Phaser.Scene {
     g.lineStyle(3, 0xe8d5b0, 0.55).strokeCircle(joy.ox, joy.oy, JOY_RADIUS + 8);
     g.fillStyle(0xe8d5b0, 0.7).fillCircle(kx, ky, 18);
     g.lineStyle(2, 0x2a221c, 0.8).strokeCircle(kx, ky, 18);
+  }
+
+  /** Where the cross buttons sit: the thumb area (upright), or over the map's bottom left on a wide touch screen. */
+  private dpadSpot(): { cx: number; cy: number; size: number } | undefined {
+    if (moveControl() !== 'dpad') return undefined;
+    if (PORTRAIT) return { cx: P_BTN_X / 2, cy: P_CTL_Y + 100, size: 50 };
+    if (!this.sys.game.device.input.touch) return undefined;
+    return { cx: 96, cy: HUD_Y - 96, size: 46 };
+  }
+
+  private inDpad(p: Phaser.Input.Pointer): boolean {
+    const d = this.dpadSpot();
+    if (!d) return false;
+    const r = d.size * 1.5 + 6;
+    return Math.abs(p.x - d.cx) <= r && Math.abs(p.y - d.cy) <= r;
+  }
+
+  /** Four fixed buttons in a cross. Hold one to keep walking that way. */
+  private drawDpad(): Phaser.GameObjects.GameObject[] {
+    const d = this.dpadSpot();
+    if (!d) return [];
+    const { cx, cy, size: s } = d;
+    const gap = 4;
+    const g = this.add.graphics().setDepth(PORTRAIT ? 0 : 20);
+    const alpha = PORTRAIT ? 1 : 0.55;
+    const out: Phaser.GameObjects.GameObject[] = [g];
+    g.fillStyle(PALETTE.dim, alpha * 0.6).fillRect(cx - s / 2, cy - s / 2, s, s);
+    const dirs: Array<[number, number]> = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    for (const [dx, dy] of dirs) {
+      const bx = cx + dx * (s + gap) - s / 2;
+      const by = cy + dy * (s + gap) - s / 2;
+      g.fillStyle(0x1f1915, alpha).fillRect(bx, by + 4, s, s - 4);
+      g.fillStyle(0x3a2f27, alpha).fillRect(bx, by, s, s - 4);
+      g.fillStyle(0xffffff, 0.1 * alpha).fillRect(bx + 2, by + 2, s - 4, 2);
+      // Arrow
+      const ax = bx + s / 2;
+      const ay = by + (s - 4) / 2;
+      const a = s * 0.22;
+      g.fillStyle(0xe8d5b0, 0.9 * alpha).fillTriangle(
+        ax + dx * a, ay + dy * a,
+        ax - dx * a * 0.6 + dy * a, ay - dy * a * 0.6 + dx * a,
+        ax - dx * a * 0.6 - dy * a, ay - dy * a * 0.6 - dx * a,
+      );
+      const zone = this.add.zone(bx + s / 2, by + s / 2, s + gap, s + gap).setInteractive();
+      zone.on('pointerdown', (p: Phaser.Input.Pointer) => this.dpadPress(p, dx, dy));
+      out.push(zone);
+    }
+    return out;
+  }
+
+  private dpadPress(p: Phaser.Input.Pointer, dx: number, dy: number) {
+    if (this.overlay.length) return;
+    this.joyClear();
+    const gfx = this.ui(this.add.graphics());
+    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: { dx, dy }, used: true, fixed: true, pauseUntil: 0, gfx, timer: null };
+    this.joyStep();
+    if (this.joy && !this.joy.timer) {
+      this.joy.timer = this.time.addEvent({ delay: JOY_REPEAT_MS, loop: true, callback: () => this.joyStep() });
+    }
   }
 
   private joyClear() {
@@ -515,6 +582,7 @@ export class TowerScene extends Phaser.Scene {
     );
 
     this.skillButtons(700, HUD_Y + 12, 244, 46, true).forEach(k);
+    this.drawDpad().forEach(k);
     k(button(this, 700, HUD_Y + 64, 120, 44, `가방 B`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
     k(button(this, 828, HUD_Y + 64, 116, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
@@ -559,9 +627,13 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, P_CTL_Y, GW, 2);
     const cx = P_BTN_X / 2;
     const cy = P_CTL_Y + 96;
-    g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
-    g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
-    k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
+    if (moveControl() === 'dpad') {
+      this.drawDpad().forEach(k);
+    } else {
+      g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
+      g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
+      k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
+    }
     const bw = GW - 14 - P_BTN_X;
     this.skillButtons(P_BTN_X, P_CTL_Y + 18, bw, 66, false).forEach(k);
     k(button(this, P_BTN_X, P_CTL_Y + 94, (bw - 6) / 2, 52, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));

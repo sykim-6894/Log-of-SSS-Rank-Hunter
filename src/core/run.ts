@@ -29,7 +29,7 @@ import {
 import { Rng } from './rng';
 import {
   ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAGE_SKILL_POWER, MAX_SKILL_LV,
-  ClassId, OwnedSkill, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
+  ClassId, OwnedSkill, SkillId, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
 
 export interface Monster {
@@ -73,6 +73,9 @@ export type Action =
   | { type: 'wait' }
   | { type: 'skill'; slot?: number }
   | { type: 'use'; item: ConsumableKind };
+
+/** Aimed attacks that look for a target in line, and how far. Blink only moves, so it keeps the facing. */
+export const AIM_REACH: Partial<Record<SkillId, number>> = { charge: 3, icebolt: 5, pierce: 6 };
 
 export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'trading' | 'dead' | 'returned';
 
@@ -1025,6 +1028,23 @@ export class TowerRun {
   }
 
   /** Monsters along a straight line from the hunter, up to the first wall. */
+  /**
+   * Turns the hunter toward the nearest enemy standing in a straight line within reach,
+   * unless one is already in line the way they face.
+   */
+  aim(reach: number) {
+    const target = (dx: number, dy: number) => this.inLine(dx, dy, reach).find((m) => this.canSee(m) && !m.kind.stalker);
+    if (target(this.facing.x, this.facing.y)) return;
+    let best: { dir: Point; dist: number } | undefined;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const m = target(dx, dy);
+      if (!m) continue;
+      const dist = TowerRun.cheb(m, this.pos);
+      if (!best || dist < best.dist) best = { dir: { x: dx, y: dy }, dist };
+    }
+    if (best) this.facing = best.dir;
+  }
+
   private inLine(dx: number, dy: number, len: number): Monster[] {
     const out: Monster[] = [];
     for (let i = 1; i <= len; i++) {
@@ -1100,6 +1120,9 @@ export class TowerRun {
     const max = s.lv >= MAX_SKILL_LV;
     const p = (1 + SKILL_LV_POWER * (s.lv - 1)) * (h.skillPower / 1.5) * (h.cls === 'mage' ? MAGE_SKILL_POWER : 1);
     const name = SKILLS[s.id].name;
+    // Straight-line attacks turn toward an enemy in line if none is in front.
+    const reach = AIM_REACH[s.id];
+    if (reach) this.aim(reach);
     const none = (why = '주변에 적이 없다.') => {
       this.say(`${name}: ${why}`);
       return false;
