@@ -431,9 +431,13 @@ export class HQScene extends Phaser.Scene {
 
     dots(this, x + 18, y + 136, w - 36, PALETTE.paperLine);
     text(this, x + 18, y + 146, `체력 ${h.hp}/${h.maxHp}`, 12, INK.ink);
-    bar(this, x + 120, y + 148, w - 290, 8, h.hp / h.maxHp, PALETTE.hp);
+    bar(this, x + 120, y + 148, w - 336, 8, h.hp / h.maxHp, PALETTE.hp);
+    // Regeneration per turn in the tower, next to each bar.
+    const per = (v: number) => `+${Number((v ?? 0).toFixed(2))}/턴`;
+    text(this, x + w - 210, y + 146, per(h.hpRegen), 12, INK.inkQuiet);
+    text(this, x + w - 210, y + 166, per(h.mpRegen), 12, INK.inkQuiet);
     text(this, x + 18, y + 166, `마나 ${h.mp}/${h.maxMp}`, 12, INK.ink);
-    bar(this, x + 120, y + 168, w - 290, 8, h.mp / h.maxMp, PALETTE.mp);
+    bar(this, x + 120, y + 168, w - 336, 8, h.mp / h.maxMp, PALETTE.mp);
     const sx = x + w - 144;
     text(this, sx, y + 146, `공격 ${h.atk}`, 12, INK.ink);
     text(this, sx, y + 166, `방어 ${h.def}`, 12, INK.ink);

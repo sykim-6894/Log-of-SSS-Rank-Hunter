@@ -58,6 +58,9 @@ export interface Hunter {
   skills: OwnedSkill[];
   /** Level-up cards still to pick. */
   picks: number;
+  /** Health and mana won back each turn in a run. Grows a little every level. */
+  hpRegen: number;
+  mpRegen: number;
   /** The three cards on offer for the next pick, once rolled. */
   cards?: LevelCard[];
 }
@@ -106,6 +109,8 @@ export function createHunter(
     cls,
     skills: [{ id: firstSkill, lv: 1 }],
     picks: 0,
+    hpRegen: c.regen.hp,
+    mpRegen: c.regen.mp,
   };
 }
 
@@ -187,6 +192,21 @@ export function levelUp(h: Hunter) {
   h.hp = h.maxHp;
   h.mp = h.maxMp;
   h.picks = (h.picks ?? 0) + 1;
+  h.hpRegen = roundRegen((h.hpRegen ?? 0) + REGEN_GROWTH.hp);
+  h.mpRegen = roundRegen((h.mpRegen ?? 0) + REGEN_GROWTH.mp);
+}
+
+/** Every level adds this much health and mana regeneration per turn. */
+export const REGEN_GROWTH = { hp: 0.02, mp: 0.01 };
+
+function roundRegen(v: number): number {
+  return Math.round(v * 1000) / 1000;
+}
+
+/** Regeneration a hunter of this class and level should have: for saves from before it existed. */
+export function baseRegen(cls: ClassId, level: number): { hp: number; mp: number } {
+  const r = CLASSES[cls].regen;
+  return { hp: roundRegen(r.hp + REGEN_GROWTH.hp * (level - 1)), mp: roundRegen(r.mp + REGEN_GROWTH.mp * (level - 1)) };
 }
 
 export function hallOfFameScore(h: Hunter): number {

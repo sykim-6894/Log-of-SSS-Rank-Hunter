@@ -2,7 +2,10 @@ import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth,
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateDanger, gateFloors, gateName, gatePool } from './gates';
-import { bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, TOP_FLOOR } from './monsters';
+import {
+  bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
+  stalkerKind, TOP_FLOOR, TRAIT_RULES,
+} from './monsters';
 import {
   addToBag,
   ChestContent,
@@ -116,8 +119,6 @@ export interface Merchant {
 }
 
 export const SIGHT = 7;
-const MP_REGEN_EVERY = 4;
-const MAGE_MP_REGEN_EVERY = 2;
 
 /** Things that happened during a turn, for the screen to show and play sounds for. */
 export type RunEvent =
@@ -145,7 +146,13 @@ export type RunEvent =
   | { type: 'death' }
   | { type: 'floor' }
   /** The gate's master just fell: the gate is cleared. */
-  | { type: 'gateClear' };
+  | { type: 'gateClear' }
+  /** A monster healed itself or was healed. */
+  | { type: 'monsterHeal'; x: number; y: number; amount: number }
+  /** The hunter's hit did nothing (the abyss stalker). */
+  | { type: 'immune'; x: number; y: number }
+  /** An abyss stalker has come for the hunter. */
+  | { type: 'stalker'; nth: number };
 
 /** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
 export interface RunSnapshot {
@@ -167,6 +174,9 @@ export interface RunSnapshot {
   encounters: EncounterOutcome[];
   nextId: number;
   met: number[];
+  floorTurn?: number;
+  stalkers?: number;
+  regenAcc?: { hp: number; mp: number };
   facing?: Point;
   buffs?: Buffs;
   traps?: Trap[];
@@ -203,6 +213,12 @@ export class TowerRun {
   facing: Point = { x: 1, y: 0 };
   buffs: Buffs = {};
   traps: Trap[] = [];
+  /** Turns spent on this floor: new monsters wander in, and in the end the stalker comes. */
+  floorTurn = 0;
+  /** Abyss stalkers already on this floor. */
+  stalkers = 0;
+  /** Fractions of health and mana regeneration carried to the next turn. */
+  private regenAcc = { hp: 0, mp: 0 };
   /** Mana handed back by the skill just used (a finishing smash at upgrade 5). */
   private refund = 0;
   /** Set when this run is a gate dungeon rather than the tower. Floors then count from the gate's entrance. */
@@ -250,6 +266,9 @@ export class TowerRun {
       facing: this.facing,
       buffs: this.buffs,
       traps: this.traps,
+      floorTurn: this.floorTurn,
+      stalkers: this.stalkers,
+      regenAcc: this.regenAcc,
       gate: this.gate,
     };
   }
@@ -283,6 +302,9 @@ export class TowerRun {
     run.facing = s.facing ?? { x: 1, y: 0 };
     run.buffs = s.buffs ?? {};
     run.traps = s.traps ?? [];
+    run.floorTurn = s.floorTurn ?? 0;
+    run.stalkers = s.stalkers ?? 0;
+    run.regenAcc = s.regenAcc ?? { hp: 0, mp: 0 };
     run.gate = s.gate;
     return run;
   }
@@ -332,6 +354,8 @@ export class TowerRun {
     this.seen = Array.from({ length: mapHeight(this.map) }, () => Array<boolean>(mapWidth(this.map)).fill(false));
     this.status = 'playing';
     this.traps = [];
+    this.floorTurn = 0;
+    this.stalkers = 0;
     if (!this.gate) this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
 
     const danger = this.danger;
@@ -343,7 +367,9 @@ export class TowerRun {
       const x = this.rng.int(room.x, room.x + room.w - 1);
       const y = this.rng.int(room.y, room.y + room.h - 1);
       if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) continue;
-      this.spawn(this.rng.pick(pool), x, y, danger);
+      const kind = this.rng.pick(pool);
+      this.spawn(kind, x, y, danger);
+      if (kind.trait === 'pack') this.spawnPack(kind, x, y, danger);
     }
 
     this.maybeSpawnRival(danger);
@@ -597,6 +623,148 @@ export class TowerRun {
     return !!this.monsterAt(x, y) || (this.pos.x === x && this.pos.y === y) || this.merchantAt(x, y);
   }
 
+  /** Whether the hunter can see this monster: in sight, and close enough if it hides in shadow. */
+  canSee(m: Monster): boolean {
+    if (!this.isVisible(m.x, m.y)) return false;
+    if (m.kind.trait !== 'stealth') return true;
+    return TowerRun.cheb(m, this.pos) <= TRAIT_RULES.stealthRange;
+  }
+
+  /** Turns until the next abyss stalker comes to this floor. */
+  get stalkerIn(): number {
+    return Math.max(0, STALKER_FIRST + this.stalkers * STALKER_NEXT - this.floorTurn);
+  }
+
+  /** One or two more of a pack kind on free tiles next to the first. */
+  private spawnPack(kind: MonsterKind, x: number, y: number, danger: number) {
+    const extra = this.rng.int(1, 2);
+    let added = 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      if (added >= extra) break;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!isWalkable(this.map, nx, ny) || this.blocked(nx, ny) || this.map.tiles[ny][nx] === Tile.Stairs) continue;
+      this.spawn(kind, nx, ny, danger);
+      added += 1;
+    }
+  }
+
+  /** A pack member woke: its kin nearby wake with it. */
+  private wake(m: Monster) {
+    if (m.awake) return;
+    m.awake = true;
+    if (m.kind.trait !== 'pack') return;
+    for (const o of this.monsters) {
+      if (!o.awake && o.kind.id === m.kind.id && TowerRun.cheb(o, m) <= TRAIT_RULES.packWake) o.awake = true;
+    }
+  }
+
+  /** The floor clock: new monsters wander in now and then, and the stalker comes for those who linger. */
+  private tickFloor() {
+    this.floorTurn += 1;
+    const cap = 6 + this.danger;
+    if (this.floorTurn % RESPAWN_EVERY === 0 && this.monsters.filter((m) => !m.kind.stalker).length < cap) {
+      const spot = this.hiddenSpot(0);
+      if (spot) {
+        const kind = this.rng.pick(this.pool);
+        this.spawn(kind, spot.x, spot.y, this.danger);
+        this.say('어디선가 새로운 기척이 느껴진다.');
+      }
+    }
+    if (this.stalkerIn === 0) {
+      const spot = this.hiddenSpot(12) ?? this.hiddenSpot(0);
+      this.stalkers += 1;
+      if (spot) {
+        // Each one hits like a monster several floors further up.
+        this.spawn(stalkerKind(this.stalkers), spot.x, spot.y, this.danger + 4 + 2 * this.stalkers);
+        const st = this.monsters[this.monsters.length - 1];
+        st.awake = true;
+        this.say(`${this.stalkers}차 던전 붕괴! ${st.kind.name}가 나타났다. 쓰러뜨릴 수 없다. 서둘러 이 층을 떠나라!`);
+        this.events.push({ type: 'stalker', nth: this.stalkers });
+      }
+    }
+  }
+
+  /** A free floor tile out of the hunter's sight, at least minDist tiles away. */
+  private hiddenSpot(minDist: number): Point | undefined {
+    for (let tries = 0; tries < 40; tries++) {
+      const p = this.randomFreeSpot();
+      if (!p) continue;
+      if (this.isVisible(p.x, p.y) || TowerRun.cheb(p, this.pos) < minDist) continue;
+      return p;
+    }
+    return undefined;
+  }
+
+  /** Steps along the shortest path to the hunter, around walls. */
+  private chaseStep(m: Monster) {
+    const W = mapWidth(this.map);
+    const H = mapHeight(this.map);
+    const dist = new Int32Array(W * H).fill(-1);
+    const q: number[] = [this.pos.y * W + this.pos.x];
+    dist[q[0]] = 0;
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i];
+      const cx = c % W;
+      const cy = (c - cx) / W;
+      if (cx === m.x && cy === m.y) break;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (!isWalkable(this.map, nx, ny) || dist[ny * W + nx] >= 0) continue;
+        dist[ny * W + nx] = dist[c] + 1;
+        q.push(ny * W + nx);
+      }
+    }
+    const here = dist[m.y * W + m.x];
+    if (here < 0) return this.stepToward(m);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = m.x + dx;
+      const ny = m.y + dy;
+      if (!isWalkable(this.map, nx, ny) || this.blocked(nx, ny)) continue;
+      const d = dist[ny * W + nx];
+      if (d >= 0 && d < here) {
+        m.x = nx;
+        m.y = ny;
+        return;
+      }
+    }
+  }
+
+  /** Backs away from the hunter if there is room. Returns true if it moved. */
+  private stepAway(m: Monster): boolean {
+    const d = (x: number, y: number) => Math.abs(this.pos.x - x) + Math.abs(this.pos.y - y);
+    let best: Point | undefined;
+    let bestD = d(m.x, m.y);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = m.x + dx;
+      const ny = m.y + dy;
+      if (!isWalkable(this.map, nx, ny) || this.blocked(nx, ny)) continue;
+      if (d(nx, ny) > bestD) {
+        bestD = d(nx, ny);
+        best = { x: nx, y: ny };
+      }
+    }
+    if (!best) return false;
+    m.x = best.x;
+    m.y = best.y;
+    return true;
+  }
+
+  /** A shaman's turn to mend a hurt ally nearby. Returns true if it healed instead of attacking. */
+  private healAlly(m: Monster): boolean {
+    if (this.turn % TRAIT_RULES.healEvery !== 0) return false;
+    const hurt = this.monsters.find(
+      (o) => o !== m && !o.kind.stalker && !o.hunter && o.hp < o.maxHp * 0.7 && Math.abs(o.x - m.x) + Math.abs(o.y - m.y) <= TRAIT_RULES.healRange,
+    );
+    if (!hurt) return false;
+    const amount = Math.min(hurt.maxHp - hurt.hp, Math.ceil(hurt.maxHp * TRAIT_RULES.healAmount));
+    hurt.hp += amount;
+    this.events.push({ type: 'monsterHeal', x: hurt.x, y: hurt.y, amount });
+    if (this.canSee(m)) this.say(`${m.kind.name}이(가) ${hurt.kind.name}을(를) 치유했다. (+${amount})`);
+    return true;
+  }
+
   isVisible(x: number, y: number): boolean {
     const dx = x - this.pos.x;
     const dy = y - this.pos.y;
@@ -626,10 +794,25 @@ export class TowerRun {
     this.turn += 1;
     if (this.guardTurns > 0) this.guardTurns -= 1;
     this.tickBuffs();
-    const regen = this.hunter.cls === 'mage' ? MAGE_MP_REGEN_EVERY : MP_REGEN_EVERY;
-    if (this.turn % regen === 0) this.hunter.mp = Math.min(this.hunter.maxMp, this.hunter.mp + 1);
+    this.regenerate();
+    if (this.status === 'playing' || this.status === 'onStairs') this.tickFloor();
     this.updateSight();
     return true;
+  }
+
+  /** The hunter's own health and mana regeneration, a fraction per turn. */
+  private regenerate() {
+    const h = this.hunter;
+    if (h.hp <= 0) return;
+    const acc = this.regenAcc;
+    acc.hp += h.hpRegen ?? 0;
+    acc.mp += h.mpRegen ?? 0;
+    const hp = Math.floor(acc.hp);
+    const mp = Math.floor(acc.mp);
+    acc.hp -= hp;
+    acc.mp -= mp;
+    h.hp = Math.min(h.maxHp, h.hp + hp);
+    h.mp = Math.min(h.maxMp, h.mp + mp);
   }
 
   private tickBuffs() {
@@ -669,7 +852,9 @@ export class TowerRun {
         }
         const target = this.monsterAt(nx, ny);
         if (target) {
-          this.hitMonster(target, this.damage(this.atkNow(), target.def));
+          const dmg = this.damage(this.atkNow(), target.def);
+          this.hitMonster(target, dmg);
+          if (target.kind.trait === 'thorns' && !target.kind.stalker) this.thorns(target, dmg);
           return true;
         }
         if (h.cls === 'archer' && this.archerShot(action.dx, action.dy)) return true;
@@ -693,6 +878,16 @@ export class TowerRun {
         this.status = 'onStairs';
       }
     }
+  }
+
+  /** Spikes: part of a melee hit comes back. Never kills on its own. */
+  private thorns(m: Monster, dealt: number) {
+    const h = this.hunter;
+    const back = Math.min(h.hp - 1, Math.max(1, Math.ceil(dealt * TRAIT_RULES.thornsShare)));
+    if (back <= 0 || this.guardTurns > 0) return;
+    h.hp -= back;
+    this.events.push({ type: 'hurt', amount: back });
+    this.say(`${m.kind.name}의 가시에 찔렸다. ${back} 피해.`);
   }
 
   private atkNow(): number {
@@ -721,7 +916,7 @@ export class TowerRun {
   /** Monsters in sight within `range` tiles, nearest first. */
   private near(range: number, from: Point = this.pos): Monster[] {
     return this.monsters
-      .filter((m) => this.isVisible(m.x, m.y) && TowerRun.cheb(m, from) <= range)
+      .filter((m) => this.canSee(m) && TowerRun.cheb(m, from) <= range)
       .sort((a, b) => TowerRun.cheb(a, from) - TowerRun.cheb(b, from));
   }
 
@@ -1047,8 +1242,13 @@ export class TowerRun {
   }
 
   private hitMonster(m: Monster, dmg: number) {
+    if (m.kind.stalker) {
+      this.events.push({ type: 'immune', x: m.x, y: m.y });
+      this.say(`${m.kind.name}에게는 어떤 공격도 통하지 않는다!`);
+      return;
+    }
     m.hp -= dmg;
-    m.awake = true;
+    this.wake(m);
     this.events.push({ type: 'hit', x: m.x, y: m.y, amount: dmg });
     if (m.hp > 0) {
       this.say(`${m.kind.name}에게 ${dmg} 피해.`);
@@ -1129,15 +1329,22 @@ export class TowerRun {
         this.hitMonster(m, dmg);
         if (!this.alive(m)) continue;
       }
+      if (m.kind.trait === 'regen' && m.hp < m.maxHp) {
+        const amount = Math.min(m.maxHp - m.hp, Math.max(1, Math.round(m.maxHp * TRAIT_RULES.regenPerTurn)));
+        m.hp += amount;
+        this.events.push({ type: 'monsterHeal', x: m.x, y: m.y, amount });
+      }
       if (m.stun) {
         m.stun -= 1;
         continue;
       }
       const dx = this.pos.x - m.x;
       const dy = this.pos.y - m.y;
-      if (!m.awake && dx * dx + dy * dy <= this.sight * this.sight) m.awake = true;
+      if (!m.awake && dx * dx + dy * dy <= this.sight * this.sight) this.wake(m);
       if (!m.awake) continue;
+      if (m.kind.trait === 'healer' && this.healAlly(m)) continue;
       const adjacent = Math.abs(dx) + Math.abs(dy) === 1;
+      if (adjacent && m.kind.trait === 'kite' && !m.root && this.rng.chance(TRAIT_RULES.kiteChance) && this.stepAway(m)) continue;
       const shoots = !adjacent && this.canShoot(m);
       if (adjacent || shoots) {
         if (shoots) this.events.push({ type: 'shot', x: m.x, y: m.y });
@@ -1148,8 +1355,14 @@ export class TowerRun {
         m.root -= 1;
         continue;
       }
-      this.stepToward(m);
+      if (m.kind.stalker) this.chaseStep(m);
+      else this.stepToward(m);
       this.checkTrap(m);
+      // Swift monsters take a second step if they still can't reach.
+      if (m.kind.trait === 'swift' && this.alive(m) && !m.root && Math.abs(this.pos.x - m.x) + Math.abs(this.pos.y - m.y) > 1) {
+        this.stepToward(m);
+        this.checkTrap(m);
+      }
     }
   }
 
@@ -1172,6 +1385,10 @@ export class TowerRun {
     if (m.hunter && m.hunter.skills?.length && this.turn % 3 === 0) {
       mult = 1.6;
       label = SKILLS[m.hunter.skills[0].id].name;
+    }
+    if (m.kind.trait === 'rage' && m.hp <= m.maxHp * TRAIT_RULES.rageAt) {
+      mult *= TRAIT_RULES.rageMult;
+      label = '광폭 공격';
     }
     if (this.guardTurns > 0) {
       this.say(`${m.kind.name}의 ${label}! 무적이라 피해가 없다.`);

@@ -39,7 +39,7 @@ export function botAction(run: TowerRun): Action {
   const adjacent = run.monsters.filter((m) => Math.abs(m.x - run.pos.x) <= 1 && Math.abs(m.y - run.pos.y) <= 1);
   if (adjacent.length >= 2 && h.skills[0] && h.mp >= skillCost(h.skills[0])) return { type: 'skill', slot: 0 };
   const visible = run.monsters
-    .filter((m) => run.isVisible(m.x, m.y))
+    .filter((m) => run.canSee(m) && !m.kind.stalker)
     .sort((a, b) => Math.abs(a.x - run.pos.x) + Math.abs(a.y - run.pos.y) - (Math.abs(b.x - run.pos.x) + Math.abs(b.y - run.pos.y)));
   const goal = visible[0] ?? (run.bossAlive ? run.monsters.find((m) => m.kind.boss) : undefined) ?? run.map.stairs;
   return stepTowards(run, goal) ?? { type: 'wait' };
