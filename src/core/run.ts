@@ -9,6 +9,7 @@ import {
   CONSUMABLES,
   ConsumableKind,
   CURSES,
+  CurseKind,
   describeGear,
   equipIfBetter,
   Gear,
@@ -131,7 +132,13 @@ export type RunEvent =
   | { type: 'heal'; amount: number }
   | { type: 'mana'; amount: number }
   | { type: 'chest'; cursed: boolean }
-  | { type: 'gear' }
+  /** Gear picked up: worn if better (old is what it replaced), otherwise left behind. */
+  | { type: 'gear'; gear: Gear; equipped: boolean; old?: Gear }
+  /** A potion or scroll found; got is false when the bag had no room. */
+  | { type: 'loot'; item: ConsumableKind; got: boolean; count: number }
+  | { type: 'gold'; amount: number }
+  /** A cursed chest, with what it took in numbers. */
+  | { type: 'curse'; curse: CurseKind; detail: string }
   | { type: 'buy' }
   | { type: 'levelup' }
   | { type: 'rescue' }
@@ -500,10 +507,12 @@ export class TowerRun {
     switch (c.type) {
       case 'gold':
         this.runGold += c.amount;
+        this.events.push({ type: 'gold', amount: c.amount });
         this.say(`보물상자: ${c.amount}G!`);
         return;
       case 'consumable': {
         const got = addToBag(h, c.kind);
+        this.events.push({ type: 'loot', item: c.kind, got: got > 0, count: h.bag[c.kind] });
         this.say(got ? `보물상자: ${CONSUMABLES[c.kind].name}!` : `보물상자: ${CONSUMABLES[c.kind].name}... 가방이 가득 차서 두고 왔다.`);
         return;
       }
@@ -513,17 +522,35 @@ export class TowerRun {
         return;
       case 'curse':
         this.say(`저주받은 상자였다! ${CURSES[c.curse]}`);
-        if (c.curse === 'drain') h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
-        if (c.curse === 'mana') h.mp = 0;
-        if (c.curse === 'greed') this.runGold = Math.floor(this.runGold * 0.7);
-        if (c.curse === 'ambush') this.ambush();
+        let detail = '';
+        if (c.curse === 'drain') {
+          const before = h.hp;
+          h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
+          detail = `체력 -${before - h.hp}  (${before} → ${h.hp})`;
+        }
+        if (c.curse === 'mana') {
+          detail = `마나 -${h.mp}  (${h.mp} → 0)`;
+          h.mp = 0;
+        }
+        if (c.curse === 'greed') {
+          const before = this.runGold;
+          this.runGold = Math.floor(this.runGold * 0.7);
+          detail = `이번 수입 -${before - this.runGold}G  (${before}G → ${this.runGold}G)`;
+        }
+        if (c.curse === 'ambush') {
+          const before = this.monsters.length;
+          this.ambush();
+          detail = `몬스터 ${this.monsters.length - before}마리가 바로 옆에 나타났다`;
+        }
+        this.events.push({ type: 'curse', curse: c.curse, detail });
         return;
     }
   }
 
   private takeGear(g: Gear) {
+    const old = this.hunter.gear[g.slot];
     const r = equipIfBetter(this.hunter, g);
-    if (r.equipped) this.events.push({ type: 'gear' });
+    this.events.push({ type: 'gear', gear: g, equipped: r.equipped, old });
     const slot = GEAR_SLOT_NAMES[g.slot];
     if (r.equipped) {
       this.say(`${slot} 장착: ${g.name} (${describeGear(g)})` + (r.discarded ? `. ${r.discarded.name}은(는) 버렸다.` : ''));

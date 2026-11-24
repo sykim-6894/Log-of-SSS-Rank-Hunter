@@ -22,7 +22,7 @@ const LAYOUT: Array<{ slot: GearSlot; col: 0 | 1; row: number; to: [number, numb
 ];
 
 /** Tier colors, from plain to rare. */
-const TIER_COLORS = ['#c9b79a', '#c9b79a', '#7fd6c9', '#7fd6c9', '#e5ae46', '#e5ae46', '#d79bff'];
+export const TIER_COLORS = ['#c9b79a', '#c9b79a', '#7fd6c9', '#7fd6c9', '#e5ae46', '#e5ae46', '#d79bff'];
 
 function fit(t: Phaser.GameObjects.Text, width: number) {
   let v = t.text;

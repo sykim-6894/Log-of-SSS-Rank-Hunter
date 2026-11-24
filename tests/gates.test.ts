@@ -189,3 +189,41 @@ describe('rival records', () => {
     expect(loadGame(storage)!.rival.roster[0].bestFloor).toBe(TOP_FLOOR);
   });
 });
+
+describe('chest feedback', () => {
+  it('reports what a curse took, in numbers', () => {
+    const h = hunter();
+    const run = new TowerRun(h, new Rng(1));
+    run.drainEvents();
+    h.hp = h.maxHp;
+    run.applyChest({ type: 'curse', curse: 'drain' });
+    const e = run.drainEvents().find((x) => x.type === 'curse');
+    expect(e).toMatchObject({ type: 'curse', curse: 'drain', detail: `체력 -${h.maxHp - h.hp}  (${h.maxHp} → ${h.hp})` });
+  });
+
+  it('reports gear worn with what it replaced, and gear left behind', () => {
+    const h = hunter();
+    const run = new TowerRun(h, new Rng(1));
+    const weak = { slot: 'weapon' as const, name: 'a', tier: 1, atk: 1, def: 0, hp: 0, mp: 0 };
+    const strong = { ...weak, name: 'b', tier: 3, atk: 4 };
+    run.applyChest({ type: 'gear', gear: weak });
+    run.drainEvents();
+    run.applyChest({ type: 'gear', gear: strong });
+    expect(run.drainEvents().find((x) => x.type === 'gear')).toMatchObject({ equipped: true, gear: strong, old: weak });
+    run.applyChest({ type: 'gear', gear: weak });
+    expect(run.drainEvents().find((x) => x.type === 'gear')).toMatchObject({ equipped: false, old: strong });
+  });
+
+  it('reports potions found and whether the bag had room', () => {
+    const h = hunter();
+    const run = new TowerRun(h, new Rng(1));
+    h.bag.mp = 4;
+    run.applyChest({ type: 'consumable', kind: 'mp' });
+    run.applyChest({ type: 'consumable', kind: 'mp' });
+    const loot = run.drainEvents().filter((x) => x.type === 'loot');
+    expect(loot).toEqual([
+      { type: 'loot', item: 'mp', got: true, count: 5 },
+      { type: 'loot', item: 'mp', got: false, count: 5 },
+    ]);
+  });
+});

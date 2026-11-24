@@ -3,8 +3,8 @@ import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleRetu
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
-import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, GEAR_SLOT_NAMES, MAX_TIER, offerLabel } from '../core/items';
+import { DOLL_H, drawPaperDoll, TIER_COLORS } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
@@ -53,6 +53,9 @@ export class TowerScene extends Phaser.Scene {
   } | null = null;
   /** Level when the screen was last drawn, to notice level ups. */
   private shownLevel = 0;
+  /** Center pop-ups for finds and curses, shown one after another. */
+  private notices: Notice[] = [];
+  private noticeUp?: Phaser.GameObjects.Container;
   /** Portrait only: a fixed camera for the HUD while the main camera follows the hunter. */
   private uiCam: Phaser.Cameras.Scene2D.Camera | null = null;
 
@@ -73,6 +76,8 @@ export class TowerScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     this.joy = null;
     this.metKinds = new Set();
+    this.notices = [];
+    this.noticeUp = undefined;
     this.run = this.resumeOrStart();
     this.overlay = [];
     this.dynamic = [];
@@ -699,7 +704,17 @@ export class TowerScene extends Phaser.Scene {
           } else sfx.chest();
           break;
         case 'gear':
-          sfx.gear();
+          if (e.equipped) sfx.gear();
+          this.notice(gearNotice(e.gear, e.equipped, e.old));
+          break;
+        case 'loot':
+          this.notice(lootNotice(e.item, e.got, e.count));
+          break;
+        case 'gold':
+          this.notice({ heading: '보물상자', color: INK.gold, lines: [[`+${e.amount}G`, INK.gold, 20]], ms: 1400 });
+          break;
+        case 'curse':
+          this.notice(curseNotice(e.curse, e.detail));
           break;
         case 'buy':
           sfx.buy();
@@ -789,6 +804,65 @@ export class TowerScene extends Phaser.Scene {
     banner.setScale(0.6);
     this.tweens.add({ targets: banner, scale: 1, duration: 160, ease: 'Back.Out' });
     this.tweens.add({ targets: banner, y: cy - 30, alpha: 0, delay: 1200, duration: 500, onComplete: () => banner.destroy() });
+  }
+
+  private notice(n: Notice) {
+    this.notices.push(n);
+    if (!this.noticeUp) this.nextNotice();
+  }
+
+  /**
+   * A card in the middle of the map, like the level-up banner but staying a little longer:
+   * what was found or what the curse took. Tap to close it early.
+   */
+  private nextNotice() {
+    const n = this.notices.shift();
+    this.noticeUp = undefined;
+    if (!n) return;
+    const cx = GW / 2;
+    const cy = PORTRAIT ? P_TOP_H + P_MAP_H * 0.5 : HUD_Y * 0.5;
+    const w = Math.min(420, GW - 32);
+    const box = this.ui(this.add.container(cx, cy).setDepth(45));
+    const g = this.add.graphics();
+    box.add(g);
+    const iconW = n.icon ? 52 : 0;
+    const left = -w / 2 + 18 + iconW;
+    const items: Phaser.GameObjects.Text[] = [];
+    const head = title(this, 0, 0, n.heading, 23, n.color).setOrigin(0.5, 0);
+    let y = 0;
+    const body: Phaser.GameObjects.Text[] = n.lines.map(([value, color, size]) => {
+      const t = (size && size > 12 ? title(this, left, 0, value, size, color) : text(this, left, 0, value, 12, color))
+        .setWordWrapWidth(w / 2 - left - 18, true);
+      return t;
+    });
+    const bodyH = body.reduce((sum, t) => sum + t.height + 6, 0);
+    const hgt = 18 + head.height + 12 + Math.max(bodyH, n.icon ? 48 : 0) + 12;
+    const top = -hgt / 2;
+    head.y = top + 16;
+    y = head.y + head.height + 12;
+    const bodyTop = y;
+    for (const t of body) {
+      t.y = y;
+      y += t.height + 6;
+    }
+    const edge = Phaser.Display.Color.HexStringToColor(n.color).color;
+    g.fillStyle(PALETTE.shadow, 0.94).fillRect(-w / 2, top, w, hgt);
+    g.lineStyle(2, edge, 1).strokeRect(-w / 2, top, w, hgt);
+    g.fillStyle(edge, 1).fillRect(-w / 2, top, w, 4);
+    if (n.icon) n.icon(g, -w / 2 + 18, bodyTop);
+    box.add([head, ...body, ...items]);
+    g.setInteractive(new Phaser.Geom.Rectangle(-w / 2, top, w, hgt), Phaser.Geom.Rectangle.Contains);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      this.tweens.add({ targets: box, alpha: 0, duration: 200, onComplete: () => { box.destroy(); this.nextNotice(); } });
+    };
+    g.on('pointerup', close);
+    box.setScale(0.7);
+    this.tweens.add({ targets: box, scale: 1, duration: 160, ease: 'Back.Out' });
+    this.time.delayedCall(n.ms ?? 2400, close);
+    this.noticeUp = box;
   }
 
   /** Health / mana / guard potion counts. */
@@ -980,4 +1054,119 @@ export class TowerScene extends Phaser.Scene {
       legend ? INK.gold : INK.red,
     );
   }
+}
+
+/** One pop-up: a heading, a few lines (text, color, size), an optional pixel icon. */
+interface Notice {
+  heading: string;
+  color: string;
+  lines: Array<[string, string, number?]>;
+  icon?: (g: Phaser.GameObjects.Graphics, x: number, y: number) => void;
+  ms?: number;
+}
+
+const POTION_COLORS: Record<ConsumableKind, number> = { hp: 0xc9403a, mp: 0x3d9fb3, guard: 0xe5ae46, escape: 0xe6dac0 };
+
+/** A 40×44 pixel potion bottle, or a rolled scroll for the return scroll. */
+function drawItemIcon(kind: ConsumableKind) {
+  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
+    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
+    if (kind === 'escape') {
+      g.fillStyle(0xe6dac0, 1).fillRect(x + 8, y + 10, 24, 24);
+      g.fillStyle(0xb9a98a, 1).fillRect(x + 6, y + 8, 28, 4).fillRect(x + 6, y + 32, 28, 4);
+      g.fillStyle(0xc4562a, 1).fillRect(x + 12, y + 16, 16, 2).fillRect(x + 12, y + 22, 12, 2);
+      return;
+    }
+    g.fillStyle(0x7a5a3a, 1).fillRect(x + 16, y + 6, 8, 5); // cork
+    g.fillStyle(0xcfcfcf, 1).fillRect(x + 15, y + 11, 10, 6); // neck
+    g.fillStyle(0xcfcfcf, 1).fillRect(x + 9, y + 17, 22, 22); // glass
+    g.fillStyle(POTION_COLORS[kind], 1).fillRect(x + 11, y + 23, 18, 14); // liquid
+    g.fillStyle(0xffffff, 0.7).fillRect(x + 12, y + 19, 3, 6); // shine
+  };
+}
+
+/** A gear piece in a box colored by its tier. */
+function drawGearIcon(gear: Gear) {
+  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
+    const c = Phaser.Display.Color.HexStringToColor(TIER_COLORS[Math.min(MAX_TIER, gear.tier) - 1]).color;
+    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
+    g.lineStyle(2, c, 1).strokeRect(x + 1, y + 1, 38, 42);
+    g.fillStyle(c, 1);
+    switch (gear.slot) {
+      case 'weapon': g.fillRect(x + 18, y + 6, 4, 24).fillRect(x + 12, y + 30, 16, 3).fillRect(x + 18, y + 33, 4, 6); break;
+      case 'shield': g.fillRect(x + 10, y + 8, 20, 20).fillRect(x + 13, y + 28, 14, 5).fillRect(x + 17, y + 33, 6, 4); break;
+      case 'helmet': g.fillRect(x + 10, y + 12, 20, 16).fillRect(x + 8, y + 26, 24, 4); break;
+      case 'armor': g.fillRect(x + 10, y + 10, 20, 26).fillRect(x + 5, y + 10, 5, 12).fillRect(x + 30, y + 10, 5, 12); break;
+      case 'boots': g.fillRect(x + 9, y + 12, 8, 20).fillRect(x + 9, y + 30, 12, 6).fillRect(x + 23, y + 12, 8, 20).fillRect(x + 23, y + 30, 12, 6); break;
+      case 'ring': g.lineStyle(4, c, 1).strokeCircle(x + 20, y + 24, 9).fillRect(x + 17, y + 10, 6, 5); break;
+      case 'earring': g.fillRect(x + 18, y + 8, 4, 10).fillRect(x + 15, y + 18, 10, 10).fillRect(x + 18, y + 28, 4, 6); break;
+    }
+  };
+}
+
+/** Stat changes from swapping old for new, like "공격 +2 · 방어 -1". */
+function gearDiff(gear: Gear, old?: Gear): string {
+  const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', '공격'], ['def', '방어'], ['hp', '체력'], ['mp', '마나']];
+  return names
+    .map(([k, label]) => [label, gear[k] - (old?.[k] ?? 0)] as const)
+    .filter(([, d]) => d !== 0)
+    .map(([label, d]) => `${label} ${d > 0 ? '+' : ''}${d}`)
+    .join(' · ');
+}
+
+function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
+  const color = TIER_COLORS[Math.min(MAX_TIER, gear.tier) - 1];
+  const slot = `${GEAR_SLOT_NAMES[gear.slot]} · ${gear.tier}단계`;
+  if (!equipped) {
+    return {
+      heading: '장비 발견',
+      color: INK.quiet,
+      icon: drawGearIcon(gear),
+      lines: [
+        [slot, INK.faint],
+        [gear.name, color, 15],
+        [describeGear(gear), INK.text],
+        [old ? `지금 쓰는 ${old.name}이(가) 더 좋아서 두고 왔다.` : '쓸 일이 없어 두고 왔다.', INK.faint],
+      ],
+      ms: 1800,
+    };
+  }
+  const lines: Notice['lines'] = [[slot, INK.faint], [gear.name, color, 15], [describeGear(gear), INK.text]];
+  const diff = gearDiff(gear, old);
+  if (diff) lines.push([`능력치 변화  ${diff}`, INK.gate]);
+  if (old) lines.push([`이전 장비 ${old.name}은(는) 버렸다.`, INK.faint]);
+  return { heading: old ? '장비 업그레이드!' : '새 장비 장착!', color: INK.gold, icon: drawGearIcon(gear), lines };
+}
+
+function lootNotice(item: ConsumableKind, got: boolean, count: number): Notice {
+  const c = CONSUMABLES[item];
+  return {
+    heading: got ? '아이템 획득!' : '가방이 가득 찼다',
+    color: got ? INK.gold : INK.quiet,
+    icon: drawItemIcon(item),
+    lines: [
+      [c.name, INK.text, 15],
+      [c.describe, INK.gate],
+      [got ? `가방 ${count}/${BAG_MAX}` : `가방 ${count}/${BAG_MAX} · 두고 왔다`, got ? INK.quiet : INK.red],
+    ],
+  };
+}
+
+const CURSE_NAMES: Record<CurseKind, string> = {
+  drain: '흡혈의 저주',
+  mana: '마력 소멸의 저주',
+  greed: '탐욕의 저주',
+  ambush: '매복의 저주',
+};
+
+function curseNotice(curse: CurseKind, detail: string): Notice {
+  return {
+    heading: `저주! ${CURSE_NAMES[curse]}`,
+    color: INK.red,
+    lines: [
+      [detail, INK.red, 15],
+      [CURSES[curse], INK.quiet],
+    ],
+    ms: 2800,
+  };
 }
