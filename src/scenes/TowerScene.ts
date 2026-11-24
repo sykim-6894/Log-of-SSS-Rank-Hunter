@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
+import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleReturn } from '../core/agency';
+import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
@@ -60,9 +61,12 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private startFloor = 1;
+  /** Gate picked at the agency, if this trip goes into a gate. */
+  private gateId?: number;
 
-  init(data: { startFloor?: number }) {
+  init(data: { startFloor?: number; gateId?: number }) {
     this.startFloor = data?.startFloor ?? 1;
+    this.gateId = data?.gateId;
   }
 
   create() {
@@ -300,7 +304,8 @@ export class TowerScene extends Phaser.Scene {
       }
       state.run = undefined;
     }
-    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor });
+    const gate = this.gateId !== undefined ? enterGate(state, this.gateId) : undefined;
+    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor, gate });
     if (this.startFloor > 1) run.log.push(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
     return run;
   }
@@ -476,7 +481,9 @@ export class TowerScene extends Phaser.Scene {
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 88, `${run.floor}층(적정 Lv.${recommendedLevel(run.floor)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    const status = k(text(this, 16, HUD_Y + 88, `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    // Keep clear of the log beside it: drop what the bag button already shows.
+    if (status.width > 258) status.setText(`${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G`);
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -502,8 +509,12 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.panel, 1).fillRect(0, 0, GW, P_TOP_H);
     g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
     const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
-    k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
-    k(text(this, GW - 14, 13, `${run.floor}층(적정 Lv.${recommendedLevel(run.floor)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
+    const gradeText = k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
+    // Long lines (gates, big earnings) lose the words the bag button already shows.
+    const room = GW - 14 - (gradeText.x + gradeText.width + 10);
+    const full = `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : '');
+    const status = k(text(this, GW - 14, 13, full, 12, INK.gold).setOrigin(1, 0));
+    if (status.width > room) status.setText(`${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · ${run.runGold}G`);
     k(text(this, 14, 38, '체력', 12, INK.quiet));
     k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
@@ -868,14 +879,25 @@ export class TowerScene extends Phaser.Scene {
   private showStairs() {
     const run = this.run;
     const h = run.hunter;
+    if (run.gate && run.isTopFloor) {
+      this.dialog('게이트 주인을 쓰러뜨렸다', [
+        `${gateName(run.gate)} 클리어! 이번 수입 ${run.runGold}G`,
+        `클리어 보상 ${gateClearGold(run.gate)}G와 장비 하나를 챙겨서 나간다.`,
+      ], [
+        ['보상 받고 귀환하기', () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
+        ['이 층을 더 둘러보기', () => { this.closeOverlay(); run.stay(); this.redraw(); }],
+      ], INK.gold);
+      return;
+    }
     const lines = [
-      `${run.floor}층 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.floor}G)`,
+      `${run.placeName} 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.danger}G)`,
       `체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`,
       '죽으면 이번 수입은 모두 잃습니다.',
     ];
     const buttons: Array<[string, () => void, boolean?]> = [];
+    if (run.gate) lines.push('지금 나가면 이 게이트는 닫힙니다.');
     if (!run.isTopFloor) {
-      buttons.push([`더 올라가기 (${run.floor + 1}층)`, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
+      buttons.push([run.gate ? `더 들어가기 (${run.floor + 1}층)` : `더 올라가기 (${run.floor + 1}층)`, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
     } else {
       lines.push('지금 갈 수 있는 탑의 꼭대기입니다.');
     }
@@ -913,11 +935,12 @@ export class TowerScene extends Phaser.Scene {
     return msgs;
   }
 
-  private finishReturn() {
+  private finishReturn(cleared = false) {
     const run = this.run;
     const r = settleReturn(state, rng, run.runGold, run.encounters);
+    const where = run.gate ? (cleared ? `${gateName(run.gate)} 클리어!` : `${run.placeName}에서 귀환.`) : `${run.floor}층에서 귀환.`;
     const msgs = [
-      `${run.floor}층에서 귀환. 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
+      `${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
     ];
     if (r.promotedTo) {
       msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
@@ -949,7 +972,7 @@ export class TowerScene extends Phaser.Scene {
       legend ? '그래, 너였구나.' : '넌 주인공이 아니었네...',
       [
         `${h.name} · ${grade}급 · Lv.${h.level}`,
-        `${run.floor}층에서 ${killer}에게 쓰러졌다.`,
+        `${run.placeName}에서 ${killer}에게 쓰러졌다.`,
         `처치 ${h.kills}마리 · 최고 ${h.bestFloor}층 · 기록 점수 ${score}`,
         fateLine,
       ],
