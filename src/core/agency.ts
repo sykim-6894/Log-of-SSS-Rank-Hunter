@@ -192,17 +192,14 @@ export function gradeIn(state: GameState, h: Hunter): Grade {
   return (i >= 0 ? rankGradeOf(i) : undefined) ?? powerGrade(h);
 }
 
-/** Floors right after a boss where a run may start, and the grade needed for each. */
-export const SKIP_POINTS: ReadonlyArray<[number, Grade]> = [
-  [6, 'D'],
-  [11, 'C'],
-  [16, 'B'],
-];
+/** Floors cleared are skippable in steps of five: a run may start right after any boss already beaten. */
+export const SKIP_STEP = 5;
 
-/** Floors this hunter may start a run on: always 1, plus each skip point their grade allows and they have reached before. */
-export function startFloors(state: GameState, h: Hunter): number[] {
-  const rank = gradeRank(gradeIn(state, h));
-  return [1, ...SKIP_POINTS.filter(([floor, need]) => rank >= gradeRank(need) && h.bestFloor >= floor).map(([floor]) => floor)];
+/** Floors this hunter may start a run on: 1, then 6, 11, 16 once they have reached that floor before. */
+export function startFloors(_state: GameState, h: Hunter): number[] {
+  const floors = [1];
+  for (let f = SKIP_STEP + 1; f <= h.bestFloor; f += SKIP_STEP) floors.push(f);
+  return floors;
 }
 
 /** Marks whoever holds #1 as having been SSS. */

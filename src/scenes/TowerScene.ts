@@ -246,7 +246,7 @@ export class TowerScene extends Phaser.Scene {
       state.run = undefined;
     }
     const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor });
-    if (this.startFloor > 1) run.log.push(`등급 덕분에 ${this.startFloor - 1}층까지 건너뛰었다.`);
+    if (this.startFloor > 1) run.log.push(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
     return run;
   }
 

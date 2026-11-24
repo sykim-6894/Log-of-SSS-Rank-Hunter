@@ -272,15 +272,17 @@ describe('ranking and grades', () => {
     expect(loadGame(storage)!.world).toEqual(worldRankers());
   });
 
-  it('grade lets a hunter skip floors they have reached before', () => {
+  it('a hunter can skip floors already cleared, in steps of five', () => {
     const rng = new Rng(5);
     const state = newGame(rng);
     const h = activeHunter(state)!;
     expect(startFloors(state, h)).toEqual([1]);
-    h.atk = 90; // combat power past C
-    expect(startFloors(state, h)).toEqual([1]); // never been past floor 5
+    h.bestFloor = 5; // reached the floor 5 boss but not past it
+    expect(startFloors(state, h)).toEqual([1]);
     h.bestFloor = 12;
     expect(startFloors(state, h)).toEqual([1, 6, 11]);
+    h.bestFloor = 20;
+    expect(startFloors(state, h)).toEqual([1, 6, 11, 16]);
     const run = new TowerRun(h, rng, { startFloor: 11 });
     expect(run.floor).toBe(11);
   });
