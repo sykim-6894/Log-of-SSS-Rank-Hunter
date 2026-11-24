@@ -826,6 +826,31 @@ describe('level-up cards', () => {
     expect(h.picks).toBe(0);
   });
 
+  it('with every slot full, only upgrades come up, then stat cards once all are maxed', () => {
+    const h = makeHunter(new Rng(1), 1, [], 'mage', 'fireball');
+    h.level = 12;
+    h.skills = classSkills('mage').slice(0, 3).map((id) => ({ id, lv: 1 }));
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const c of rollCards(h, new Rng(seed))) expect(c.type).toBe('upgrade');
+    }
+    h.skills[0].lv = 5;
+    h.skills[1].lv = 5;
+    for (let seed = 1; seed <= 20; seed++) {
+      const cards = rollCards(h, new Rng(seed));
+      expect(cards.filter((c) => c.type === 'upgrade')).toEqual([{ type: 'upgrade', skill: h.skills[2].id }]);
+      expect(cards.filter((c) => c.type === 'learn')).toHaveLength(0);
+    }
+    h.skills[2].lv = 5;
+    for (const c of rollCards(h, new Rng(3))) expect(c.type).toBe('stat');
+    // A level-1 hunter's single slot is full too: no new skill until level 5.
+    const n = makeHunter(new Rng(2), 1, [], 'sword');
+    for (let seed = 1; seed <= 20; seed++) {
+      expect(rollCards(n, new Rng(seed)).some((c) => c.type === 'learn')).toBe(false);
+    }
+    n.level = 5;
+    expect([1, 2, 3, 4, 5].some((seed) => rollCards(n, new Rng(seed)).some((c) => c.type === 'learn'))).toBe(true);
+  });
+
   it('rival hunters pick their own cards', () => {
     const h = makeHunter(new Rng(1), 1, [], 'knight');
     for (let i = 0; i < 12; i++) levelUp(h);

@@ -158,18 +158,22 @@ export function cardTitle(c: LevelCard, h: Hunter): string {
 }
 
 export function cardText(c: LevelCard, h: Hunter): string {
-  if (c.type === 'stat') return '배울 것도 강화할 것도 없을 때 나오는 카드';
+  if (c.type === 'stat') return '스킬 칸이 다 찼고 모든 스킬이 5단계일 때 나오는 카드';
   const info = SKILLS[c.skill];
   if (c.type === 'learn') return info.text + (h.skills.length >= slotCount(h.level) ? ' · 칸이 차서 하나와 바꿈' : '');
   const lv = h.skills.find((s) => s.id === c.skill)?.lv ?? 1;
   return lv + 1 >= MAX_SKILL_LV ? `위력 +20%, 5단계: ${info.max}` : '위력 +20%';
 }
 
-/** Three cards for one level-up: new skills and upgrades at random, stat cards when those run out. */
+/**
+ * Three cards for one level-up: new skills and upgrades at random, stat cards when those run out.
+ * Once every open slot holds a skill, only upgrades (then stat cards) come up.
+ */
 export function rollCards(h: Hunter, rng: Rng): LevelCard[] {
   const owned = new Set(h.skills.map((s) => s.id));
   const pool: LevelCard[] = [];
-  for (const id of classSkills(h.cls)) {
+  const full = h.skills.length >= slotCount(h.level);
+  for (const id of full ? [] : classSkills(h.cls)) {
     if (owned.has(id)) continue;
     if (SKILLS[id].ultimate && h.level < ULTIMATE_LEVEL) continue;
     pool.push({ type: 'learn', skill: id });
