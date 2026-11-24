@@ -748,13 +748,12 @@ export class HQScene extends Phaser.Scene {
   /** Live association ranking: ours, the rival agency's, the fallen, and established rankers. */
   private drawRanking(x: number, y: number, w = 448) {
     panel(this, x, y, w, 326, '헌터 순위 · 명예의 전당');
-    const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 162, floor: x + 196, score: x + 238, note: x + w - 18 };
+    const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 170, score: x + 212, note: x + w - 18 };
     const hy = y + 20;
     text(this, cols.rank, hy, '#', 12, INK.faint);
     text(this, cols.grade, hy, '등급', 12, INK.faint);
     text(this, cols.name, hy, '이름', 12, INK.faint);
     text(this, cols.lv, hy, 'Lv', 12, INK.faint);
-    text(this, cols.floor, hy, '층', 12, INK.faint);
     text(this, cols.score, hy, '전투력', 12, INK.faint);
     text(this, cols.note, hy, '소속 · 최후', 12, INK.faint).setOrigin(1, 0);
     dots(this, x + 16, hy + 18, w - 32);
@@ -767,7 +766,6 @@ export class HQScene extends Phaser.Scene {
       text(this, cols.grade, ry, g, 12, i === 0 ? INK.gold : INK.rust, true);
       text(this, cols.name, ry, r.name, 12, c, r.status === 'ours');
       text(this, cols.lv, ry, `${r.level}`, 12, INK.quiet);
-      text(this, cols.floor, ry, `${r.bestFloor}`, 12, INK.quiet);
       text(this, cols.score, ry, `${r.score}`, 12, INK.quiet);
       const note = r.cls ? `${CLASSES[r.cls].name} · ${r.note}` : r.note;
       fit(text(this, cols.note, ry, note, 12, r.status === 'gone' ? INK.faint : c), cols.note - cols.score - 50).setOrigin(1, 0);
