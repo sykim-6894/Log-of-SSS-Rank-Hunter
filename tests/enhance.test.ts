@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeHunter, ENHANCE_CHANCE, enhanceCost, enhanceGear, enhanceRisk, newGame, settleReturn } from '../src/core/agency';
+import { activeHunter, ENHANCE_CHANCE, enhanceCost, enhanceGear, enhanceRisk, failOdds, newGame, settleReturn } from '../src/core/agency';
 import { createHunter } from '../src/core/hunter';
 import { equipIfBetter, gearLabel, gearScore, gearStats, makeGear, MAX_PLUS, setPlus } from '../src/core/items';
 import { Rng } from '../src/core/rng';
@@ -55,21 +55,32 @@ describe('gear enhancement', () => {
     expect(enhanceGear(state, rng, 'shield')).toBeUndefined(); // nothing worn there
   });
 
-  it('failing below +5 keeps the level, +5 and +6 drop one, +7 and up break the piece', () => {
+  it('a failure below +5 keeps the level; +5 and +6 drop or stay; +7 and up can also break', () => {
     expect(ENHANCE_CHANCE).toHaveLength(MAX_PLUS);
-    for (const [plus, risk] of [[4, 'none'], [5, 'drop'], [6, 'drop'], [7, 'break'], [9, 'break']] as const) {
+    for (let p = 0; p < MAX_PLUS; p++) {
+      const f = failOdds({ slot: 'weapon', name: 'x', tier: 1, atk: 1, def: 0, hp: 0, mp: 0, plus: p });
+      expect(f.break + f.drop + f.keep).toBeCloseTo(1);
+      if (p < 5) expect(f.keep).toBe(1);
+      if (p === 5 || p === 6) expect([f.break, f.drop > 0, f.keep > 0]).toEqual([0, true, true]);
+      if (p >= 7) expect(f.break > 0 && f.drop > 0 && f.keep > 0).toBe(true);
+    }
+    // A scripted rng: the try fails, then the failure roll lands where we want.
+    const scripted = (roll: number) => ({ chance: () => false, next: () => roll }) as unknown as Rng;
+    const cases: Array<[number, number, 'keep' | 'drop' | 'break']> = [
+      [4, 0.0, 'keep'], [5, 0.1, 'drop'], [6, 0.9, 'keep'], [7, 0.1, 'break'], [7, 0.3, 'drop'], [8, 0.95, 'keep'], [9, 0.39, 'break'],
+    ];
+    for (const [plus, roll, want] of cases) {
       const { state, h } = setup(plus);
-      expect(enhanceRisk(h.gear.weapon!)).toBe(risk);
-      const fail = { chance: () => false } as unknown as Rng;
+      expect(enhanceRisk(h.gear.weapon!)).toBe(plus >= 7 ? 'break' : plus >= 5 ? 'drop' : 'none');
       const atkBefore = h.atk;
-      const r = enhanceGear(state, fail, 'weapon')!;
+      const r = enhanceGear(state, scripted(roll), 'weapon')!;
       expect(r.success).toBe(false);
-      if (risk === 'none') expect(h.gear.weapon!.plus).toBe(plus);
-      if (risk === 'drop') expect(h.gear.weapon!.plus).toBe(plus - 1);
-      if (risk === 'break') {
+      if (want === 'keep') expect(h.gear.weapon!.plus).toBe(plus);
+      if (want === 'drop') expect(h.gear.weapon!.plus).toBe(plus - 1);
+      if (want === 'break') {
         expect(r.broken).toBe(true);
         expect(h.gear.weapon).toBeUndefined();
-        expect(h.atk).toBe(atkBefore - gearStats({ ...r.gear }).atk);
+        expect(h.atk).toBe(atkBefore - gearStats(r.gear).atk);
       }
     }
   });

@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS } from '../core/monsters';
@@ -545,12 +545,12 @@ export class HQScene extends Phaser.Scene {
   /** Enhance worn gear with the agency's 마력석 and gold. Higher levels can drop or break. */
   private drawEnhance(result?: EnhanceResult) {
     const h = activeHunter(state);
-    const w = Math.min(GW - 28, 560);
+    const w = PORTRAIT ? GW - 28 : 720;
     const x = (GW - w) / 2;
     const stones = state.agent.stones ?? 0;
     title(this, GW / 2, 18, '장비 강화', 23, INK.text).setOrigin(0.5, 0);
     text(this, GW / 2, 50, `마력석 ${stones}개 · 운영 자금 ${state.agent.gold}G`, 12, INK.gold).setOrigin(0.5, 0);
-    text(this, GW / 2, 70, '+5부터 실패하면 한 단계 하락, +7부터 실패하면 장비가 부서진다.', 12, INK.faint)
+    text(this, GW / 2, 70, '+5부터 실패하면 한 단계 떨어질 수 있고, +7부터는 부서질 수도 있다.', 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
 
     let y = PORTRAIT ? 112 : 96;
@@ -571,7 +571,7 @@ export class HQScene extends Phaser.Scene {
     }
     y += 30;
 
-    const rowH = PORTRAIT ? 70 : 64;
+    const rowH = PORTRAIT ? 86 : 64;
     GEAR_SLOTS.forEach((slot, i) => {
       const ry = y + i * rowH;
       const g = h?.gear[slot];
@@ -595,10 +595,19 @@ export class HQScene extends Phaser.Scene {
       }
       const cost = enhanceCost(g);
       const risk = enhanceRisk(g);
-      const riskText = risk === 'break' ? ' · 파괴 위험' : risk === 'drop' ? ' · 하락 위험' : '';
       const ok = stones >= cost.stones && state.agent.gold >= cost.gold;
-      fit(text(this, tx, ry + 42, `마력석 ${cost.stones} · ${cost.gold}G · ${PORTRAIT ? '' : '성공 '}${Math.round(enhanceChance(g) * 100)}%${riskText}`, 12,
-        risk === 'break' ? INK.red : ok ? INK.quiet : INK.faint), tw);
+      const pct = (v: number) => Math.round(v * 100);
+      const f = failOdds(g);
+      const failText = risk === 'none' ? '' : `실패 시 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`;
+      const costText = `마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(enhanceChance(g))}%`;
+      const riskColor = risk === 'break' ? INK.red : risk === 'drop' ? INK.rust : INK.quiet;
+      if (PORTRAIT) {
+        fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
+        if (failText) fit(text(this, tx, ry + 60, failText, 12, riskColor), tw);
+      } else {
+        const c = fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
+        if (failText) fit(text(this, tx + c.width + 6, ry + 42, `· ${failText}`, 12, riskColor), tw - c.width - 6);
+      }
       button(this, x + w - bw - 10, ry + (rowH - 6) / 2 - 17, bw, 34, `+${plus + 1}`, () => {
         const r = enhanceGear(state, rng, slot);
         if (!r) return;

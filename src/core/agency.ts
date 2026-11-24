@@ -403,10 +403,23 @@ export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): Purch
 
 /** Chance to reach +1 … +10. */
 export const ENHANCE_CHANCE = [1, 1, 1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
-/** From this level up, a failure drops the piece one level. */
-export const ENHANCE_DROP_FROM = 5;
-/** From this level up, a failure breaks the piece for good. */
-export const ENHANCE_BREAK_FROM = 7;
+/**
+ * What happens on a failed try, by the level the piece is at: chance it breaks, chance it drops
+ * a level, and the rest it stays. Below +5 a failure only costs the stones and gold.
+ */
+export const ENHANCE_FAIL: Record<number, { break: number; drop: number }> = {
+  5: { break: 0, drop: 0.5 },
+  6: { break: 0, drop: 0.5 },
+  7: { break: 0.2, drop: 0.4 },
+  8: { break: 0.3, drop: 0.4 },
+  9: { break: 0.4, drop: 0.4 },
+};
+
+/** Odds of each outcome if a try at this level fails. */
+export function failOdds(g: Gear): { break: number; drop: number; keep: number } {
+  const f = ENHANCE_FAIL[g.plus ?? 0] ?? { break: 0, drop: 0 };
+  return { ...f, keep: Math.max(0, 1 - f.break - f.drop) };
+}
 
 /** Stones and agency gold to take a piece one level up. */
 export function enhanceCost(g: Gear): { stones: number; gold: number } {
@@ -427,10 +440,10 @@ export interface EnhanceResult {
   gear: Gear;
 }
 
-/** What a failure at this level costs: nothing, a level, or the piece. */
+/** The worst a failure at this level can do: nothing, a level, or the piece. */
 export function enhanceRisk(g: Gear): 'none' | 'drop' | 'break' {
-  const p = g.plus ?? 0;
-  return p >= ENHANCE_BREAK_FROM ? 'break' : p >= ENHANCE_DROP_FROM ? 'drop' : 'none';
+  const f = failOdds(g);
+  return f.break > 0 ? 'break' : f.drop > 0 ? 'drop' : 'none';
 }
 
 /** Tries to enhance the active hunter's piece in a slot, paid from the agency's stones and gold. */
@@ -445,13 +458,17 @@ export function enhanceGear(state: GameState, rng: Rng, slot: GearSlot): Enhance
   state.agent.gold -= cost.gold;
   const from = g.plus ?? 0;
   const success = rng.chance(enhanceChance(g));
-  const risk = enhanceRisk(g);
-  if (!success && risk === 'break') {
-    setPlus(h, slot, 0);
-    unequip(h, slot);
-    return { success, broken: true, from, to: 0, gear: { ...g, plus: from } };
+  if (success) {
+    setPlus(h, slot, from + 1);
+    return { success, broken: false, from, to: from + 1, gear: g };
   }
-  const to = success ? from + 1 : risk === 'drop' ? from - 1 : from;
+  const odds = failOdds(g);
+  const roll = rng.next();
+  if (roll < odds.break) {
+    unequip(h, slot);
+    return { success, broken: true, from, to: 0, gear: g };
+  }
+  const to = roll < odds.break + odds.drop ? from - 1 : from;
   setPlus(h, slot, to);
   return { success, broken: false, from, to, gear: g };
 }
