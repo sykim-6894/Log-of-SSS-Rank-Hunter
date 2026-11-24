@@ -3,7 +3,7 @@ import {
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -14,6 +14,8 @@ export interface Agent {
   gold: number;
   /** False until the player names the agency on the first screen. Older saves never had this. */
   named?: boolean;
+  /** 마력석 in the agency's store, for enhancing gear. Kept between runs. */
+  stones?: number;
 }
 
 /** A hunter who is gone for good: died unrescued, or was finished off. */
@@ -397,6 +399,63 @@ export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): Purch
 
 // ---------- After a run ----------
 
+// ---------- Enhancement ----------
+
+/** Chance to reach +1 … +10. */
+export const ENHANCE_CHANCE = [1, 1, 1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
+/** From this level up, a failure drops the piece one level. */
+export const ENHANCE_DROP_FROM = 5;
+/** From this level up, a failure breaks the piece for good. */
+export const ENHANCE_BREAK_FROM = 7;
+
+/** Stones and agency gold to take a piece one level up. */
+export function enhanceCost(g: Gear): { stones: number; gold: number } {
+  const to = (g.plus ?? 0) + 1;
+  return { stones: to, gold: 10 * to * g.tier };
+}
+
+export function enhanceChance(g: Gear): number {
+  return ENHANCE_CHANCE[Math.min(MAX_PLUS, (g.plus ?? 0) + 1) - 1];
+}
+
+export interface EnhanceResult {
+  success: boolean;
+  /** The piece broke and is gone. */
+  broken: boolean;
+  from: number;
+  to: number;
+  gear: Gear;
+}
+
+/** What a failure at this level costs: nothing, a level, or the piece. */
+export function enhanceRisk(g: Gear): 'none' | 'drop' | 'break' {
+  const p = g.plus ?? 0;
+  return p >= ENHANCE_BREAK_FROM ? 'break' : p >= ENHANCE_DROP_FROM ? 'drop' : 'none';
+}
+
+/** Tries to enhance the active hunter's piece in a slot, paid from the agency's stones and gold. */
+export function enhanceGear(state: GameState, rng: Rng, slot: GearSlot): EnhanceResult | undefined {
+  const h = activeHunter(state);
+  const g = h?.gear[slot];
+  if (!h || !g || (g.plus ?? 0) >= MAX_PLUS) return undefined;
+  const cost = enhanceCost(g);
+  const stones = state.agent.stones ?? 0;
+  if (stones < cost.stones || state.agent.gold < cost.gold) return undefined;
+  state.agent.stones = stones - cost.stones;
+  state.agent.gold -= cost.gold;
+  const from = g.plus ?? 0;
+  const success = rng.chance(enhanceChance(g));
+  const risk = enhanceRisk(g);
+  if (!success && risk === 'break') {
+    setPlus(h, slot, 0);
+    unequip(h, slot);
+    return { success, broken: true, from, to: 0, gear: { ...g, plus: from } };
+  }
+  const to = success ? from + 1 : risk === 'drop' ? from - 1 : from;
+  setPlus(h, slot, to);
+  return { success, broken: false, from, to, gear: g };
+}
+
 export interface GachaResult {
   gear: Gear;
   equipped: boolean;
@@ -445,9 +504,10 @@ export interface ReturnResult extends AfterRunNews {
 
 /** Hunter came back alive: pay tribute under the current contract, then re-contract on promotion. */
 export function settleReturn(
-  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false,
+  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0,
 ): ReturnResult {
   const { agent } = state;
+  agent.stones = (agent.stones ?? 0) + stones;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
   const rate = TRIBUTE_RATE[hunter.contractGrade];

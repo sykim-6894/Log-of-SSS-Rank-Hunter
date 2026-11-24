@@ -24,7 +24,7 @@ import {
   offerLabel,
   rollOffers,
   rollChest,
-  rollGear,
+  rollGear, gearLabel
 } from './items';
 import { Rng } from './rng';
 import {
@@ -121,6 +121,9 @@ export interface Merchant {
 export const SIGHT = 7;
 
 /** Things that happened during a turn, for the screen to show and play sounds for. */
+/** Chance an ordinary monster drops a 마력석. */
+export const STONE_DROP = 0.1;
+
 export type RunEvent =
   | { type: 'hit'; x: number; y: number; amount: number }
   | { type: 'hurt'; amount: number }
@@ -138,6 +141,8 @@ export type RunEvent =
   /** A potion or scroll found; got is false when the bag had no room. */
   | { type: 'loot'; item: ConsumableKind; got: boolean; count: number }
   | { type: 'gold'; amount: number }
+  /** 마력석 picked up. */
+  | { type: 'stone'; x: number; y: number; amount: number }
   /** A cursed chest, with what it took in numbers. */
   | { type: 'curse'; curse: CurseKind; detail: string }
   | { type: 'buy' }
@@ -161,6 +166,7 @@ export interface RunSnapshot {
   monsters: Array<Omit<Monster, 'hunter'> & { hunterId?: number }>;
   pos: Point;
   runGold: number;
+  stones?: number;
   turn: number;
   status: RunStatus;
   /** One string of 0/1 per row. */
@@ -191,6 +197,8 @@ export class TowerRun {
   pos: Point = { x: 0, y: 0 };
   /** Gold earned this run. Lost if the hunter dies. */
   runGold = 0;
+  /** 마력석 found this run. They go to the agency on return and are lost on death. */
+  stones = 0;
   turn = 0;
   status: RunStatus = 'playing';
   seen: boolean[][] = [];
@@ -247,6 +255,7 @@ export class TowerRun {
       monsters: this.monsters.map(({ hunter, ...m }) => ({ ...m, hunterId: hunter?.id })),
       pos: { ...this.pos },
       runGold: this.runGold,
+      stones: this.stones,
       turn: this.turn,
       status: this.status,
       seen: this.seen.map((row) => row.map((v) => (v ? '1' : '0')).join('')),
@@ -283,6 +292,7 @@ export class TowerRun {
     run.monsters = s.monsters.map(({ hunterId, ...m }) => ({ ...m, hunter: hunterId === undefined ? undefined : rival(hunterId) }));
     run.pos = s.pos;
     run.runGold = s.runGold;
+    run.stones = s.stones ?? 0;
     run.turn = s.turn;
     run.status = s.status;
     run.seen = s.seen.map((row) => [...row].map((c) => c === '1'));
@@ -546,7 +556,7 @@ export class TowerRun {
         return;
       }
       case 'gear':
-        this.say(`보물상자: ${c.gear.name}!`);
+        this.say(`보물상자: ${gearLabel(c.gear)}!`);
         this.takeGear(c.gear);
         return;
       case 'curse':
@@ -582,9 +592,9 @@ export class TowerRun {
     this.events.push({ type: 'gear', gear: g, equipped: r.equipped, old });
     const slot = GEAR_SLOT_NAMES[g.slot];
     if (r.equipped) {
-      this.say(`${slot} 장착: ${g.name} (${describeGear(g)})` + (r.discarded ? `. ${r.discarded.name}은(는) 버렸다.` : ''));
+      this.say(`${slot} 장착: ${gearLabel(g)} (${describeGear(g)})` + (r.discarded ? `. ${gearLabel(r.discarded)}은(는) 버렸다.` : ''));
     } else {
-      this.say(`지금 ${slot}이(가) 더 좋다. ${g.name}은(는) 버렸다.`);
+      this.say(`지금 ${slot}이(가) 더 좋다. ${gearLabel(g)}은(는) 버렸다.`);
     }
   }
 
@@ -1276,6 +1286,11 @@ export class TowerRun {
     const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
+    const stones = m.hunter || m.kind.stalker ? 0
+      : m.kind.boss ? 3 + Math.floor(this.danger / 5)
+      : m.kind.elite ? 2
+      : this.rng.chance(STONE_DROP) ? 1 : 0;
+    this.gainStones(stones, m.x, m.y);
     if (m.kind.elite) {
       this.say('중간보스가 장비를 떨어뜨렸다!');
       this.takeGear(rollGear(this.rng, this.danger + 2));
@@ -1517,9 +1532,17 @@ export class TowerRun {
     const gold = gateClearGold(gate);
     this.runGold += gold;
     this.say(`${gateName(gate)} 클리어! 보상 +${gold}G`);
+    this.gainStones(2 + Math.floor(this.danger / 4), this.pos.x, this.pos.y);
     this.takeGear(rollGear(this.rng, this.danger + 4));
     this.status = 'returned';
     return true;
+  }
+
+  private gainStones(n: number, x: number, y: number) {
+    if (n <= 0) return;
+    this.stones += n;
+    this.events.push({ type: 'stone', x, y, amount: n });
+    this.say(`마력석 +${n} (이번 탐험 ${this.stones}개)`);
   }
 
   /** Step off the stairs prompt and keep exploring the floor. */

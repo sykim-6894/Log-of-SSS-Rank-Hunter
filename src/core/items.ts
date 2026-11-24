@@ -60,6 +60,8 @@ export interface Gear {
   def: number;
   hp: number;
   mp: number;
+  /** Enhancement level, +0 to +MAX_PLUS. Each level adds PLUS_BONUS of the base stats. */
+  plus?: number;
 }
 
 export type Equipment = Partial<Record<GearSlot, Gear>>;
@@ -78,17 +80,36 @@ export const MAX_TIER = 7;
 /** Tiers 8 and 9 only come from the gear draw. */
 export const TOP_TIER = 9;
 
+export const MAX_PLUS = 10;
+export const PLUS_BONUS = 0.1;
+
+export type GearStats = Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>;
+
+/** What the piece actually gives, enhancement included. Every +1 adds at least 1 to each stat it has. */
+export function gearStats(g: Gear): GearStats {
+  const p = g.plus ?? 0;
+  const up = (v: number) => (v > 0 ? v + Math.ceil(v * PLUS_BONUS * p) : v);
+  return { atk: up(g.atk), def: up(g.def), hp: up(g.hp), mp: up(g.mp) };
+}
+
+/** The name with its enhancement, like "+3 철검". */
+export function gearLabel(g: Gear): string {
+  return g.plus ? `+${g.plus} ${g.name}` : g.name;
+}
+
 /** Same weights as combat power, so "better" means it raises combat power more. */
 export function gearScore(g: Gear): number {
-  return g.hp + g.mp + (g.atk + g.def) * 5;
+  const s = gearStats(g);
+  return s.hp + s.mp + (s.atk + s.def) * 5;
 }
 
 export function describeGear(g: Gear): string {
+  const s = gearStats(g);
   const parts: string[] = [];
-  if (g.atk) parts.push(`공격 +${g.atk}`);
-  if (g.def) parts.push(`방어 +${g.def}`);
-  if (g.hp) parts.push(`체력 +${g.hp}`);
-  if (g.mp) parts.push(`마나 +${g.mp}`);
+  if (s.atk) parts.push(`공격 +${s.atk}`);
+  if (s.def) parts.push(`방어 +${s.def}`);
+  if (s.hp) parts.push(`체력 +${s.hp}`);
+  if (s.mp) parts.push(`마나 +${s.mp}`);
   return parts.join(' ');
 }
 
@@ -132,7 +153,8 @@ export function makeGear(rng: Rng, tier: number, slot: GearSlot = rng.pick(GEAR_
   return g;
 }
 
-function applyGear(h: Hunter, g: Gear, sign: 1 | -1) {
+function applyGear(h: Hunter, piece: Gear, sign: 1 | -1) {
+  const g = gearStats(piece);
   h.atk += g.atk * sign;
   h.def += g.def * sign;
   h.maxHp += g.hp * sign;
@@ -159,6 +181,23 @@ export function equipIfBetter(h: Hunter, g: Gear): EquipResult {
   h.gear[g.slot] = g;
   applyGear(h, g, 1);
   return { equipped: true, discarded: current };
+}
+
+/** Changes the enhancement of a worn piece, moving the hunter's stats with it. */
+export function setPlus(h: Hunter, slot: GearSlot, plus: number) {
+  const g = h.gear[slot];
+  if (!g) return;
+  applyGear(h, g, -1);
+  g.plus = Math.max(0, Math.min(MAX_PLUS, plus));
+  applyGear(h, g, 1);
+}
+
+/** Takes a piece off for good (it broke). */
+export function unequip(h: Hunter, slot: GearSlot) {
+  const g = h.gear[slot];
+  if (!g) return;
+  applyGear(h, g, -1);
+  delete h.gear[slot];
 }
 
 // ---------- Gear draw ----------
@@ -219,7 +258,7 @@ export function rollOffers(rng: Rng, floor: number): Offer[] {
 }
 
 export function offerLabel(o: Offer): string {
-  if (o.type === 'gear') return `${GEAR_SLOT_NAMES[o.gear.slot]} ${o.gear.name} (${describeGear(o.gear)})`;
+  if (o.type === 'gear') return `${GEAR_SLOT_NAMES[o.gear.slot]} ${gearLabel(o.gear)} (${describeGear(o.gear)})`;
   if (o.type === 'item') return `${CONSUMABLES[o.item].name} (${CONSUMABLES[o.item].describe})`;
   return '응급 치료 (체력·마나 모두 회복)';
 }

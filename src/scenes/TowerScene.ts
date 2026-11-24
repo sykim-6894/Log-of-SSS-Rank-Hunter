@@ -3,7 +3,7 @@ import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleRetu
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
@@ -718,6 +718,9 @@ export class TowerScene extends Phaser.Scene {
         case 'loot':
           this.notice(lootNotice(e.item, e.got, e.count));
           break;
+        case 'stone':
+          this.floatText(e.x, e.y, `마력석 +${e.amount}`, '#b98cff');
+          break;
         case 'gold':
           this.notice({ heading: '보물상자', color: INK.gold, lines: [[`+${e.amount}G`, INK.gold, 20]], ms: 1400 });
           break;
@@ -1074,7 +1077,7 @@ export class TowerScene extends Phaser.Scene {
 
   private finishReturn(cleared = false) {
     const run = this.run;
-    const r = settleReturn(state, rng, run.runGold, run.encounters, cleared);
+    const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones);
     const stolen = cleared && run.gate?.rival ? ` ${run.gate.rival.agency}보다 먼저 해냈다!` : '';
     const where = run.gate ? (cleared ? `${gateName(run.gate)} 클리어!${stolen}` : `${run.placeName}에서 귀환.`) : `${run.floor}층에서 귀환.`;
     const msgs = [
@@ -1083,6 +1086,7 @@ export class TowerScene extends Phaser.Scene {
     if (r.promotedTo) {
       msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
+    if (run.stones > 0) msgs.push(`마력석 ${run.stones}개를 에이전시 창고에 넣었다. (보유 ${state.agent.stones}개)`);
     msgs.push('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.');
     msgs.push(...this.newsLines(r));
     state.run = undefined;
@@ -1161,17 +1165,17 @@ function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
       icon: drawGearIcon(gear),
       lines: [
         [slot, INK.faint],
-        [gear.name, color, 15],
+        [gearLabel(gear), color, 15],
         [describeGear(gear), INK.text],
-        [old ? `지금 쓰는 ${old.name}이(가) 더 좋아서 두고 왔다.` : '쓸 일이 없어 두고 왔다.', INK.faint],
+        [old ? `지금 쓰는 ${gearLabel(old)}이(가) 더 좋아서 두고 왔다.` : '쓸 일이 없어 두고 왔다.', INK.faint],
       ],
       ms: 1800,
     };
   }
-  const lines: Notice['lines'] = [[slot, INK.faint], [gear.name, color, 15], [describeGear(gear), INK.text]];
+  const lines: Notice['lines'] = [[slot, INK.faint], [gearLabel(gear), color, 15], [describeGear(gear), INK.text]];
   const diff = gearDiff(gear, old);
   if (diff) lines.push([`능력치 변화  ${diff}`, INK.gate]);
-  if (old) lines.push([`이전 장비 ${old.name}은(는) 버렸다.`, INK.faint]);
+  if (old) lines.push([`이전 장비 ${gearLabel(old)}은(는) 버렸다.`, INK.faint]);
   return { heading: old ? '장비 업그레이드!' : '새 장비 장착!', color: INK.gold, icon: drawGearIcon(gear), lines };
 }
 
