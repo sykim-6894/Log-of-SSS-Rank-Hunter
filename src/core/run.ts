@@ -143,7 +143,9 @@ export type RunEvent =
   | { type: 'levelup' }
   | { type: 'rescue' }
   | { type: 'death' }
-  | { type: 'floor' };
+  | { type: 'floor' }
+  /** The gate's master just fell: the gate is cleared. */
+  | { type: 'gateClear' };
 
 /** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
 export interface RunSnapshot {
@@ -1065,6 +1067,10 @@ export class TowerRun {
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
+    if (m.kind.boss && this.gateCleared) {
+      this.events.push({ type: 'gateClear' });
+      this.say(`${gateName(this.gate!)} 클리어!`);
+    }
     const expScale = m.hunter ? 1 : floorExpScale(this.danger) * overLevelFactor(this.hunter.level, this.danger);
     const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
@@ -1281,12 +1287,18 @@ export class TowerRun {
     return true;
   }
 
-  /** Gold and gear for clearing a gate. Only from the last floor's stairs, once its master is down. */
+  /** The gate's master is down: the reward can be taken from anywhere on the last floor. */
+  get gateCleared(): boolean {
+    return !!this.gate && this.isTopFloor && !this.bossAlive;
+  }
+
+  /** Gold and gear for clearing a gate, once its master is down. Ends the run. */
   clearGate(): boolean {
-    if (!this.gate || !this.isTopFloor || this.status !== 'onStairs') return false;
-    const gold = gateClearGold(this.gate);
+    const gate = this.gate;
+    if (!gate || !this.gateCleared || (this.status !== 'onStairs' && this.status !== 'playing')) return false;
+    const gold = gateClearGold(gate);
     this.runGold += gold;
-    this.say(`${gateName(this.gate)} 클리어! 보상 +${gold}G`);
+    this.say(`${gateName(gate)} 클리어! 보상 +${gold}G`);
     this.takeGear(rollGear(this.rng, this.danger + 4));
     this.status = 'returned';
     return true;
