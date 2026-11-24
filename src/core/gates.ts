@@ -5,18 +5,29 @@ import { Rng } from './rng';
  * Gates: short dungeons that open at the agency for a few days and then close.
  * A gate's grade sets how dangerous it is, measured as the tower floor it matches.
  */
-export type GateGrade = 'E' | 'D' | 'C' | 'B' | 'A' | 'S';
-export const GATE_GRADES: GateGrade[] = ['E', 'D', 'C', 'B', 'A', 'S'];
+export type GateGrade = 'E' | 'D' | 'C' | 'B' | 'A' | 'S' | 'SS' | 'SSS';
+export const GATE_GRADES: GateGrade[] = ['E', 'D', 'C', 'B', 'A', 'S', 'SS', 'SSS'];
 
-/** Tower floor the first gate floor matches, and how many floors the gate has. */
-export const GATE_INFO: Record<GateGrade, { danger: number; floors: number }> = {
+/**
+ * Tower floor the first gate floor matches, and how many floors the gate has.
+ * SS and SSS gates are as deep as the abyss and pay more gold and magic stones for the clear.
+ */
+export const GATE_INFO: Record<GateGrade, { danger: number; floors: number; gold?: number; stones?: number }> = {
   E: { danger: 2, floors: 3 },
   D: { danger: 5, floors: 3 },
   C: { danger: 8, floors: 4 },
   B: { danger: 11, floors: 4 },
   A: { danger: 14, floors: 5 },
   S: { danger: 17, floors: 5 },
+  SS: { danger: 21, floors: 6, gold: 1.5, stones: 2 },
+  SSS: { danger: 26, floors: 6, gold: 2, stones: 3 },
 };
+
+/** Magic stones for clearing a gate. */
+export function gateClearStones(g: Gate): number {
+  const info = GATE_INFO[g.grade];
+  return Math.round((2 + Math.floor(gateDanger(g, gateFloors(g)) / 4)) * (info.stones ?? 1));
+}
 
 export type GateThemeId = 'goblin' | 'wolf' | 'orc' | 'swamp' | 'shadow';
 
@@ -95,7 +106,7 @@ export function gateLevel(g: Gate): number {
 /** Gold for clearing the gate, on top of what was picked up inside. */
 export function gateClearGold(g: Gate): number {
   const base = 40 * gateDanger(g, gateFloors(g));
-  return Math.round(base * (g.rule ? 1.5 : 1) * (g.rival ? INTERCEPT_BONUS : 1));
+  return Math.round(base * (GATE_INFO[g.grade].gold ?? 1) * (g.rule ? 1.5 : 1) * (g.rival ? INTERCEPT_BONUS : 1));
 }
 
 /** The grade that suits a hunter of this level best. */

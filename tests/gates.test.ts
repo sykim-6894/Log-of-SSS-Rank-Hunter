@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { enterGate, newGame, refreshGates, settleReturn } from '../src/core/agency';
 import { botAction } from '../src/core/bot';
 import { createHunter } from '../src/core/hunter';
-import { Gate, GATE_INFO, GATE_SLOTS, GATE_THEMES, gateClearGold, gateFloors, gateKind, gradeForLevel, rollGate } from '../src/core/gates';
+import { Gate, GATE_INFO, GATE_SLOTS, GATE_THEMES, gateClearGold, gateClearStones, gateFloors, gateKind, gradeForLevel, rollGate } from '../src/core/gates';
 import { MONSTERS, monsterPool } from '../src/core/monsters';
 import { Rng } from '../src/core/rng';
 import { TowerRun } from '../src/core/run';
@@ -42,7 +42,9 @@ describe('gate board', () => {
   it('offers grades that fit the best hunter', () => {
     expect(gradeForLevel(1)).toBe('E');
     expect(gradeForLevel(8)).toBe('D');
-    expect(gradeForLevel(30)).toBe('S');
+    expect(gradeForLevel(19)).toBe('S');
+    expect(gradeForLevel(23)).toBe('SS');
+    expect(gradeForLevel(30)).toBe('SSS');
   });
 
   it('E gates have no special rule', () => {
@@ -277,5 +279,37 @@ describe('bag after a trip', () => {
     h.bag.hp = 0;
     settleReturn(state, rng, 0);
     expect(h.bag.hp).toBe(1);
+  });
+});
+
+describe('SS and SSS gates', () => {
+  it('go as deep as the abyss and pay more gold and stones than an S gate', () => {
+    const s = gate({ grade: 'S' });
+    const ss = gate({ grade: 'SS' });
+    const sss = gate({ grade: 'SSS' });
+    expect(gateFloors(ss)).toBe(6);
+    expect(GATE_INFO.SSS.danger).toBeGreaterThan(GATE_INFO.SS.danger);
+    expect(gateClearGold(ss)).toBeGreaterThan(gateClearGold(s) * 1.5);
+    expect(gateClearGold(sss)).toBeGreaterThan(gateClearGold(ss) * 1.5);
+    expect(gateClearStones(ss)).toBeGreaterThanOrEqual(gateClearStones(s) * 2);
+    expect(gateClearStones(sss)).toBeGreaterThan(gateClearStones(ss));
+  });
+
+  it('show up on the board once the best hunter is strong enough', () => {
+    const rng = new Rng(11);
+    const state = newGame(rng);
+    state.slots[0]!.level = 30;
+    for (let i = 0; i < 10; i++) settleReturn(state, rng, 0);
+    expect(state.gates!.some((g) => g.grade === 'SS' || g.grade === 'SSS')).toBe(true);
+  });
+
+  it('a clear gives the bigger stone reward', () => {
+    const h = hunter();
+    const g = gate({ grade: 'SS' });
+    const run = new TowerRun(h, new Rng(3), { gate: g });
+    run.enterFloor(gateFloors(g));
+    run.monsters = [];
+    expect(run.clearGate()).toBe(true);
+    expect(run.stones).toBe(gateClearStones(g));
   });
 });
