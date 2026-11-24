@@ -4,7 +4,7 @@ import {
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
-import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
+import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, rollGate, rollGateGrade, rollRift } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { Duel, RunSnapshot } from './run';
@@ -101,6 +101,10 @@ export interface GameState {
   nextGateId?: number;
   /** Gates cleared by us and by the rival agency. */
   gateRecord?: { ours: number; rival: number };
+  /** The great rift, while it is open (or our hunter is inside). */
+  rift?: Gate;
+  /** Day the next great rift opens. */
+  nextRiftDay?: number;
 }
 
 /** Each day the rival agency sends a team into one open gate with this chance. */
@@ -148,6 +152,38 @@ function startRaid(state: GameState, rng: Rng, news: string[]) {
   news.push(`${who}이(가) ${gateName(g)}에 들어갔다. 다음 날이면 끝낼지도 모른다.`);
 }
 
+/**
+ * The great rift. One opens every few days, sized to the agency's best hunter, and stays three days.
+ * Our hunter gets one try. If we don't close it, the rival agency does and its best hunter grows.
+ * `closed` says whether our hunter just cleared it.
+ */
+export function updateRift(state: GameState, rng: Rng, news: string[], closed = false) {
+  const day = state.day ?? 0;
+  const r = state.rift;
+  if (r && (r.entered || r.closesOn < day)) {
+    if (closed && r.entered) {
+      news.push(`대균열을 막아냈다! 협회가 ${state.agent.name}의 이름을 기억한다.`);
+    } else {
+      const record = (state.gateRecord ??= { ours: 0, rival: 0 });
+      record.rival++;
+      const best = [...state.rival.roster].sort((a, b) => combatPower(b) - combatPower(a))[0];
+      if (best) for (let i = 0; i < RIFT.rivalLevels; i++) levelUp(best);
+      news.push(best
+        ? `대균열을 ${state.rival.name}의 ${best.name}이(가) 막아냈다. 명성을 얻고 더 강해졌다.`
+        : `대균열을 ${state.rival.name}이(가) 막아냈다.`);
+    }
+    state.rift = undefined;
+    state.nextRiftDay = day + rng.int(RIFT.gapMin, RIFT.gapMax);
+  }
+  if (!state.rift && day >= (state.nextRiftDay ?? RIFT.firstDay)) {
+    const best = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
+    const id = state.nextGateId ?? 1;
+    state.nextGateId = id + 1;
+    state.rift = rollRift(rng, id, best, day);
+    news.push(`대균열이 열렸다! ${RIFT.days}일 안에 막지 못하면 ${state.rival.name}이(가) 공을 가져간다.`);
+  }
+}
+
 /** Drops gates past their last day and opens new ones until there are GATE_SLOTS. */
 export function refreshGates(state: GameState, rng: Rng) {
   const day = state.day ?? 0;
@@ -163,6 +199,10 @@ export function refreshGates(state: GameState, rng: Rng) {
 
 /** Takes a gate off the board for the hunter going in. Win or lose, it is gone. */
 export function enterGate(state: GameState, id: number): Gate | undefined {
+  if (state.rift && state.rift.id === id && !state.rift.entered) {
+    state.rift.entered = true;
+    return state.rift;
+  }
   const gates = state.gates ?? [];
   const i = gates.findIndex((g) => g.id === id);
   return i < 0 ? undefined : gates.splice(i, 1)[0];
@@ -604,7 +644,7 @@ export function settleReturn(
   // Potions and scrolls don't come home: the bag goes back to one health potion.
   hunter.bag = startingBag();
 
-  const news = afterRun(state, rng, encounters);
+  const news = afterRun(state, rng, encounters, clearedGate);
   const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, ...news };
 
   const now = gradeIn(state, hunter);
@@ -692,7 +732,7 @@ function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
 }
 
 /** Shared bookkeeping at the end of every run. */
-function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): AfterRunNews {
+function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], clearedGate = false): AfterRunNews {
   const news: AfterRunNews = { signingSupport: 0, finished: [], grewStronger: [], gateNews: [] };
 
   // Rival hunters met in the tower: finished for good, or back and stronger.
@@ -749,6 +789,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
   resolveRaids(state, rng, news.gateNews);
   refreshGates(state, rng);
   startRaid(state, rng, news.gateNews);
+  updateRift(state, rng, news.gateNews, clearedGate);
   return news;
 }
 

@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
 import { activeHunter, AGENCY_NAME_MAX, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
-import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
+import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
 import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
@@ -259,13 +259,15 @@ export class HQScene extends Phaser.Scene {
     text(this, GW / 2, 52, '들어가면 클리어하든 못 하든 닫힌다. 귀환할 때마다 하루가 지나고 새 게이트가 열린다.', 12, INK.quiet)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
     const rec = state.gateRecord ?? { ours: 0, rival: 0 };
-    const recY = PORTRAIT ? 100 + 3 * 146 + 4 : 96 + 146 + 8;
+    const rift = state.rift && !state.rift.entered ? [state.rift] : [];
+    const gates = [...rift, ...(state.gates ?? [])];
+    const cols = PORTRAIT ? 1 : 3;
+    const rows = Math.ceil(gates.length / cols);
+    const recY = (PORTRAIT ? 100 : 96) + rows * 146 + (PORTRAIT ? 4 : 8);
     text(this, GW / 2, recY, `게이트 공략  ${state.agent.name} ${rec.ours} : ${rec.rival} ${state.rival.name}`, 12, INK.text).setOrigin(0.5, 0);
     text(this, GW / 2, recY + 20, `${state.rival.name}도 게이트를 노린다. 먼저 들어간 게이트는 다음 날 클리어될 수 있다.`, 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
-    const gates = state.gates ?? [];
     const cardH = 136;
-    const cols = PORTRAIT ? 1 : 3;
     const cw = (w - (cols - 1) * 12) / cols;
     gates.forEach((g: Gate, i) => {
       const cx = x + (i % cols) * (cw + 12);
@@ -273,18 +275,26 @@ export class HQScene extends Phaser.Scene {
       panel(this, cx, cy, cw, cardH);
       const lvl = gateLevel(g);
       const hard = !!h && h.level < lvl - 1;
-      title(this, cx + 14, cy + 12, gateName(g), 15, g.rule ? INK.red : INK.gold);
+      if (g.rift) {
+        const fx = this.add.graphics();
+        fx.lineStyle(2, 0xb05cff, 0.9).strokeRect(cx + 3, cy + 3, cw - 6, cardH - 6);
+      }
+      title(this, cx + 14, cy + 12, gateName(g), 15, g.rift ? '#d79bff' : g.rule ? INK.red : INK.gold);
       const left = g.closesOn - day;
-      text(this, cx + cw - 14, cy + 14, g.rival ? '경쟁 중' : left <= 0 ? '오늘까지' : `${left + 1}일 남음`, 12, g.rival ? INK.red : INK.quiet).setOrigin(1, 0);
-      fit(text(this, cx + 14, cy + 38, `${gateFloors(g)}층 · 적정 Lv.${lvl}${hard ? ' (위험)' : ''}`, 12, hard ? INK.red : INK.text), cw - 28);
-      if (g.rival) {
+      text(this, cx + cw - 14, cy + 14, g.rival ? '경쟁 중' : left <= 0 ? '오늘까지' : `${left + 1}일 남음`, 12, g.rival || g.rift ? INK.red : INK.quiet).setOrigin(1, 0);
+      fit(text(this, cx + 14, cy + 38, `${g.rift ? `${g.grade}급 상당 · ` : ''}${gateFloors(g)}층 · 적정 Lv.${lvl}${hard ? ' (위험)' : ''}`, 12, hard ? INK.red : INK.text), cw - 28);
+      if (g.rift) {
+        fit(text(this, cx + 14, cy + 56, cols > 1 ? '단 한 번. 못 막으면 경쟁사가 가져간다' : `한 번뿐인 기회. 못 막으면 ${state.rival.name}이(가) 공을 가져간다`, 12, '#d79bff'), cw - 28);
+      } else if (g.rival) {
         const who = g.rival.hunter ? `${g.rival.agency} ${g.rival.hunter}(Lv.${g.rival.level})` : `${g.rival.agency} 팀(Lv.${g.rival.level})`;
         fit(text(this, cx + 14, cy + 56, `${who} 공략 중${cols > 1 ? '' : ' · 다음 날 클리어 시도'}`, 12, '#d79bff'), cw - 28);
       } else {
         fit(text(this, cx + 14, cy + 56, `출몰: ${GATE_THEMES[g.theme].pool.map((id) => MONSTERS[id].name).join(', ')}`, 12, INK.quiet), cw - 28);
       }
       fit(text(this, cx + 14, cy + 74, g.rule ? `특수 규칙 [${GATE_RULES[g.rule].name}] ${GATE_RULES[g.rule].text}` : '특수 규칙 없음', 12, g.rule ? INK.rust : INK.faint), cw - 28);
-      button(this, cx + 14, cy + cardH - 40, cw - 28, 30, `${g.rival ? '가로채기' : '입장'} · 클리어 보상 ${gateClearGold(g)}G+장비`, () => {
+      const verb = g.rift ? '막으러 가기' : g.rival ? '가로채기' : '입장';
+      const reward = g.rift ? `${gateClearGold(g)}G+마력석 ${gateClearStones(g)}` : `클리어 보상 ${gateClearGold(g)}G+장비`;
+      button(this, cx + 14, cy + cardH - 40, cw - 28, 30, `${verb} · ${reward}`, () => {
         persist();
         this.scene.start('Tower', { gateId: g.id });
       }, { primary: true, size: 12, enabled: !!h });
@@ -310,7 +320,8 @@ export class HQScene extends Phaser.Scene {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
       }, { primary: true, size, enabled: !!h });
-      button(this, x + w - gw, y, gw, hgt, `게이트 ${state.gates?.length ?? 0}`, () =>
+      const rift = state.rift && !state.rift.entered;
+      button(this, x + w - gw, y, gw, hgt, rift ? `게이트 ${state.gates?.length ?? 0} · 균열!` : `게이트 ${state.gates?.length ?? 0}`, () =>
         this.scene.restart({ messages: this.messages, gates: true }), { size: Math.min(size, 18), enabled: !!h });
       return;
     }
