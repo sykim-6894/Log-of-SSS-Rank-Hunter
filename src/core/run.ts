@@ -1,7 +1,7 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
-import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateDanger, gateFloors, gateName, gatePool } from './gates';
+import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateClearStones, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import {
   abyssDepth, bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
   stalkerKind, TOP_FLOOR, TRAIT_RULES,
@@ -1647,7 +1647,7 @@ export class TowerRun {
     const gold = gateClearGold(gate);
     this.runGold += gold;
     this.say(`${gateName(gate)} 클리어! 보상 +${gold}G`);
-    this.gainStones(2 + Math.floor(this.danger / 4), this.pos.x, this.pos.y);
+    this.gainStones(gateClearStones(gate), this.pos.x, this.pos.y);
     this.takeGear(rollGear(this.rng, this.danger + 4));
     this.status = 'returned';
     return true;
