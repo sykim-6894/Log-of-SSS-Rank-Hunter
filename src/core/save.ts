@@ -1,4 +1,4 @@
-import { GameState, HallOfFameEntry, SLOT_COUNT, worldRankers } from './agency';
+import { GameState, HallOfFameEntry, refreshWorldRankers, SLOT_COUNT, worldRankers } from './agency';
 import { Grade, Hunter, powerGrade } from './hunter';
 import { emptyBag } from './items';
 
@@ -80,10 +80,9 @@ export function loadGame(storage: Storage): GameState | undefined {
   if (!raw) return undefined;
   try {
     const data = JSON.parse(raw) as GameState | SaveV2 | SaveV1;
-    if (data.version === 1) return migrateV1(data);
-    if (data.version === 2) return migrateV2(data);
-    if (data.version === 3) return data;
-    return undefined;
+    const state = data.version === 1 ? migrateV1(data) : data.version === 2 ? migrateV2(data) : data.version === 3 ? data : undefined;
+    if (state) refreshWorldRankers(state);
+    return state;
   } catch {
     return undefined;
   }

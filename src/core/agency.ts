@@ -1,5 +1,5 @@
 import {
-  combatPower, createHunter, Grade, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
+  combatPower, createHunter, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
@@ -21,6 +21,8 @@ export interface HallOfFameEntry {
   bestFloor: number;
   totalTribute: number;
   score: number;
+  /** Combat power when they fell. Older saves lack it. */
+  power?: number;
   fate: string;
 }
 
@@ -37,25 +39,35 @@ export interface WorldRanker {
   agency: string;
   level: number;
   bestFloor: number;
+  /** Ranking score, which is combat power. */
   score: number;
 }
 
 export const SLOT_COUNT = 3;
 
+/**
+ * The association's top 10 at the start. All of them are stronger than any A grade hunter
+ * (combat power 2000), so S and above have to be earned by real strength.
+ */
 export function worldRankers(): WorldRanker[] {
   const list: Array<[string, string, number, number, number]> = [
-    ['천도결', '하늘문 길드', 42, 10, 9000],
-    ['서리안', '청운 에이전시', 36, 10, 7000],
-    ['마태한', '철갑 헌터스', 31, 10, 5500],
-    ['연소휘', '하늘문 길드', 27, 10, 4200],
-    ['구자겸', '바람결 컴퍼니', 23, 9, 3300],
-    ['하은재', '청운 에이전시', 19, 8, 2600],
-    ['방도철', '철갑 헌터스', 16, 7, 2000],
-    ['유가람', '바람결 컴퍼니', 13, 6, 1600],
-    ['진무열', '독립 헌터', 11, 5, 1300],
-    ['나세아', '독립 헌터', 9, 5, 1000],
+    ['천도결', '하늘문 길드', 72, 20, 9000],
+    ['서리안', '청운 에이전시', 64, 20, 7200],
+    ['마태한', '철갑 헌터스', 58, 20, 5800],
+    ['연소휘', '하늘문 길드', 52, 20, 4700],
+    ['구자겸', '바람결 컴퍼니', 47, 20, 3900],
+    ['하은재', '청운 에이전시', 43, 19, 3300],
+    ['방도철', '철갑 헌터스', 40, 18, 2900],
+    ['유가람', '바람결 컴퍼니', 37, 17, 2600],
+    ['진무열', '독립 헌터', 35, 16, 2350],
+    ['나세아', '독립 헌터', 33, 15, 2150],
   ];
   return list.map(([name, agency, level, bestFloor, score], i) => ({ id: -1 - i, name, agency, level, bestFloor, score }));
+}
+
+/** Saves from before the rankers were raised hold rankers weaker than A grade: swap in the new ones. */
+export function refreshWorldRankers(state: GameState) {
+  if (state.world.some((w) => w.score < GRADE_A_POWER)) state.world = worldRankers();
 }
 
 /** Everything that survives between runs. */
@@ -150,18 +162,18 @@ export interface RankRow {
   note: string;
 }
 
-/** Live top 10 over every named hunter: ours, the rival agency's, and the fallen. */
+/** Live top 10 by combat power over every named hunter: ours, the rival agency's, the fallen, the rankers. */
 export function ranking(state: GameState): RankRow[] {
   const rows: RankRow[] = [];
   for (const h of state.slots) {
-    if (h) rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: hallOfFameScore(h), status: 'ours', note: '우리 소속' });
+    if (h) rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'ours', note: '우리 소속' });
   }
   for (const h of state.rival.roster) {
     const note = h.origin === 'rival' ? '라이벌' : h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
-    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: hallOfFameScore(h), status: 'rival', note });
+    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'rival', note });
   }
   for (const e of state.hallOfFame) {
-    rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score: e.score, status: 'gone', note: e.fate });
+    rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score: e.power ?? estimatePower(e.level), status: 'gone', note: e.fate });
   }
   for (const w of state.world) {
     rows.push({ id: w.id, name: w.name, level: w.level, bestFloor: w.bestFloor, score: w.score, status: 'world', note: w.agency });
@@ -169,10 +181,28 @@ export function ranking(state: GameState): RankRow[] {
   return rows.sort((a, b) => b.score - a.score || a.id - b.id).slice(0, 10);
 }
 
+/** Rough combat power of an old record that did not store it: a fresh hunter plus level-ups. */
+function estimatePower(level: number): number {
+  return 95 + 37 * (level - 1);
+}
+
 /** A hunter's grade right now: S and above from the ranking, otherwise from combat power. */
 export function gradeIn(state: GameState, h: Hunter): Grade {
   const i = ranking(state).findIndex((r) => r.id === h.id);
   return (i >= 0 ? rankGradeOf(i) : undefined) ?? powerGrade(h);
+}
+
+/** Floors right after a boss where a run may start, and the grade needed for each. */
+export const SKIP_POINTS: ReadonlyArray<[number, Grade]> = [
+  [6, 'D'],
+  [11, 'C'],
+  [16, 'B'],
+];
+
+/** Floors this hunter may start a run on: always 1, plus each skip point their grade allows and they have reached before. */
+export function startFloors(state: GameState, h: Hunter): number[] {
+  const rank = gradeRank(gradeIn(state, h));
+  return [1, ...SKIP_POINTS.filter(([floor, need]) => rank >= gradeRank(need) && h.bestFloor >= floor).map(([floor]) => floor)];
 }
 
 /** Marks whoever holds #1 as having been SSS. */
@@ -330,7 +360,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
 function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
   return {
     id: h.id, name: h.name, grade, level: h.level, kills: h.kills, bestFloor: h.bestFloor,
-    totalTribute: h.totalTribute, score: hallOfFameScore(h), fate,
+    totalTribute: h.totalTribute, score: hallOfFameScore(h), power: combatPower(h), fate,
   };
 }
 

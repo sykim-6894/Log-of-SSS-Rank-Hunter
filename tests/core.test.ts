@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { activeHunter, buyItem, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, train, trainingCost } from '../src/core/agency';
+import { activeHunter, buyItem, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, startFloors, train, trainingCost, worldRankers } from '../src/core/agency';
 import { botAction, stepTowards } from '../src/core/bot';
 import { generateFloor, isWalkable, MAP_W, Tile } from '../src/core/dungeon';
-import { combatPower, createHunter as makeHunter, expToNext, gainExp, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
+import { combatPower, createHunter as makeHunter, expToNext, gainExp, GRADE_A_POWER, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
 import { Rng } from '../src/core/rng';
 import { TowerRun } from '../src/core/run';
 import { loadGame, SAVE_KEY, saveGame } from '../src/core/save';
-import { bossFor, MONSTERS, TOP_FLOOR } from '../src/core/monsters';
+import { bossFor, floorExpScale, MONSTERS, overLevelFactor, recommendedLevel, TOP_FLOOR } from '../src/core/monsters';
 import { BAG_MAX, CURSE_FROM_FLOOR, equipIfBetter, Gear, rollChest, rollGear } from '../src/core/items';
 
 const createHunter = (rng: Rng) => makeHunter(rng, 1);
@@ -212,7 +212,7 @@ function memStorage() {
 
 function filler(n: number, score: number) {
   return Array.from({ length: n }, (_, i) => ({
-    id: 1000 + i, name: `기록${i}`, grade: 'A' as const, level: 1, kills: 0, bestFloor: 1, totalTribute: 0, score: score - i, fate: '사망',
+    id: 1000 + i, name: `기록${i}`, grade: 'A' as const, level: 1, kills: 0, bestFloor: 1, totalTribute: 0, score: score - i, power: score - i, fate: '사망',
   }));
 }
 
@@ -247,6 +247,42 @@ describe('ranking and grades', () => {
     state.hallOfFame = filler(10, 100000);
     expect(gradeIn(state, h)).toBe('F');
     expect(ranking(state)).toHaveLength(10);
+  });
+
+  it('association rankers are all stronger than an A grade hunter', () => {
+    for (const w of worldRankers()) expect(w.score).toBeGreaterThan(GRADE_A_POWER);
+    const rng = new Rng(5);
+    const state = newGame(rng);
+    const h = activeHunter(state)!;
+    // A hunter with a huge kill record but little strength stays out of the top 10.
+    h.killScore = 100000;
+    h.bestFloor = 20;
+    expect(gradeIn(state, h)).toBe('F');
+    h.atk = 2000;
+    expect(gradeIn(state, h)).toBe('SSS');
+  });
+
+  it('old saves get the stronger rankers', () => {
+    const rng = new Rng(5);
+    const state = newGame(rng);
+    state.world = state.world.map((w) => ({ ...w, score: 1000 }));
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    saveGame(storage, state);
+    expect(loadGame(storage)!.world).toEqual(worldRankers());
+  });
+
+  it('grade lets a hunter skip floors they have reached before', () => {
+    const rng = new Rng(5);
+    const state = newGame(rng);
+    const h = activeHunter(state)!;
+    expect(startFloors(state, h)).toEqual([1]);
+    h.atk = 90; // combat power past C
+    expect(startFloors(state, h)).toEqual([1]); // never been past floor 5
+    h.bestFloor = 12;
+    expect(startFloors(state, h)).toEqual([1, 6, 11]);
+    const run = new TowerRun(h, rng, { startFloor: 11 });
+    expect(run.floor).toBe(11);
   });
 
   it('tribute keeps falling through S, SS and SSS', () => {
@@ -602,6 +638,46 @@ describe('saving a run in progress', () => {
     expect(types).toContain('hit');
     expect(types).toContain('hurt');
     expect(run.drainEvents()).toEqual([]);
+  });
+});
+
+describe('experience and ranged enemies', () => {
+  it('higher floors give more experience; far over-levelled hunters get little', () => {
+    expect(floorExpScale(10)).toBeGreaterThan(3);
+    expect(overLevelFactor(recommendedLevel(5), 5)).toBe(1);
+    expect(overLevelFactor(20, 1)).toBe(0.1);
+    const fresh = createHunter(new Rng(1));
+    gainExp(fresh, 23); // level 3, the right level for floor 1
+    const strong = createHunter(new Rng(1));
+    for (let i = 0; i < 30; i++) gainExp(strong, 10000);
+    const kill = (h: Hunter) => {
+      const run = new TowerRun(h, new Rng(3));
+      run.monsters = [];
+      run.map.tiles[run.pos.y][run.pos.x + 1] = Tile.Floor;
+      run.monsters.push({ id: 1, kind: MONSTERS.goblin, x: run.pos.x + 1, y: run.pos.y, hp: 1, maxHp: 1, atk: 0, def: 0, awake: true });
+      const before = h.exp;
+      const lv = h.level;
+      run.act({ type: 'move', dx: 1, dy: 0 });
+      return h.level > lv ? Infinity : h.exp - before;
+    };
+    expect(kill(fresh)).toBe(MONSTERS.goblin.exp);
+    expect(kill(strong)).toBe(1);
+  });
+
+  it('an archer shoots along a clear line, not through walls', () => {
+    const run = new TowerRun(createHunter(new Rng(6)), new Rng(6));
+    run.monsters = [];
+    const { x, y } = run.pos;
+    for (let i = 1; i <= 3; i++) run.map.tiles[y][x + i] = Tile.Floor;
+    run.monsters.push({ id: 1, kind: MONSTERS.archer, x: x + 3, y, hp: 50, maxHp: 50, atk: 8, def: 0, awake: true });
+    run.drainEvents();
+    run.act({ type: 'wait' });
+    const events = run.drainEvents().map((e) => e.type);
+    expect(events).toContain('shot');
+    expect(events).toContain('hurt');
+    run.map.tiles[y][x + 2] = Tile.Wall;
+    run.act({ type: 'wait' });
+    expect(run.drainEvents().map((e) => e.type)).not.toContain('shot');
   });
 });
 

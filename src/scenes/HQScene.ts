@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, train, TRAINING, trainingCost } from '../core/agency';
+import { activeHunter, buyItem, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost } from '../core/agency';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
@@ -13,6 +13,8 @@ export interface HQData {
   messages?: string[];
   /** Second click on 방출 confirms the release. */
   armRelease?: boolean;
+  /** Show the start floor choices instead of the depart button. */
+  pickStart?: boolean;
 }
 
 let welcomed = false;
@@ -44,6 +46,7 @@ function fit(t: Phaser.GameObjects.Text, width: number) {
 export class HQScene extends Phaser.Scene {
   private messages: string[] = [];
   private releaseArmed = false;
+  private pickingStart = false;
 
   constructor() {
     super('HQ');
@@ -52,6 +55,7 @@ export class HQScene extends Phaser.Scene {
   init(data: HQData) {
     this.messages = data.messages ?? [];
     this.releaseArmed = !!data.armRelease;
+    this.pickingStart = !!data.pickStart;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
       this.messages = [
         `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
@@ -90,12 +94,36 @@ export class HQScene extends Phaser.Scene {
     this.drawRival(488, 442);
     this.drawLog(488, 530);
 
-    button(this, 488, 618, 448, 58, '▶  성장의 탑 입장', () => {
-      persist();
-      this.scene.start('Tower');
-    }, { primary: true, size: 24, enabled: !!activeHunter(state) });
+    this.departButton(488, 618, 448, 58, 24);
 
     text(this, 480, 698, '방향키·WASD 이동/공격   Q 회전베기   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
+  }
+
+  /**
+   * Enter the tower. When the hunter's grade lets them skip low floors, the first press
+   * turns the button into one button per start floor.
+   */
+  private departButton(x: number, y: number, w: number, hgt: number, size: number) {
+    const h = activeHunter(state);
+    const go = (floor: number) => {
+      persist();
+      this.scene.start('Tower', { startFloor: floor });
+    };
+    const floors = h ? startFloors(state, h) : [1];
+    if (!this.pickingStart || floors.length < 2) {
+      button(this, x, y, w, hgt, '▶  성장의 탑 입장', () => {
+        if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
+        else go(1);
+      }, { primary: true, size, enabled: !!h });
+      return;
+    }
+    const cancelW = 56;
+    const gap = 6;
+    const bw = (w - cancelW - gap * floors.length) / floors.length;
+    floors.forEach((f, i) => {
+      button(this, x + i * (bw + gap), y, bw, hgt, `▶ ${f}층부터`, () => go(f), { primary: true, size: Math.min(size, 16) });
+    });
+    button(this, x + w - cancelW, y, cancelW, hgt, '취소', () => this.scene.restart({ messages: this.messages }), { size: 12 });
   }
 
   private createPortrait() {
@@ -130,10 +158,7 @@ export class HQScene extends Phaser.Scene {
     if (this.messages.length && tab !== 'log') {
       fit(text(this, x, departY - 26, `· ${this.messages[0]}`, 12, INK.text), w);
     }
-    button(this, x, departY, w, 56, '▶  성장의 탑 입장', () => {
-      persist();
-      this.scene.start('Tower');
-    }, { primary: true, size: 20, enabled: !!activeHunter(state) });
+    this.departButton(x, departY, w, 56, 20);
 
     const g = this.add.graphics();
     g.fillStyle(PALETTE.panelDark, 1).fillRect(0, tabsY, GW, GH - tabsY);
@@ -197,6 +222,13 @@ export class HQScene extends Phaser.Scene {
     const power = combatPower(h);
     const grade = gradeIn(state, h);
     const next = [...GRADE_THRESHOLDS].reverse().find(([, min]) => min > power);
+    const board = ranking(state);
+    const place = board.findIndex((r) => r.id === h.id);
+    const tenth = board[board.length - 1];
+    const goal =
+      place >= 0 ? `협회 랭킹 ${place + 1}위`
+      : next ? `다음 ${next[0]}급까지 ${next[1] - power}`
+      : `S급(랭킹 10위)까지 ${Math.max(1, (tenth?.score ?? power) - power + 1)}`;
 
     const g = this.add.graphics();
     g.fillStyle(PALETTE.shadow, 1).fillRect(x + 4, y + 4, w, ht);
@@ -248,7 +280,7 @@ export class HQScene extends Phaser.Scene {
 
     dots(this, x + 18, y + 188, w - 36, PALETTE.paperLine);
     title(this, x + 18, y + 198, `전투력 ${power}`, 15, INK.ink);
-    text(this, x + w - 18, y + 201, next ? `다음 ${next[0]}급까지 ${next[1] - power}` : '최고 등급', 12, INK.inkQuiet).setOrigin(1, 0);
+    text(this, x + w - 18, y + 201, goal, 12, INK.inkQuiet).setOrigin(1, 0);
     const extras = [h.rescues ? `위기 지원 ${h.rescues}` : '', h.skillPower > 1.5 ? `회전베기 ×${h.skillPower}` : ''].filter(Boolean).join(' · ');
     fit(text(this, x + 18, y + 228, `처치 ${h.kills} · 최고 ${h.bestFloor}층 · 상납 ${h.totalTribute}G` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
     const others = state.slots.filter(Boolean).length > 1;
@@ -354,7 +386,7 @@ export class HQScene extends Phaser.Scene {
     text(this, cols.name, hy, '이름', 12, INK.faint);
     text(this, cols.lv, hy, 'Lv', 12, INK.faint);
     text(this, cols.floor, hy, '층', 12, INK.faint);
-    text(this, cols.score, hy, '점수', 12, INK.faint);
+    text(this, cols.score, hy, '전투력', 12, INK.faint);
     text(this, cols.note, hy, '소속 · 최후', 12, INK.faint).setOrigin(1, 0);
     dots(this, x + 16, hy + 18, w - 32);
     const color = { ours: INK.gate, rival: '#d79bff', gone: INK.faint, world: INK.quiet } as const;
