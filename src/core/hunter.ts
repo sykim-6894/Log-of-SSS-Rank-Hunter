@@ -56,6 +56,8 @@ export interface Hunter {
   skillPower: number;
   /** For a rival hunter: the id of our hunter they shadow. */
   rivalOf?: number;
+  /** Times this enemy hunter was beaten and let go for a reward. Each makes them much stronger. */
+  spared?: number;
   /** Which pixel figure to draw. Always the class's look. */
   look?: number;
   /** Class, chosen at hiring. Fixed for life. */

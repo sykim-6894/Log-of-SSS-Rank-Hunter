@@ -3,7 +3,7 @@ import { activeHunter, AGENCY_NAME_MAX, buyItem, canChallenge, drawGear, nextCha
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
-import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
+import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
@@ -802,12 +802,15 @@ export class HQScene extends Phaser.Scene {
     title(this, x + 18, y + 18, rival.name, 15, '#d79bff');
     const rec = state.gateRecord ?? { ours: 0, rival: 0 };
     text(this, x + w - 18, y + 20, `옛 동료 ${former} · 라이벌 ${rival.roster.length - former} · 게이트 ${rec.rival}`, 12, INK.quiet).setOrigin(1, 0);
+    // Each of our hunters has their own rival: the active hunter's first.
     const me = activeHunter(state);
-    const mine = me && rival.roster.find((h) => h.origin === 'rival' && h.rivalOf === me.id);
-    const line = mine
-      ? `${me!.name}의 라이벌: ${mine.name} · 전투력 ${combatPower(mine)} (${gradeIn(state, mine)}급)`
-      : '우리 헌터가 S급이 되면 라이벌을 내세운다.';
-    fit(text(this, x + 18, y + 44, line, 12, mine ? INK.text : INK.faint), w - 36);
+    const ours = [me, ...state.slots.filter((s) => s && s !== me)].filter((s): s is Hunter => !!s);
+    const pairs = ours.flatMap((o) => {
+      const r = rival.roster.find((h) => h.origin === 'rival' && h.rivalOf === o.id);
+      return r ? [`${o.name}의 라이벌 ${r.name} ${combatPower(r)}`] : [];
+    });
+    const line = pairs.length ? pairs.join(' · ') : '우리 헌터가 S급이 되면 라이벌을 내세운다.';
+    fit(text(this, x + 18, y + 44, line, 12, pairs.length ? INK.text : INK.faint), w - 36);
   }
 
   private drawLog(x: number, y: number, w = 448, count = 3, wrap = false) {

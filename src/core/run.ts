@@ -503,7 +503,8 @@ export class TowerRun {
   }
 
   private maybeSpawnRival(floor: number) {
-    const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id));
+    // A rival only hunts the hunter they shadow; others' rivals stay away.
+    const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id) && (h.origin !== 'rival' || h.rivalOf === this.hunter.id));
     if (floor < 2 || pool.length === 0) return;
     if (!this.rng.chance(this.options.encounterChance ?? 0.25)) return;
     // The hunter's own rival shows up more often than the others.
@@ -528,8 +529,9 @@ export class TowerRun {
       range: h.cls === 'mage' || h.cls === 'archer' ? 4 : undefined,
     };
     this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
-    const tag = h.origin === 'rival' ? '라이벌' : '옛 동료';
-    this.say(`[${tag}] ${h.name}의 기척이 느껴진다...`);
+    const tag = h.origin === 'rival' ? `${this.hunter.name}의 라이벌` : '옛 동료';
+    const again = h.spared ? ` 풀어준 뒤로 훨씬 강해졌다 (${h.spared}번째 재회).` : '';
+    this.say(`[${tag}] ${h.name}의 기척이 느껴진다...${again}`);
   }
 
   private randomFreeSpot(): Point | undefined {

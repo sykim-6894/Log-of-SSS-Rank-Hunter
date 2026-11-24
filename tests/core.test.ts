@@ -637,7 +637,9 @@ describe('saving a run in progress', () => {
   it('a rival hunter in a saved run is linked back to the roster', () => {
     const rival = makeHunter(new Rng(4), 77);
     rival.origin = 'rival';
-    const run = new TowerRun(createHunter(new Rng(4)), new Rng(4), { rivals: [rival], encounterChance: 1 });
+    const me = createHunter(new Rng(4));
+    rival.rivalOf = me.id;
+    const run = new TowerRun(me, new Rng(4), { rivals: [rival], encounterChance: 1 });
     run.enterFloor(2);
     const before = run.monsters.find((m) => m.hunter);
     const back = TowerRun.restore(JSON.parse(JSON.stringify(run.snapshot())), run.hunter, new Rng(1), { rivals: [rival] })!;

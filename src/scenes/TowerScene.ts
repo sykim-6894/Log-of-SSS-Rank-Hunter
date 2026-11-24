@@ -1073,7 +1073,7 @@ export class TowerScene extends Phaser.Scene {
   private showChoice() {
     const run = this.run;
     const c = run.pendingChoice!;
-    const tag = c.hunter.origin === 'rival' ? '라이벌' : '옛 동료';
+    const tag = c.hunter.origin === 'rival' ? `${run.hunter.name}의 라이벌` : '옛 동료';
     const pick = (i: number) => () => {
       this.closeOverlay();
       run.resolveChoice(i);
@@ -1081,7 +1081,7 @@ export class TowerScene extends Phaser.Scene {
     };
     this.dialog(
       `[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`,
-      [`${state.rival.name} 소속 · Lv.${c.hunter.level}`, '보상을 받고 보내주면 더 강해져서 다시 나타난다.', '완전히 쓰러뜨리면 다시는 만나지 않는다.'],
+      [`${state.rival.name} 소속 · Lv.${c.hunter.level}`, c.hunter.origin === 'rival' ? '보상을 받고 보내주면 훨씬 강해져서 다시 나타난다 (능력치 +25%).' : '보상을 받고 보내주면 더 강해져서 다시 나타난다 (능력치 +15%).', '완전히 쓰러뜨리면 다시는 만나지 않는다.'],
       [
         [`${REWARDS[c.rewards[0]].label}: ${REWARDS[c.rewards[0]].describe(c.hunter.level)}`, pick(0), true],
         [`${REWARDS[c.rewards[1]].label}: ${REWARDS[c.rewards[1]].describe(c.hunter.level)}`, pick(1), true],
@@ -1094,7 +1094,7 @@ export class TowerScene extends Phaser.Scene {
   private newsLines(n: AfterRunNews): string[] {
     const msgs: string[] = [];
     for (const name of n.finished) msgs.push(`${name}은(는) 명예의 전당에 이름만 남겼다.`);
-    for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 더 강해졌다.`);
+    for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 훨씬 강해졌다.`);
     if (n.rivalCreated) msgs.push(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`);
     msgs.push(...n.gateNews);
     return msgs;

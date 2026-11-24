@@ -304,7 +304,7 @@ export function ranking(state: GameState): RankRow[] {
     }
   }
   for (const h of state.rival.roster) {
-    const note = h.origin === 'rival' ? '라이벌' : h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
+    const note = rivalTag(state, h);
     const score = combatPower(h);
     rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'rival', note, cls: h.cls, order: score });
   }
@@ -705,8 +705,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
       state.hallOfFame.push(toRecord(h, powerGrade(h), '우리 헌터에게 완전히 쓰러짐'));
       news.finished.push(h.name);
     } else {
-      levelUp(h);
-      levelUp(h);
+      spareBoost(h);
       news.grewStronger.push(h.name);
     }
   }
@@ -725,7 +724,9 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
   for (const r of state.rival.roster.filter((h) => h.origin === 'rival')) {
     const target = state.slots.find((h) => h?.id === r.rivalOf);
     if (!target) continue;
-    const goal = combatPower(target) * (0.92 + rng.next() * 0.16);
+    // Each time our hunter let them go, they come back further ahead.
+    const edge = 1 + SPARE_EDGE * (r.spared ?? 0);
+    const goal = combatPower(target) * (0.92 + rng.next() * 0.16) * edge;
     for (let i = 0; i < 20 && combatPower(r) < goal; i++) levelUp(r);
     r.bestFloor = Math.min(TOP_FLOOR, Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1)));
     r.killScore = Math.max(r.killScore, Math.round(target.killScore * (0.9 + rng.next() * 0.2)));
@@ -749,6 +750,34 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
   refreshGates(state, rng);
   startRaid(state, rng, news.gateNews);
   return news;
+}
+
+/** Stat gain for an enemy hunter let go with a reward: a rival grows more than an old colleague. */
+export const SPARE_BOOST = { rival: 0.25, other: 0.15 };
+/** How far a rival keeps ahead of the hunter they shadow, per time they were let go. */
+export const SPARE_EDGE = 0.12;
+
+/** Beaten and let go: two levels and a big jump in every stat. */
+export function spareBoost(h: Hunter) {
+  levelUp(h);
+  levelUp(h);
+  const f = 1 + (h.origin === 'rival' ? SPARE_BOOST.rival : SPARE_BOOST.other);
+  h.maxHp = Math.round(h.maxHp * f);
+  h.maxMp = Math.round(h.maxMp * f);
+  h.atk = Math.round(h.atk * f);
+  h.def = Math.round(h.def * f);
+  h.hp = h.maxHp;
+  h.mp = h.maxMp;
+  h.spared = (h.spared ?? 0) + 1;
+}
+
+/** "강도윤의 라이벌" for a rival, or how an old colleague ended up at the rival agency. */
+export function rivalTag(state: GameState, h: Hunter): string {
+  if (h.origin === 'rival') {
+    const target = state.slots.find((s) => s?.id === h.rivalOf);
+    return target ? `${target.name}의 라이벌` : '라이벌';
+  }
+  return h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
 }
 
 function createRival(state: GameState, rng: Rng, mine: Hunter): Hunter {
