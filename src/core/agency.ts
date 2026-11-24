@@ -3,7 +3,7 @@ import {
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, startingBag } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GACHA_REFUND, rollGacha, startingBag } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -396,6 +396,28 @@ export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): Purch
 }
 
 // ---------- After a run ----------
+
+export interface GachaResult {
+  gear: Gear;
+  equipped: boolean;
+  /** What was worn in that slot before. */
+  old?: Gear;
+  /** Gold back when the piece was no better and got sold. */
+  refund: number;
+}
+
+/** The active hunter pays for one gear draw. Better than what is worn: put on. Otherwise sold back. */
+export function drawGear(state: GameState, rng: Rng): GachaResult | undefined {
+  const h = activeHunter(state);
+  if (!h || h.gold < GACHA_PRICE) return undefined;
+  h.gold -= GACHA_PRICE;
+  const gear = rollGacha(rng);
+  const old = h.gear[gear.slot];
+  const { equipped } = equipIfBetter(h, gear);
+  const refund = equipped ? 0 : GACHA_REFUND;
+  h.gold += refund;
+  return { gear, equipped, old, refund };
+}
 
 /** What happened to rival hunters met in the tower. */
 export interface EncounterOutcome {

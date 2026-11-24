@@ -1,14 +1,15 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AGENCY_NAME_MAX, buyItem, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS } from '../core/monsters';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
-import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, GEAR_SLOT_NAMES, makeGear } from '../core/items';
+import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
-import { soundOn, toggleSound } from '../game/sfx';
+import { sfx, soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
+import { Rng } from '../core/rng';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 
@@ -22,6 +23,8 @@ export interface HQData {
   hire?: { slot: number; change?: boolean; cls?: ClassId; skills?: SkillId[] };
   /** Show the board of open gates. */
   gates?: boolean;
+  /** Show the gear draw, with the last result if there is one. */
+  gacha?: { result?: GachaResult };
 }
 
 let welcomed = false;
@@ -56,6 +59,7 @@ export class HQScene extends Phaser.Scene {
   private pickingStart = false;
   private hiring?: HQData['hire'];
   private showingGates = false;
+  private gacha?: HQData['gacha'];
 
   constructor() {
     super('HQ');
@@ -67,6 +71,7 @@ export class HQScene extends Phaser.Scene {
     this.pickingStart = !!data.pickStart;
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
+    this.gacha = data.gacha;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
@@ -101,6 +106,7 @@ export class HQScene extends Phaser.Scene {
     if (!state.gates) refreshGates(state, rng);
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
+    if (this.gacha) return this.drawGacha(this.gacha.result);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -514,12 +520,11 @@ export class HQScene extends Phaser.Scene {
     const h = activeHunter(state);
     if (!h) return;
     panel(this, x, y, w, 76, '가방 · 상점');
-    const worn = GEAR_SLOTS.filter((s) => h.gear[s]).length;
     button(this, x + 14, y + 14, 96, 26, showGear ? '순위 보기' : '장비 보기', () => {
       showGear = !showGear;
       this.scene.restart({ messages: this.messages });
     });
-    text(this, x + 120, y + 20, `장비 ${worn}/${GEAR_SLOTS.length}칸`, 12, INK.text);
+    button(this, x + 118, y + 14, 112, 26, '장비 뽑기', () => this.openGacha(), { primary: true, size: 12 });
     text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
@@ -527,12 +532,92 @@ export class HQScene extends Phaser.Scene {
     });
   }
 
+  private openGacha() {
+    this.scene.restart({ messages: this.messages, gacha: {} });
+  }
+
+  /**
+   * The gear draw: a pricey gamble paid from the hunter's own gold.
+   * Tiers 8 and 9 can only be found here.
+   */
+  private drawGacha(result?: GachaResult) {
+    const h = activeHunter(state);
+    const w = Math.min(GW - 28, 520);
+    const x = (GW - w) / 2;
+    title(this, GW / 2, 18, '장비 뽑기', 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 52, '균열에서 흘러나온 봉인 상자. 무엇이 들었는지는 열어 봐야 안다.', 12, INK.quiet)
+      .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
+
+    const oy = PORTRAIT ? 96 : 84;
+    const oddsH = 36 + GACHA_ODDS.length * 22;
+    panel(this, x, oy, w, oddsH, '확률');
+    GACHA_ODDS.forEach((o, i) => {
+      const ly = oy + 24 + i * 22;
+      const sample = makeGear(new Rng(1), o.tier, 'weapon');
+      text(this, x + 18, ly, `${o.label} · ${o.tier}단계`, 12, tierColor(o.tier), true);
+      text(this, x + 150, ly, `예) ${sample.name}`, 12, INK.quiet);
+      text(this, x + w - 18, ly, `${Math.round(o.chance * 100)}%`, 12, tierColor(o.tier)).setOrigin(1, 0);
+    });
+
+    const ry = oy + oddsH + 12;
+    text(this, GW / 2, ry, `지금 낀 것보다 좋으면 바로 착용, 아니면 ${GACHA_REFUND}G에 되판다.`, 12, INK.faint)
+      .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
+
+    const cy = ry + 30;
+    const cardH = 132;
+    if (result) {
+      const g = result.gear;
+      const color = tierColor(g.tier);
+      panel(this, x, cy, w, cardH, '결과');
+      const big = g.tier >= 8;
+      if (big) {
+        const glow = this.add.graphics();
+        glow.lineStyle(3, Phaser.Display.Color.HexStringToColor(color).color, 1).strokeRect(x - 2, cy - 2, w + 4, cardH + 4);
+        this.tweens.add({ targets: glow, alpha: 0.2, duration: 500, yoyo: true, repeat: -1 });
+      }
+      const icon = this.add.graphics();
+      drawGearIcon(g)(icon, x + 18, cy + 26);
+      text(this, x + 72, cy + 22, `${gachaLabel(g.tier)} · ${GEAR_SLOT_NAMES[g.slot]} · ${g.tier}단계`, 12, INK.faint);
+      title(this, x + 72, cy + 40, g.name, 15, color);
+      text(this, x + 72, cy + 64, describeGear(g), 12, INK.text);
+      const outcome = result.equipped
+        ? (result.old ? `착용! ${result.old.name} 대신 · ${gearDiff(g, result.old)}` : `착용! ${gearDiff(g)}`)
+        : `${result.old?.name ?? '지금 장비'}이(가) 더 좋아서 ${result.refund}G에 되팔았다.`;
+      text(this, x + 18, cy + 92, outcome, 12, result.equipped ? INK.gold : INK.quiet).setWordWrapWidth(w - 36, true);
+      icon.setAlpha(0);
+      this.tweens.add({ targets: icon, alpha: 1, duration: 250 });
+      if (big) this.cameras.main.flash(300, 255, 200, 150);
+    } else {
+      panel(this, x, cy, w, cardH, '결과');
+      text(this, GW / 2, cy + cardH / 2 - 8, '아직 뽑지 않았다.', 12, INK.faint).setOrigin(0.5, 0);
+    }
+
+    const by = Math.max(cy + cardH + 20, GH - 190);
+    if (h) {
+      text(this, GW / 2, by, `${h.name}의 소지금 ${h.gold}G`, 12, h.gold >= GACHA_PRICE ? INK.gold : INK.red).setOrigin(0.5, 0);
+    }
+    const can = !!h && h.gold >= GACHA_PRICE;
+    button(this, x, by + 26, w, 56, can ? `뽑기  ${GACHA_PRICE}G` : `뽑기  ${GACHA_PRICE}G (소지금 부족)`, () => {
+      const r = drawGear(state, rng);
+      if (!r) return;
+      persist();
+      if (r.gear.tier >= 8) sfx.levelup();
+      else if (r.equipped) sfx.gear();
+      else sfx.buy();
+      const msg = r.equipped ? `장비 뽑기: ${r.gear.name}(${r.gear.tier}단계) 착용!` : `장비 뽑기: ${r.gear.name}. ${r.refund}G에 되팔았다.`;
+      this.messages = [msg, ...this.messages];
+      this.scene.restart({ messages: this.messages, gacha: { result: r } });
+    }, { primary: true, size: 18, enabled: can });
+    button(this, x, by + 92, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+  }
+
   /** The gear doll in a panel. */
   private drawGearPanel(x: number, y: number, w: number) {
     const h = activeHunter(state);
     if (!h) return;
     panel(this, x, y, w, DOLL_H + 40, '장비');
-    text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
+    if (PORTRAIT) button(this, x + w - 112, y + 8, 100, 26, '장비 뽑기', () => this.openGacha(), { primary: true, size: 12 });
+    else text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
     drawPaperDoll(this, x + 12, y + 32, w - 24, h);
   }
 

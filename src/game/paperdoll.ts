@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Hunter } from '../core/hunter';
-import { describeGear, GEAR_SLOT_NAMES, GearSlot, MAX_TIER } from '../core/items';
+import { describeGear, Gear, GEAR_SLOT_NAMES, GearSlot, TOP_TIER } from '../core/items';
 import { INK, PALETTE, text } from './ui';
 
 /** Height of the paper doll drawn by drawPaperDoll. */
@@ -22,7 +22,11 @@ const LAYOUT: Array<{ slot: GearSlot; col: 0 | 1; row: number; to: [number, numb
 ];
 
 /** Tier colors, from plain to rare. */
-export const TIER_COLORS = ['#c9b79a', '#c9b79a', '#7fd6c9', '#7fd6c9', '#e5ae46', '#e5ae46', '#d79bff'];
+export const TIER_COLORS = ['#c9b79a', '#c9b79a', '#7fd6c9', '#7fd6c9', '#e5ae46', '#e5ae46', '#d79bff', '#ff8f4a', '#ff5f8a'];
+
+export function tierColor(tier: number): string {
+  return TIER_COLORS[Math.max(1, Math.min(TOP_TIER, tier)) - 1];
+}
 
 function fit(t: Phaser.GameObjects.Text, width: number) {
   let v = t.text;
@@ -72,7 +76,7 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
     g.lineStyle(2, gear ? PALETTE.lineLight : PALETTE.line, 1).strokeRect(bx + 1, by + 1, boxW - 2, BOX_H - 2);
     objs.push(text(scene, bx + 8, by + 5, GEAR_SLOT_NAMES[l.slot], 12, INK.faint));
     if (gear) {
-      const color = TIER_COLORS[Math.min(MAX_TIER, gear.tier) - 1];
+      const color = tierColor(gear.tier);
       objs.push(text(scene, bx + boxW - 8, by + 5, `${gear.tier}단계`, 12, color).setOrigin(1, 0));
       objs.push(fit(text(scene, bx + 8, by + 19, gear.name, 12, color, true), boxW - 16));
       objs.push(fit(text(scene, bx + 8, by + 34, describeGear(gear), 12, INK.gate), boxW - 16));
@@ -96,4 +100,33 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
   objs.push(fit(text(scene, tx + 8, ty + 21, `공격 +${sum.atk} 방어 +${sum.def}`, 12, INK.text), boxW - 12));
   objs.push(fit(text(scene, tx + 8, ty + 36, `체력 +${sum.hp} 마나 +${sum.mp}`, 12, INK.text), boxW - 12));
   return objs;
+}
+
+/** A gear piece in a box colored by its tier. */
+export function drawGearIcon(gear: Gear) {
+  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
+    const c = Phaser.Display.Color.HexStringToColor(tierColor(gear.tier)).color;
+    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
+    g.lineStyle(2, c, 1).strokeRect(x + 1, y + 1, 38, 42);
+    g.fillStyle(c, 1);
+    switch (gear.slot) {
+      case 'weapon': g.fillRect(x + 18, y + 6, 4, 24).fillRect(x + 12, y + 30, 16, 3).fillRect(x + 18, y + 33, 4, 6); break;
+      case 'shield': g.fillRect(x + 10, y + 8, 20, 20).fillRect(x + 13, y + 28, 14, 5).fillRect(x + 17, y + 33, 6, 4); break;
+      case 'helmet': g.fillRect(x + 10, y + 12, 20, 16).fillRect(x + 8, y + 26, 24, 4); break;
+      case 'armor': g.fillRect(x + 10, y + 10, 20, 26).fillRect(x + 5, y + 10, 5, 12).fillRect(x + 30, y + 10, 5, 12); break;
+      case 'boots': g.fillRect(x + 9, y + 12, 8, 20).fillRect(x + 9, y + 30, 12, 6).fillRect(x + 23, y + 12, 8, 20).fillRect(x + 23, y + 30, 12, 6); break;
+      case 'ring': g.lineStyle(4, c, 1).strokeCircle(x + 20, y + 24, 9).fillRect(x + 17, y + 10, 6, 5); break;
+      case 'earring': g.fillRect(x + 18, y + 8, 4, 10).fillRect(x + 15, y + 18, 10, 10).fillRect(x + 18, y + 28, 4, 6); break;
+    }
+  };
+}
+
+/** Stat changes from swapping old for new, like "공격 +2 · 방어 -1". */
+export function gearDiff(gear: Gear, old?: Gear): string {
+  const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', '공격'], ['def', '방어'], ['hp', '체력'], ['mp', '마나']];
+  return names
+    .map(([k, label]) => [label, gear[k] - (old?.[k] ?? 0)] as const)
+    .filter(([, d]) => d !== 0)
+    .map(([label, d]) => `${label} ${d > 0 ? '+' : ''}${d}`)
+    .join(' · ');
 }
