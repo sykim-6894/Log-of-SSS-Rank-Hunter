@@ -3,7 +3,7 @@ import {
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GACHA_REFUND, rollGacha, startingBag } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -476,9 +476,31 @@ export function settleReturn(
   return result;
 }
 
+/** Slots a hunter gets better gear in when a rival agency signs them. */
+export const SCOUT_GEAR_UPGRADES = 2;
+/** Each day, a scouted hunter gets one piece one tier better with this chance. */
+export const SCOUT_GEAR_DAILY = 0.3;
+
+/**
+ * The rival agency outfits a hunter it took: one slot gets a piece one tier better,
+ * an empty slot gets what their best floor would drop. Returns the new piece, if any.
+ */
+export function upgradeScoutGear(h: Hunter, rng: Rng): Gear | undefined {
+  const slots = rng.shuffle([...GEAR_SLOTS]);
+  for (const slot of slots) {
+    const cur = h.gear[slot];
+    if (cur && cur.tier >= MAX_TIER) continue;
+    const next = cur ? makeGear(rng, cur.tier + 1, slot) : rollGear(rng, Math.max(1, h.bestFloor), slot);
+    if (equipIfBetter(h, next).equipped) return next;
+  }
+  return undefined;
+}
+
 export interface DeathResult extends AfterRunNews {
   hunter: Hunter;
   scouted: boolean;
+  /** Gear the rival agency gave a scouted hunter. */
+  newGear?: Gear[];
   entry?: HallOfFameEntry;
 }
 
@@ -498,8 +520,13 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
   const scouted = h.everSSS || rng.chance(scoutChance(grade));
   state.slots[slot] = null;
   let entry: HallOfFameEntry | undefined;
+  let newGear: Gear[] | undefined;
   if (scouted) {
     h.origin = 'scouted';
+    for (let i = 0; i < SCOUT_GEAR_UPGRADES; i++) {
+      const g = upgradeScoutGear(h, rng);
+      if (g) (newGear ??= []).push(g);
+    }
     h.hp = h.maxHp;
     h.mp = h.maxMp;
     state.rival.roster.push(h);
@@ -510,7 +537,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
   const news = afterRun(state, rng, encounters);
   if (!state.slots.some((s) => !!s)) hire(state, rng, slot);
   pickActiveSlot(state);
-  return { hunter: h, scouted, entry, ...news, signingSupport: 0 };
+  return { hunter: h, scouted, entry, newGear, ...news, signingSupport: 0 };
 }
 
 function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
@@ -540,10 +567,11 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
     }
   }
 
-  // The rival agency trains its hunters too.
+  // The rival agency trains its hunters too, and keeps outfitting the ones it scouted.
   for (const h of state.rival.roster) {
     if (h.origin === 'rival') continue;
     if (rng.chance(0.5)) levelUp(h);
+    if (h.origin === 'scouted' && rng.chance(SCOUT_GEAR_DAILY)) upgradeScoutGear(h, rng);
   }
 
   // Hunters nobody plays pick their own level-up cards.
