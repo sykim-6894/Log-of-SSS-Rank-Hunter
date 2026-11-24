@@ -1,4 +1,4 @@
-import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, Point, Tile, center } from './dungeon';
+import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, TOP_FLOOR } from './monsters';
@@ -71,6 +71,8 @@ export interface RunOptions {
   eliteChance?: number;
   /** Chance per floor (from floor 2) of a wandering merchant. */
   merchantChance?: number;
+  /** Size of each floor. Upright phones use tall floors. */
+  mapSize?: { w: number; h: number };
   /** Floor to start on. Lower floors can be skipped once the hunter's grade allows it. */
   startFloor?: number;
 }
@@ -239,10 +241,10 @@ export class TowerRun {
 
   enterFloor(n: number) {
     this.floor = n;
-    this.map = generateFloor(this.rng);
+    this.map = generateFloor(this.rng, this.options.mapSize?.w ?? MAP_W, this.options.mapSize?.h ?? MAP_H);
     this.pos = { ...this.map.start };
     this.monsters = [];
-    this.seen = Array.from({ length: MAP_H }, () => Array<boolean>(MAP_W).fill(false));
+    this.seen = Array.from({ length: mapHeight(this.map) }, () => Array<boolean>(mapWidth(this.map)).fill(false));
     this.status = 'playing';
     this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
 
@@ -487,8 +489,8 @@ export class TowerRun {
   }
 
   private updateSight() {
-    for (let y = Math.max(0, this.pos.y - SIGHT); y <= Math.min(MAP_H - 1, this.pos.y + SIGHT); y++) {
-      for (let x = Math.max(0, this.pos.x - SIGHT); x <= Math.min(MAP_W - 1, this.pos.x + SIGHT); x++) {
+    for (let y = Math.max(0, this.pos.y - SIGHT); y <= Math.min(mapHeight(this.map) - 1, this.pos.y + SIGHT); y++) {
+      for (let x = Math.max(0, this.pos.x - SIGHT); x <= Math.min(mapWidth(this.map) - 1, this.pos.x + SIGHT); x++) {
         if (this.isVisible(x, y)) this.seen[y][x] = true;
       }
     }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activeHunter, buyItem, gradeIn, hire, newGame, ranking, release, settleDeath, settleReturn, startFloors, train, trainingCost, worldRankers } from '../src/core/agency';
 import { botAction, stepTowards } from '../src/core/bot';
-import { generateFloor, isWalkable, MAP_W, Tile } from '../src/core/dungeon';
+import { generateFloor, isWalkable, MAP_W, TALL_MAP_H, TALL_MAP_W, Tile } from '../src/core/dungeon';
 import { combatPower, createHunter as makeHunter, expToNext, gainExp, GRADE_A_POWER, gradeOf, Hunter, TRIBUTE_RATE } from '../src/core/hunter';
 import { Rng } from '../src/core/rng';
 import { TowerRun } from '../src/core/run';
@@ -33,6 +33,17 @@ function reachable(seed: number): boolean {
 describe('floor generation', () => {
   it('always connects the start to the stairs', () => {
     for (let seed = 1; seed <= 200; seed++) expect(reachable(seed)).toBe(true);
+  });
+
+  it('makes tall floors for upright phones, and runs use them', () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const map = generateFloor(new Rng(seed), TALL_MAP_W, TALL_MAP_H);
+      expect(map.tiles).toHaveLength(TALL_MAP_H);
+      expect(map.tiles[0]).toHaveLength(TALL_MAP_W);
+    }
+    const run = new TowerRun(createHunter(new Rng(2)), new Rng(2), { mapSize: { w: TALL_MAP_W, h: TALL_MAP_H } });
+    expect(run.seen).toHaveLength(TALL_MAP_H);
+    expect(botAction(run)).toBeDefined();
   });
 
   it('places exactly one stairs tile', () => {
