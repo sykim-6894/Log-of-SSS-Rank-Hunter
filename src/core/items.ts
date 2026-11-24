@@ -65,15 +65,18 @@ export interface Gear {
 export type Equipment = Partial<Record<GearSlot, Gear>>;
 
 const GEAR_NAMES: Record<GearSlot, string[]> = {
-  weapon: ['녹슨 단검', '철검', '강철 장검', '기사의 검', '게이트 결정검', '마력의 대검', '균열의 검'],
-  shield: ['나무 방패', '철 방패', '강철 방패', '기사의 방패', '결정 방패', '마력의 방벽', '균열의 방패'],
-  helmet: ['가죽 두건', '철 투구', '강철 투구', '기사의 투구', '결정 투구', '마력의 관', '균열의 투구'],
-  armor: ['가죽 조끼', '사슬 갑옷', '강철 흉갑', '기사의 갑주', '결정 갑주', '마력의 판금', '균열의 갑주'],
-  boots: ['짚신', '가죽 장화', '강철 장화', '기사의 장화', '결정 장화', '마력의 장화', '균열의 장화'],
-  ring: ['구리 반지', '은 반지', '금 반지', '루비 반지', '결정 반지', '마력의 반지', '균열의 반지'],
-  earring: ['나무 귀걸이', '구리 귀걸이', '은 귀걸이', '금 귀걸이', '결정 귀걸이', '마력의 귀걸이', '균열의 귀걸이'],
+  weapon: ['녹슨 단검', '철검', '강철 장검', '기사의 검', '게이트 결정검', '마력의 대검', '균열의 검', '용살의 성검', '천공의 신검'],
+  shield: ['나무 방패', '철 방패', '강철 방패', '기사의 방패', '결정 방패', '마력의 방벽', '균열의 방패', '용비늘 방패', '천공의 방패'],
+  helmet: ['가죽 두건', '철 투구', '강철 투구', '기사의 투구', '결정 투구', '마력의 관', '균열의 투구', '용왕의 투구', '천공의 왕관'],
+  armor: ['가죽 조끼', '사슬 갑옷', '강철 흉갑', '기사의 갑주', '결정 갑주', '마력의 판금', '균열의 갑주', '용비늘 갑주', '천공의 갑주'],
+  boots: ['짚신', '가죽 장화', '강철 장화', '기사의 장화', '결정 장화', '마력의 장화', '균열의 장화', '질풍의 장화', '천공의 장화'],
+  ring: ['구리 반지', '은 반지', '금 반지', '루비 반지', '결정 반지', '마력의 반지', '균열의 반지', '용안의 반지', '천공의 반지'],
+  earring: ['나무 귀걸이', '구리 귀걸이', '은 귀걸이', '금 귀걸이', '결정 귀걸이', '마력의 귀걸이', '균열의 귀걸이', '용안의 귀걸이', '천공의 귀걸이'],
 };
+/** Highest tier found in the tower, gates and shops. */
 export const MAX_TIER = 7;
+/** Tiers 8 and 9 only come from the gear draw. */
+export const TOP_TIER = 9;
 
 /** Same weights as combat power, so "better" means it raises combat power more. */
 export function gearScore(g: Gear): number {
@@ -92,6 +95,11 @@ export function describeGear(g: Gear): string {
 /** A random piece of gear. Higher floors give higher tiers. */
 export function rollGear(rng: Rng, floor: number, slot: GearSlot = rng.pick(GEAR_SLOTS)): Gear {
   const tier = Math.max(1, Math.min(MAX_TIER, Math.ceil(floor / 2) + rng.int(-1, 1)));
+  return makeGear(rng, tier, slot);
+}
+
+/** A piece of gear of a given tier. */
+export function makeGear(rng: Rng, tier: number, slot: GearSlot = rng.pick(GEAR_SLOTS)): Gear {
   const g: Gear = { slot, name: GEAR_NAMES[slot][tier - 1], tier, atk: 0, def: 0, hp: 0, mp: 0 };
   const half = Math.ceil(tier / 2);
   switch (slot) {
@@ -151,6 +159,34 @@ export function equipIfBetter(h: Hunter, g: Gear): EquipResult {
   h.gear[g.slot] = g;
   applyGear(h, g, 1);
   return { equipped: true, discarded: current };
+}
+
+// ---------- Gear draw ----------
+
+/** One draw at the agency costs about what an A to S gate clear pays the hunter. */
+export const GACHA_PRICE = 1000;
+/** A drawn piece that is no better than what is worn is sold back for this much. */
+export const GACHA_REFUND = 300;
+export const GACHA_ODDS: Array<{ tier: number; chance: number; label: string }> = [
+  { tier: 5, chance: 0.35, label: '희귀' },
+  { tier: 6, chance: 0.3, label: '희귀' },
+  { tier: 7, chance: 0.22, label: '영웅' },
+  { tier: 8, chance: 0.1, label: '전설' },
+  { tier: 9, chance: 0.03, label: '신화' },
+];
+
+export function gachaLabel(tier: number): string {
+  return GACHA_ODDS.find((o) => o.tier === tier)?.label ?? '일반';
+}
+
+/** One random piece from the draw, any slot, tier by GACHA_ODDS. */
+export function rollGacha(rng: Rng): Gear {
+  let r = rng.next();
+  for (const o of GACHA_ODDS) {
+    if (r < o.chance) return makeGear(rng, o.tier);
+    r -= o.chance;
+  }
+  return makeGear(rng, GACHA_ODDS[GACHA_ODDS.length - 1].tier);
 }
 
 // ---------- Wandering merchant ----------

@@ -3,8 +3,8 @@ import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleRetu
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, GEAR_SLOT_NAMES, MAX_TIER, offerLabel } from '../core/items';
-import { DOLL_H, drawPaperDoll, TIER_COLORS } from '../game/paperdoll';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
+import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
@@ -1150,37 +1150,8 @@ function drawItemIcon(kind: ConsumableKind) {
   };
 }
 
-/** A gear piece in a box colored by its tier. */
-function drawGearIcon(gear: Gear) {
-  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
-    const c = Phaser.Display.Color.HexStringToColor(TIER_COLORS[Math.min(MAX_TIER, gear.tier) - 1]).color;
-    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
-    g.lineStyle(2, c, 1).strokeRect(x + 1, y + 1, 38, 42);
-    g.fillStyle(c, 1);
-    switch (gear.slot) {
-      case 'weapon': g.fillRect(x + 18, y + 6, 4, 24).fillRect(x + 12, y + 30, 16, 3).fillRect(x + 18, y + 33, 4, 6); break;
-      case 'shield': g.fillRect(x + 10, y + 8, 20, 20).fillRect(x + 13, y + 28, 14, 5).fillRect(x + 17, y + 33, 6, 4); break;
-      case 'helmet': g.fillRect(x + 10, y + 12, 20, 16).fillRect(x + 8, y + 26, 24, 4); break;
-      case 'armor': g.fillRect(x + 10, y + 10, 20, 26).fillRect(x + 5, y + 10, 5, 12).fillRect(x + 30, y + 10, 5, 12); break;
-      case 'boots': g.fillRect(x + 9, y + 12, 8, 20).fillRect(x + 9, y + 30, 12, 6).fillRect(x + 23, y + 12, 8, 20).fillRect(x + 23, y + 30, 12, 6); break;
-      case 'ring': g.lineStyle(4, c, 1).strokeCircle(x + 20, y + 24, 9).fillRect(x + 17, y + 10, 6, 5); break;
-      case 'earring': g.fillRect(x + 18, y + 8, 4, 10).fillRect(x + 15, y + 18, 10, 10).fillRect(x + 18, y + 28, 4, 6); break;
-    }
-  };
-}
-
-/** Stat changes from swapping old for new, like "공격 +2 · 방어 -1". */
-function gearDiff(gear: Gear, old?: Gear): string {
-  const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', '공격'], ['def', '방어'], ['hp', '체력'], ['mp', '마나']];
-  return names
-    .map(([k, label]) => [label, gear[k] - (old?.[k] ?? 0)] as const)
-    .filter(([, d]) => d !== 0)
-    .map(([label, d]) => `${label} ${d > 0 ? '+' : ''}${d}`)
-    .join(' · ');
-}
-
 function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
-  const color = TIER_COLORS[Math.min(MAX_TIER, gear.tier) - 1];
+  const color = tierColor(gear.tier);
   const slot = `${GEAR_SLOT_NAMES[gear.slot]} · ${gear.tier}단계`;
   if (!equipped) {
     return {
