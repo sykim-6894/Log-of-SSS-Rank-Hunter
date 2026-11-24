@@ -1013,7 +1013,7 @@ export class TowerScene extends Phaser.Scene {
     this.joyClear();
     this.dialog('게이트 클리어!', [
       `${gateName(run.gate)}의 주인을 쓰러뜨렸다. 이번 수입 ${run.runGold}G`,
-      `클리어 보상 ${gateClearGold(run.gate)}G와 장비 하나를 챙겨서 나간다.`,
+      `클리어 보상 ${gateClearGold(run.gate)}G${run.gate.rival ? '(가로채기 +30%)' : ''}와 장비 하나를 챙겨서 나간다.`,
       '남아도 보상은 사라지지 않는다. 나중에 계단에서 나갈 수 있다.',
     ], [
       ['보상 받고 귀환하기', () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
@@ -1068,13 +1068,15 @@ export class TowerScene extends Phaser.Scene {
     for (const name of n.finished) msgs.push(`${name}은(는) 명예의 전당에 이름만 남겼다.`);
     for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 더 강해졌다.`);
     if (n.rivalCreated) msgs.push(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`);
+    msgs.push(...n.gateNews);
     return msgs;
   }
 
   private finishReturn(cleared = false) {
     const run = this.run;
-    const r = settleReturn(state, rng, run.runGold, run.encounters);
-    const where = run.gate ? (cleared ? `${gateName(run.gate)} 클리어!` : `${run.placeName}에서 귀환.`) : `${run.floor}층에서 귀환.`;
+    const r = settleReturn(state, rng, run.runGold, run.encounters, cleared);
+    const stolen = cleared && run.gate?.rival ? ` ${run.gate.rival.agency}보다 먼저 해냈다!` : '';
+    const where = run.gate ? (cleared ? `${gateName(run.gate)} 클리어!${stolen}` : `${run.placeName}에서 귀환.`) : `${run.floor}층에서 귀환.`;
     const msgs = [
       `${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
     ];
