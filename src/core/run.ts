@@ -28,7 +28,7 @@ import {
 } from './items';
 import { Rng } from './rng';
 import {
-  ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAX_SKILL_LV,
+  ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAGE_SKILL_POWER, MAX_SKILL_LV,
   ClassId, OwnedSkill, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
 
@@ -1098,7 +1098,7 @@ export class TowerRun {
   private castSkill(s: OwnedSkill): boolean {
     const h = this.hunter;
     const max = s.lv >= MAX_SKILL_LV;
-    const p = (1 + SKILL_LV_POWER * (s.lv - 1)) * (h.skillPower / 1.5);
+    const p = (1 + SKILL_LV_POWER * (s.lv - 1)) * (h.skillPower / 1.5) * (h.cls === 'mage' ? MAGE_SKILL_POWER : 1);
     const name = SKILLS[s.id].name;
     const none = (why = '주변에 적이 없다.') => {
       this.say(`${name}: ${why}`);

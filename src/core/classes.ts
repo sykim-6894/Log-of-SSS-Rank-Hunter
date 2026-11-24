@@ -28,8 +28,8 @@ export const CLASSES: Record<ClassId, ClassInfo> = {
   },
   mage: {
     name: '마법사', role: '원거리 폭딜', look: 1,
-    base: { hp: 24, mp: 20, atk: 5, def: 1 }, growth: { hp: 3, mp: 4, atk: 1, def: 0 }, regen: { hp: 0.1, mp: 0.5 },
-    passive: '마력 순환', passiveText: '마나가 2배 빨리 찬다',
+    base: { hp: 27, mp: 20, atk: 5, def: 1 }, growth: { hp: 4, mp: 4, atk: 1, def: 0 }, regen: { hp: 0.1, mp: 0.5 },
+    passive: '마력 순환', passiveText: '마나가 2배 빨리 차고 스킬 위력 +25%',
   },
   archer: {
     name: '궁수', role: '원거리 견제', look: 2,
@@ -54,6 +54,8 @@ export function archerHitChance(dist: number): number {
 }
 export const ARCHER_DODGE = 0.15;
 export const SWORD_KILL_HEAL = 3;
+/** The mage's passive also makes every skill hit this much harder. */
+export const MAGE_SKILL_POWER = 1.25;
 export const KNIGHT_LOW_HP = 0.3;
 export const KNIGHT_LOW_DEF = 3;
 
@@ -86,7 +88,7 @@ export const SKILLS: Record<SkillId, SkillInfo> = {
   stance: { cls: 'sword', name: '반격 자세', mp: 4, text: '3턴 동안 맞을 때마다 ×1.2 반격', max: '받는 피해 절반' },
   warcry: { cls: 'sword', name: '전투 함성', mp: 6, text: '4턴 동안 공격 +30%', max: '주변 적 1턴 기절' },
   storm: { cls: 'sword', name: '검기 폭풍', mp: 15, mpMax: 10, ultimate: true, text: '2칸 안 모든 적 ×2.5', max: '마나 10' },
-  fireball: { cls: 'mage', name: '화염구', mp: 6, text: '4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', max: '3턴 화상' },
+  fireball: { cls: 'mage', name: '화염구', mp: 5, text: '4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', max: '3턴 화상' },
   icebolt: { cls: 'mage', name: '얼음 화살', mp: 5, aimed: true, text: '직선 5칸 첫 적 ×1.3 + 2턴 빙결', max: '빙결 3턴, 관통' },
   chain: { cls: 'mage', name: '번개 사슬', mp: 7, text: '가까운 적부터 3명 연쇄 ×1.2', max: '5명까지' },
   manashield: { cls: 'mage', name: '마나 보호막', mp: 6, text: '5턴 동안 피해를 마나로 대신 받음', max: '마나 1로 피해 2 막음' },
