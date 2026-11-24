@@ -753,10 +753,11 @@ export class TowerScene extends Phaser.Scene {
           cam.flash(400, 90, 30, 140);
           sfx.curse();
           this.notice({
-            heading: e.nth > 1 ? `심연의 추적자 ${e.nth} 출현!` : '심연의 추적자 출현!',
+            heading: `${e.nth}차 던전 붕괴!`,
             color: '#c98bff',
             lines: [
-              ['쓰러뜨릴 수 없는 적이 당신을 찾아 나섰다.', INK.text],
+              [e.nth > 1 ? '더 강한 심연의 추적자가 나타났다.' : '심연의 추적자가 나타났다.', INK.text],
+              ['쓰러뜨릴 수 없는 적이 당신을 찾아 나섰다.', INK.quiet],
               ['계단을 찾아 이 층을 떠나라!', INK.red, 15],
             ],
             ms: 3200,
@@ -909,7 +910,7 @@ export class TowerScene extends Phaser.Scene {
     const x = r ? r.x + r.w : GW - 10;
     const y = r ? r.y + r.h + 4 : 8;
     const left = run.stalkerIn;
-    const label = run.stalkers > 0 ? `추적자 ${run.stalkers} · 다음 ${left}턴` : `추적자까지 ${left}턴`;
+    const label = `${run.stalkers + 1}차 던전 붕괴까지 ${left}턴`;
     const color = run.stalkers > 0 || left <= 30 ? '#e0574f' : INK.quiet;
     const t = this.ui(text(this, x, y, label, 12, color).setOrigin(1, 0).setDepth(30));
     t.setBackgroundColor('#000000aa').setPadding(4, 2, 4, 2);

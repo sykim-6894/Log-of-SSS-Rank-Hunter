@@ -679,7 +679,7 @@ export class TowerRun {
         this.spawn(stalkerKind(this.stalkers), spot.x, spot.y, this.danger + 4 + 2 * this.stalkers);
         const st = this.monsters[this.monsters.length - 1];
         st.awake = true;
-        this.say(`${st.kind.name}가 나타났다! 쓰러뜨릴 수 없다. 서둘러 이 층을 떠나라!`);
+        this.say(`${this.stalkers}차 던전 붕괴! ${st.kind.name}가 나타났다. 쓰러뜨릴 수 없다. 서둘러 이 층을 떠나라!`);
         this.events.push({ type: 'stalker', nth: this.stalkers });
       }
     }
