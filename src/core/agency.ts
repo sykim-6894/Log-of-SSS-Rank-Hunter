@@ -7,7 +7,7 @@ import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE,
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
-import type { RunSnapshot } from './run';
+import type { Duel, RunSnapshot } from './run';
 
 export interface Agent {
   name: string;
@@ -296,21 +296,85 @@ export interface RankRow {
 
 /** Live top 10 by combat power over every named hunter: ours, the rival agency's, the fallen, the rankers. */
 export function ranking(state: GameState): RankRow[] {
-  const rows: RankRow[] = [];
+  const rows: Array<RankRow & { order: number }> = [];
   for (const h of state.slots) {
-    if (h) rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'ours', note: '우리 소속', cls: h.cls });
+    if (h) {
+      const score = combatPower(h);
+      rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'ours', note: '우리 소속', cls: h.cls, order: ladderScore(state, h, score) });
+    }
   }
   for (const h of state.rival.roster) {
     const note = h.origin === 'rival' ? '라이벌' : h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
-    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'rival', note, cls: h.cls });
+    const score = combatPower(h);
+    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'rival', note, cls: h.cls, order: score });
   }
   for (const e of state.hallOfFame) {
-    rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score: e.power ?? estimatePower(e.level), status: 'gone', note: e.fate });
+    const score = e.power ?? estimatePower(e.level);
+    rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score, status: 'gone', note: e.fate, order: score });
   }
   for (const w of state.world) {
-    rows.push({ id: w.id, name: w.name, level: w.level, bestFloor: w.bestFloor, score: w.score, status: 'world', note: w.agency, cls: w.cls });
+    rows.push({ id: w.id, name: w.name, level: w.level, bestFloor: w.bestFloor, score: w.score, status: 'world', note: w.agency, cls: w.cls, order: w.score });
   }
-  return rows.sort((a, b) => b.score - a.score || a.id - b.id).slice(0, 10);
+  return rows
+    .sort((a, b) => b.order - a.order || a.id - b.id)
+    .slice(0, 10)
+    .map(({ order: _order, ...r }) => r);
+}
+
+/**
+ * Where our hunter stands among the association rankers. Strength alone can't pass a ranker:
+ * the hunter has to beat them in a challenge. A beaten ranker stays below the hunter.
+ */
+function ladderScore(state: GameState, h: Hunter, power: number): number {
+  const beaten = new Set(h.beaten ?? []);
+  const floor = Math.max(0, ...state.world.filter((w) => beaten.has(w.id)).map((w) => w.score + 1));
+  const next = state.world.filter((w) => !beaten.has(w.id) && w.score > floor).reduce((m, w) => Math.min(m, w.score), Infinity);
+  return Math.max(floor, Math.min(power, next - 0.5));
+}
+
+/** The ranker this hunter may challenge now: the lowest one not beaten yet that stands above them. */
+export function nextChallenge(state: GameState, h: Hunter): { ranker: WorldRanker; rank: number } | undefined {
+  const beaten = new Set(h.beaten ?? []);
+  const floor = Math.max(0, ...state.world.filter((w) => beaten.has(w.id)).map((w) => w.score + 1));
+  const ranker = state.world.filter((w) => !beaten.has(w.id) && w.score > floor).sort((a, b) => a.score - b.score)[0];
+  if (!ranker) return undefined;
+  const rank = ranking(state).findIndex((r) => r.id === ranker.id) + 1;
+  return { ranker, rank: rank || 10 };
+}
+
+/** One challenge a day: a day passes each time a hunter comes back. */
+export function canChallenge(state: GameState, h: Hunter): boolean {
+  return h.duelDay !== (state.day ?? 0) && !!nextChallenge(state, h);
+}
+
+/**
+ * The ranker as a fighter: their class grown to their level, then scaled so their
+ * combat power matches their ranking score.
+ */
+export function rankerFighter(w: WorldRanker): { hp: number; mp: number; atk: number; def: number } {
+  const r = createHunter(new Rng(1000 - w.id), w.id, [], w.cls ?? 'sword');
+  while (r.level < w.level) levelUp(r);
+  const base = combatPower(r) - r.level * 20;
+  const f = Math.max(1, (w.score - w.level * 20) / base);
+  return { hp: Math.round(r.maxHp * f), mp: Math.round(r.maxMp * f), atk: Math.round(r.atk * f), def: Math.round(r.def * f) };
+}
+
+/** Sets up the challenge against the next ranker, or undefined if there is none today. */
+export function startDuel(state: GameState): Duel | undefined {
+  const h = activeHunter(state);
+  if (!h || !canChallenge(state, h)) return undefined;
+  const { ranker, rank } = nextChallenge(state, h)!;
+  const f = rankerFighter(ranker);
+  h.duelDay = state.day ?? 0;
+  return { rankerId: ranker.id, rank, name: ranker.name, agency: ranker.agency, cls: ranker.cls, level: ranker.level, hp: f.hp, atk: f.atk, def: f.def };
+}
+
+/** After the fight: a win puts the ranker below the hunter for good. */
+export function settleDuel(state: GameState, duel: Duel): boolean {
+  const h = activeHunter(state);
+  if (!h || !duel.won) return false;
+  h.beaten = [...new Set([...(h.beaten ?? []), duel.rankerId])];
+  return true;
 }
 
 /** Rough combat power of an old record that did not store it: a fresh hunter plus level-ups. */
@@ -331,6 +395,9 @@ export const SKIP_STEP = 5;
 export function startFloors(_state: GameState, h: Hunter): number[] {
   const floors = [1];
   for (let f = SKIP_STEP + 1; f <= h.bestFloor; f += SKIP_STEP) floors.push(f);
+  // The abyss: from its deepest five-floor step reached so far.
+  const deep = h.abyssBest ?? 0;
+  if (deep >= 1 && h.bestFloor >= TOP_FLOOR) floors.push(TOP_FLOOR + 1 + SKIP_STEP * Math.floor((deep - 1) / SKIP_STEP));
   return floors;
 }
 

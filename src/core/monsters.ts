@@ -18,6 +18,8 @@ export interface MonsterKind {
   trait?: TraitId;
   /** The abyss stalker: hunts the hunter down and cannot be killed. */
   stalker?: boolean;
+  /** An association ranker met in a challenge duel. */
+  ranker?: boolean;
 }
 
 export type TraitId = 'pack' | 'kite' | 'swift' | 'rage' | 'regen' | 'stealth' | 'healer' | 'thorns';
@@ -63,7 +65,13 @@ export const MONSTERS: Record<string, MonsterKind> = {
 };
 
 /** Highest floor for now. A boss guards every fifth floor. */
+/** The tower's last floor. Above it the abyss goes on without end. */
 export const TOP_FLOOR = 20;
+
+/** "심연 3층" for floor 23. */
+export function abyssDepth(floor: number): number {
+  return Math.max(0, floor - TOP_FLOOR);
+}
 export const BOSS_EVERY = 5;
 
 /** Which ordinary monsters can appear on a floor. */

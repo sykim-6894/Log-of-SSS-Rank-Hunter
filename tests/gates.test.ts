@@ -170,6 +170,7 @@ describe('rival records', () => {
       const h = state.slots[0]!;
       while (combatPower(h) < GRADE_A_POWER * 2) levelUp(h);
       h.bestFloor = TOP_FLOOR;
+      h.beaten = state.world.map((w) => w.id).slice(-1); // beat #10, so the hunter is S and gets a rival
       for (let i = 0; i < 5; i++) settleReturn(state, rng, 0);
       expect(state.rival.roster.length).toBeGreaterThan(0);
       for (const r of state.rival.roster) expect(r.bestFloor).toBeLessThanOrEqual(TOP_FLOOR);

@@ -1,8 +1,8 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, AGENCY_NAME_MAX, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
-import { MONSTERS } from '../core/monsters';
+import { MONSTERS, TOP_FLOOR } from '../core/monsters';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
@@ -312,7 +312,8 @@ export class HQScene extends Phaser.Scene {
     const gap = 6;
     const bw = (w - cancelW - gap * floors.length) / floors.length;
     floors.forEach((f, i) => {
-      button(this, x + i * (bw + gap), y, bw, hgt, `▶ ${f}층부터`, () => go(f), { primary: true, size: Math.min(size, 16) });
+      const name = f > TOP_FLOOR ? `심연 ${f - TOP_FLOOR}` : `${f}층`;
+      button(this, x + i * (bw + gap), y, bw, hgt, floors.length > 4 ? name : `▶ ${name}부터`, () => go(f), { primary: true, size: Math.min(size, floors.length > 4 ? 14 : 16) });
     });
     button(this, x + w - cancelW, y, cancelW, hgt, '취소', () => this.scene.restart({ messages: this.messages }), { size: 12 });
   }
@@ -474,7 +475,7 @@ export class HQScene extends Phaser.Scene {
       fit(text(this, x + 130, y + 228, `스킬 ${skills}`, 12, INK.inkQuiet), w - 236);
     } else {
       const extras = [h.rescues ? `위기 지원 ${h.rescues}` : ''].filter(Boolean).join(' · ');
-      fit(text(this, x + 18, y + 228, `스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
+      fit(text(this, x + 18, y + 228, `스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
     }
     const others = state.slots.filter(Boolean).length > 1;
     button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? '정말?' : '방출', () => {
@@ -759,7 +760,7 @@ export class HQScene extends Phaser.Scene {
     dots(this, x + 16, hy + 18, w - 32);
     const color = { ours: INK.gate, rival: '#d79bff', gone: INK.faint, world: INK.quiet } as const;
     ranking(state).forEach((r, i) => {
-      const ry = hy + 28 + i * 26;
+      const ry = hy + 26 + i * 25;
       const c = color[r.status];
       const g = rankGradeOf(i)!;
       text(this, cols.rank, ry, `${i + 1}`, 12, i === 0 ? INK.gold : INK.quiet, true);
@@ -772,6 +773,26 @@ export class HQScene extends Phaser.Scene {
     });
     const gone = state.hallOfFame.length;
     if (gone > 0) text(this, x + w - 18, y + 304, `기록으로 남은 헌터 ${gone}명`, 12, INK.faint).setOrigin(1, 0);
+    this.challengeButton(x + 14, y + 300, Math.min(260, w - 150));
+  }
+
+  /** Challenge the next association ranker. Only a win moves our hunter past them. */
+  private challengeButton(x: number, y: number, w: number) {
+    const h = activeHunter(state);
+    if (!h) return;
+    const next = nextChallenge(state, h);
+    if (!next) {
+      text(this, x + 4, y + 6, '협회 랭커를 모두 꺾었다.', 12, INK.gold);
+      return;
+    }
+    const ok = canChallenge(state, h);
+    const label = ok ? `${next.rank}위 ${next.ranker.name}에게 도전 (${next.ranker.score})` : `오늘은 도전 완료 · 다음 ${next.ranker.name}`;
+    button(this, x, y, w, 22, label, () => {
+      const duel = startDuel(state);
+      if (!duel) return;
+      persist();
+      this.scene.start('Tower', { duel });
+    }, { primary: ok, size: 12, enabled: ok });
   }
 
   private drawRival(x: number, y: number, w = 448) {
