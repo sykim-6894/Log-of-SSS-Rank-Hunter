@@ -12,6 +12,8 @@ import type { RunSnapshot } from './run';
 export interface Agent {
   name: string;
   gold: number;
+  /** False until the player names the agency on the first screen. Older saves never had this. */
+  named?: boolean;
 }
 
 /** A hunter who is gone for good: died unrescued, or was finished off. */
@@ -117,13 +119,42 @@ export function enterGate(state: GameState, id: number): Gate | undefined {
   return i < 0 ? undefined : gates.splice(i, 1)[0];
 }
 
-const AGENCY_NAMES = ['새벽 에이전시', '청람 헌터스', '북극성 매니지먼트', '흑요 에이전시', '은하 헌터 협회'];
+const AGENCY_FIRST = [
+  '새벽', '청람', '북극성', '흑요', '은하', '백랑', '청룡', '주작', '현무', '태양', '월광', '천둥',
+  '바람결', '별빛', '은빛', '금강', '해오름', '노을', '설화', '불꽃', '푸른달', '검은별', '한빛', '창공',
+];
+const AGENCY_LAST = ['에이전시', '헌터스', '매니지먼트', '컴퍼니', '길드', '헌터 협회', '기획', '엔터'];
+export const AGENCY_NAME_MAX = 12;
+
+/** A made-up agency name like "청룡 헌터스", different from any name in avoid. */
+export function randomAgencyName(rng: Rng, avoid: string[] = []): string {
+  for (let i = 0; i < 20; i++) {
+    const name = `${rng.pick(AGENCY_FIRST)} ${rng.pick(AGENCY_LAST)}`;
+    if (!avoid.includes(name)) return name;
+  }
+  return `${rng.pick(AGENCY_FIRST)} ${rng.pick(AGENCY_LAST)}`;
+}
+
+/** Trims spaces and cuts to the length limit. Empty means the name can't be used. */
+export function cleanAgencyName(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().slice(0, AGENCY_NAME_MAX);
+}
+
+/** Names the agency on the first screen. The rival agency never shares the name. */
+export function foundAgency(state: GameState, rng: Rng, raw: string): boolean {
+  const name = cleanAgencyName(raw);
+  if (!name) return false;
+  state.agent.name = name;
+  state.agent.named = true;
+  if (state.rival.name === name) state.rival.name = rng.pick(RIVAL_NAMES.filter((n) => n !== name));
+  return true;
+}
 const RIVAL_NAMES = ['적월 길드', '흑철 헌터스', '마그나 에이전시', '백야 컴퍼니'];
 
 export function newGame(rng: Rng): GameState {
   const state: GameState = {
     version: 3,
-    agent: { name: rng.pick(AGENCY_NAMES), gold: 100 },
+    agent: { name: randomAgencyName(rng), gold: 100, named: false },
     slots: [null, null, null],
     activeSlot: 0,
     hallOfFame: [],
