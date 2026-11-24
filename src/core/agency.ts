@@ -5,6 +5,7 @@ import {
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, rollGate, rollGateGrade } from './gates';
+import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { RunSnapshot } from './run';
 
@@ -447,7 +448,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
     if (!target) continue;
     const goal = combatPower(target) * (0.92 + rng.next() * 0.16);
     for (let i = 0; i < 20 && combatPower(r) < goal; i++) levelUp(r);
-    r.bestFloor = Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1));
+    r.bestFloor = Math.min(TOP_FLOOR, Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1)));
     r.killScore = Math.max(r.killScore, Math.round(target.killScore * (0.9 + rng.next() * 0.2)));
     r.kills = Math.max(r.kills, target.kills);
     autoPick(r, rng);

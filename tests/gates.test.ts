@@ -158,3 +158,34 @@ describe('gate runs', () => {
     expect(['dead', 'returned']).toContain(run.status);
   });
 });
+
+describe('rival records', () => {
+  it('a rival shadowing a hunter at the top floor never passes it', async () => {
+    const { TOP_FLOOR } = await import('../src/core/monsters');
+    const { settleReturn } = await import('../src/core/agency');
+    const { GRADE_A_POWER, combatPower, levelUp } = await import('../src/core/hunter');
+    for (let seed = 1; seed <= 20; seed++) {
+      const rng = new Rng(seed);
+      const state = newGame(rng);
+      const h = state.slots[0]!;
+      while (combatPower(h) < GRADE_A_POWER * 2) levelUp(h);
+      h.bestFloor = TOP_FLOOR;
+      for (let i = 0; i < 5; i++) settleReturn(state, rng, 0);
+      expect(state.rival.roster.length).toBeGreaterThan(0);
+      for (const r of state.rival.roster) expect(r.bestFloor).toBeLessThanOrEqual(TOP_FLOOR);
+    }
+  });
+
+  it('old saves with a rival past the top floor are fixed on load', async () => {
+    const { TOP_FLOOR } = await import('../src/core/monsters');
+    const mem = new Map<string, string>();
+    const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
+    const state = newGame(new Rng(2));
+    const r = createHunter(new Rng(3), 99, [], 'mage');
+    r.origin = 'rival';
+    r.bestFloor = TOP_FLOOR + 1;
+    state.rival.roster.push(r);
+    saveGame(storage, state);
+    expect(loadGame(storage)!.rival.roster[0].bestFloor).toBe(TOP_FLOOR);
+  });
+});
