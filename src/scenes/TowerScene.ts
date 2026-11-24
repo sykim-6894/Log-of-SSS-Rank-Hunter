@@ -6,6 +6,7 @@ import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { sfx, toggleSound } from '../game/sfx';
+import { recommendedLevel } from '../core/monsters';
 import { Action, REWARDS, RunEvent, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
@@ -56,9 +57,16 @@ export class TowerScene extends Phaser.Scene {
     super('Tower');
   }
 
+  private startFloor = 1;
+
+  init(data: { startFloor?: number }) {
+    this.startFloor = data?.startFloor ?? 1;
+  }
+
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     this.joy = null;
+    this.metKinds = new Set();
     this.run = this.resumeOrStart();
     this.overlay = [];
     this.dynamic = [];
@@ -177,23 +185,33 @@ export class TowerScene extends Phaser.Scene {
   }
 
   /**
-   * One held-joystick step. When a new enemy comes into view, walking pauses briefly
-   * (with a "!" over the hunter) so the player can react, then carries on while held.
+   * One held-joystick step. When a kind of enemy not met before this run comes into view,
+   * walking pauses briefly (with a "!" over the hunter) so the player can react, then carries
+   * on while held. Kinds already met don't stop the hunter again.
    */
   private joyStep() {
     const joy = this.joy;
     if (!joy || !joy.dir || this.time.now < joy.pauseUntil) return;
     if (this.overlay.length || this.run.status !== 'playing') return this.joyClear();
-    const before = this.visibleEnemies();
     this.perform({ type: 'move', dx: joy.dir.dx, dy: joy.dir.dy });
-    if (this.joy && this.visibleEnemies() > before) {
+    if (this.joy && this.noteNewKinds()) {
       this.joy.pauseUntil = this.time.now + JOY_SIGHT_PAUSE_MS;
       this.floatText(this.run.pos.x, this.run.pos.y, '!', INK.gold);
     }
   }
 
-  private visibleEnemies() {
-    return this.run.monsters.filter((m) => this.run.isVisible(m.x, m.y)).length;
+  /** Kinds of enemy already met this run (rival hunters and mid-bosses count as their own kinds). */
+  private metKinds = new Set<string>();
+
+  /** Records the kinds of enemy in view. True if one of them was new. */
+  private noteNewKinds(): boolean {
+    let fresh = false;
+    for (const m of this.run.monsters) {
+      if (!this.run.isVisible(m.x, m.y) || this.metKinds.has(m.kind.id)) continue;
+      this.metKinds.add(m.kind.id);
+      fresh = true;
+    }
+    return fresh;
   }
 
   private drawJoy(kx: number, ky: number) {
@@ -227,7 +245,9 @@ export class TowerScene extends Phaser.Scene {
       }
       state.run = undefined;
     }
-    return new TowerRun(activeHunter(state)!, rng, options);
+    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor });
+    if (this.startFloor > 1) run.log.push(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
+    return run;
   }
 
   /** Save after every change, so closing the app mid-run loses nothing. A finished run clears it. */
@@ -242,6 +262,8 @@ export class TowerScene extends Phaser.Scene {
     if (this.overlay.length) return;
     this.run.act(action);
     this.redraw();
+    // Kinds seen while walking with keys or taps don't stop the joystick later.
+    if (!this.joy) this.noteNewKinds();
   }
 
   private clearDynamic() {
@@ -281,7 +303,7 @@ export class TowerScene extends Phaser.Scene {
 
     for (const m of run.monsters) {
       if (!run.isVisible(m.x, m.y)) continue;
-      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.awake ? INK.rust : '#c9a46a';
+      const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
       if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
       else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
@@ -384,7 +406,7 @@ export class TowerScene extends Phaser.Scene {
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 88, `${run.floor}층 · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    k(text(this, 16, HUD_Y + 88, `${run.floor}층(적정 Lv.${recommendedLevel(run.floor)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -411,7 +433,7 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
     const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
     k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
-    k(text(this, GW - 14, 13, `${run.floor}층 · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
+    k(text(this, GW - 14, 13, `${run.floor}층(적정 Lv.${recommendedLevel(run.floor)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold).setOrigin(1, 0));
     k(text(this, 14, 38, '체력', 12, INK.quiet));
     k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
@@ -485,6 +507,9 @@ export class TowerScene extends Phaser.Scene {
             sfx.bigKill();
           } else sfx.kill();
           break;
+        case 'shot':
+          this.shot(e.x, e.y);
+          break;
         case 'hurt':
           hurt += e.amount;
           this.floatText(at.x, at.y, `-${e.amount}`, INK.red);
@@ -555,6 +580,20 @@ export class TowerScene extends Phaser.Scene {
   }
 
   /** A white blink over a tile that was hit. */
+  /** An arrow or bolt that flies from a ranged monster to the hunter. */
+  private shot(x: number, y: number) {
+    const to = this.run.pos;
+    const p = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, 8, 3, 0xe5ae46).setDepth(26));
+    p.setRotation(Math.atan2(to.y - y, to.x - x));
+    this.tweens.add({
+      targets: p,
+      x: to.x * TILE + TILE / 2,
+      y: to.y * TILE + TILE / 2,
+      duration: 90 + 25 * (Math.abs(to.x - x) + Math.abs(to.y - y)),
+      onComplete: () => p.destroy(),
+    });
+  }
+
   private tileFlash(x: number, y: number) {
     const r = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, TILE, TILE, 0xffffff, 0.55).setDepth(25));
     this.tweens.add({ targets: r, alpha: 0, duration: 120, onComplete: () => r.destroy() });

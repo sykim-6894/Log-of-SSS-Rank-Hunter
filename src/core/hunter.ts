@@ -94,9 +94,11 @@ export function combatPower(h: Pick<Hunter, 'maxHp' | 'maxMp' | 'atk' | 'def' | 
   return h.maxHp + h.maxMp + (h.atk + h.def) * 5 + h.level * 20;
 }
 
+export const GRADE_A_POWER = 2000;
+
 /** Lower bound of combat power for each grade, highest first. */
 export const GRADE_THRESHOLDS: ReadonlyArray<[PowerGrade, number]> = [
-  ['A', 2000],
+  ['A', GRADE_A_POWER],
   ['B', 1000],
   ['C', 500],
   ['D', 250],

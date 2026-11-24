@@ -1,7 +1,7 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
-import { bossFor, eliteOf, floorScale, MonsterKind, monsterPool, TOP_FLOOR } from './monsters';
+import { bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, TOP_FLOOR } from './monsters';
 import {
   addToBag,
   ChestContent,
@@ -71,6 +71,8 @@ export interface RunOptions {
   eliteChance?: number;
   /** Chance per floor (from floor 2) of a wandering merchant. */
   merchantChance?: number;
+  /** Floor to start on. Lower floors can be skipped once the hunter's grade allows it. */
+  startFloor?: number;
 }
 
 export interface Merchant {
@@ -90,6 +92,7 @@ const MP_REGEN_EVERY = 4;
 export type RunEvent =
   | { type: 'hit'; x: number; y: number; amount: number }
   | { type: 'hurt'; amount: number }
+  | { type: 'shot'; x: number; y: number; missed?: boolean }
   | { type: 'block' }
   | { type: 'kill'; x: number; y: number; big: boolean }
   | { type: 'heal'; amount: number }
@@ -157,7 +160,7 @@ export class TowerRun {
     private options: RunOptions = {},
     start = true,
   ) {
-    if (start) this.enterFloor(1);
+    if (start) this.enterFloor(Math.max(1, Math.min(TOP_FLOOR, options.startFloor ?? 1)));
   }
 
   drainEvents(): RunEvent[] {
@@ -616,7 +619,8 @@ export class TowerRun {
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
-    const levels = gainExp(this.hunter, Math.round(m.kind.exp * scale));
+    const expScale = m.hunter ? 1 : floorExpScale(this.floor) * overLevelFactor(this.hunter.level, this.floor);
+    const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
     if (m.kind.elite) {
@@ -666,7 +670,10 @@ export class TowerRun {
       const dy = this.pos.y - m.y;
       if (!m.awake && dx * dx + dy * dy <= SIGHT * SIGHT) m.awake = true;
       if (!m.awake) continue;
-      if (Math.abs(dx) + Math.abs(dy) === 1) {
+      const adjacent = Math.abs(dx) + Math.abs(dy) === 1;
+      const shoots = !adjacent && this.canShoot(m);
+      if (adjacent || shoots) {
+        if (shoots) this.events.push({ type: 'shot', x: m.x, y: m.y });
         if (this.guardTurns > 0) {
           this.say(`${m.kind.name}의 공격! 무적이라 피해가 없다.`);
           this.events.push({ type: 'block' });
@@ -675,7 +682,7 @@ export class TowerRun {
         const dmg = this.damage(m.atk, this.hunter.def);
         this.hunter.hp -= dmg;
         this.events.push({ type: 'hurt', amount: dmg });
-        this.say(`${m.kind.name}의 공격! ${dmg} 피해.`);
+        this.say(shoots ? `${m.kind.name}의 원거리 공격! ${dmg} 피해.` : `${m.kind.name}의 공격! ${dmg} 피해.`);
         if (this.hunter.hp <= 0 && this.hunter.rescues > 0) {
           this.hunter.rescues -= 1;
           this.hunter.hp = Math.ceil(this.hunter.maxHp * 0.3);
@@ -695,6 +702,25 @@ export class TowerRun {
       }
       this.stepToward(m);
     }
+  }
+
+  /** A ranged monster fires along a row or column when nothing stands in between. */
+  private canShoot(m: Monster): boolean {
+    const range = m.kind.range;
+    if (!range) return false;
+    const dx = this.pos.x - m.x;
+    const dy = this.pos.y - m.y;
+    if (dx !== 0 && dy !== 0) return false;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    if (dist < 2 || dist > range) return false;
+    const sx = Math.sign(dx);
+    const sy = Math.sign(dy);
+    for (let i = 1; i < dist; i++) {
+      const x = m.x + sx * i;
+      const y = m.y + sy * i;
+      if (!isWalkable(this.map, x, y) || this.monsterAt(x, y)) return false;
+    }
+    return true;
   }
 
   private stepToward(m: Monster) {
