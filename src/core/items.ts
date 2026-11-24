@@ -26,6 +26,11 @@ export function emptyBag(): Bag {
   return { hp: 0, mp: 0, guard: 0, escape: 0 };
 }
 
+/** What a hunter carries out of the agency: one health potion. Anything else is bought before leaving. */
+export function startingBag(): Bag {
+  return { ...emptyBag(), hp: 1 };
+}
+
 /** Puts items in the bag. Returns how many fit; the rest are left behind. */
 export function addToBag(h: Hunter, kind: ConsumableKind, count = 1): number {
   const fit = Math.max(0, Math.min(count, BAG_MAX - h.bag[kind]));

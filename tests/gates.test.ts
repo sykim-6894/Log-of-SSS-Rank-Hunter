@@ -260,3 +260,21 @@ describe('clearing a gate', () => {
     expect(run.clearGate()).toBe(false);
   });
 });
+
+describe('bag after a trip', () => {
+  it('new hunters carry one health potion', () => {
+    expect(hunter().bag).toEqual({ hp: 1, mp: 0, guard: 0, escape: 0 });
+  });
+
+  it('coming back from the tower or a gate leaves only one health potion', () => {
+    const rng = new Rng(11);
+    const state = newGame(rng);
+    const h = state.slots[0]!;
+    h.bag = { hp: 5, mp: 3, guard: 2, escape: 1 };
+    settleReturn(state, rng, 50);
+    expect(h.bag).toEqual({ hp: 1, mp: 0, guard: 0, escape: 0 });
+    h.bag.hp = 0;
+    settleReturn(state, rng, 0);
+    expect(h.bag.hp).toBe(1);
+  });
+});

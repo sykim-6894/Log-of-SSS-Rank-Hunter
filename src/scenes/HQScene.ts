@@ -529,7 +529,8 @@ export class HQScene extends Phaser.Scene {
     this.drawGearPanel(x, y, w);
 
     const py = y + DOLL_H + 60;
-    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52, '물약 · 상점');
+    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52 + 22, '물약 · 상점');
+    text(this, x + 16, py + 32 + CONSUMABLE_KINDS.length * 52, '귀환하면 가방은 체력 물약 1개로 돌아갑니다.', 12, INK.faint);
     text(this, x + w - 16, py + 14, `헌터 소지금 ${h.gold}G`, 12, INK.gold).setOrigin(1, 0);
     CONSUMABLE_KINDS.forEach((kind, i) => {
       const c = CONSUMABLES[kind];

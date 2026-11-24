@@ -1038,6 +1038,7 @@ export class TowerScene extends Phaser.Scene {
     if (r.promotedTo) {
       msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
+    msgs.push('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.');
     msgs.push(...this.newsLines(r));
     state.run = undefined;
     persist();

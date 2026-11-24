@@ -1,5 +1,5 @@
 import { ClassId, CLASS_IDS, CLASSES, classSkills, LevelCard, OwnedSkill, SkillId } from './classes';
-import { Bag, emptyBag, Equipment } from './items';
+import { Bag, Equipment, startingBag } from './items';
 import { Rng } from './rng';
 
 /** F to A come from combat power. S, SS and SSS come from the live ranking. */
@@ -91,7 +91,7 @@ export function createHunter(
     atk: c.base.atk,
     def: c.base.def,
     gold: 20,
-    bag: { ...emptyBag(), hp: 2 },
+    bag: startingBag(),
     gear: {},
     kills: 0,
     killScore: 0,

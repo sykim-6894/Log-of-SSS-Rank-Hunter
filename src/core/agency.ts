@@ -3,7 +3,7 @@ import {
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, startingBag } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -383,6 +383,8 @@ export function settleReturn(state: GameState, rng: Rng, earned: number, encount
   hunter.totalTribute += tribute;
   hunter.hp = hunter.maxHp;
   hunter.mp = hunter.maxMp;
+  // Potions and scrolls don't come home: the bag goes back to one health potion.
+  hunter.bag = startingBag();
 
   const news = afterRun(state, rng, encounters);
   const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, ...news };
