@@ -5,6 +5,7 @@ import { hallOfFameScore } from '../core/hunter';
 import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
+import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
 import { recommendedLevel } from '../core/monsters';
 import { Action, REWARDS, RunEvent, TowerRun } from '../core/run';
@@ -361,7 +362,14 @@ export class TowerScene extends Phaser.Scene {
       if (!run.isVisible(m.x, m.y)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
       if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
-      else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
+      else if (hasMonsterArt(m.kind.id)) {
+        // Mid-bosses: the same creature, bigger and gold. Sleeping monsters are a little dim.
+        const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE - 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
+        if (m.kind.elite) img.setScale(1.3).setTint(0xffd27a);
+        if (m.kind.boss) img.setScale(1.35);
+        if (!m.awake) img.setAlpha(0.75);
+        if (m.stun) img.setTint(0x9fd8ff);
+      } else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1) {
         const hb = this.keep(this.add.graphics());
