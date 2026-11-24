@@ -1,7 +1,19 @@
 import { Rng } from './rng';
 
+/** Landscape floors: wide, for PC and sideways phones. */
 export const MAP_W = 40;
 export const MAP_H = 25;
+/** Upright floors for phones held upright: narrow and tall, so the screen is filled. */
+export const TALL_MAP_W = 24;
+export const TALL_MAP_H = 40;
+
+export function mapWidth(map: FloorMap): number {
+  return map.tiles[0].length;
+}
+
+export function mapHeight(map: FloorMap): number {
+  return map.tiles.length;
+}
 
 export enum Tile {
   Wall = 0,
@@ -46,22 +58,22 @@ function carveV(tiles: Tile[][], y1: number, y2: number, x: number) {
 }
 
 /** Random rooms joined in order by L-shaped corridors, so every room is reachable. */
-export function generateFloor(rng: Rng): FloorMap {
+export function generateFloor(rng: Rng, width = MAP_W, height = MAP_H): FloorMap {
   for (;;) {
-    const map = tryGenerate(rng);
+    const map = tryGenerate(rng, width, height);
     if (map) return map;
   }
 }
 
-function tryGenerate(rng: Rng): FloorMap | undefined {
-  const tiles: Tile[][] = Array.from({ length: MAP_H }, () => Array<Tile>(MAP_W).fill(Tile.Wall));
+function tryGenerate(rng: Rng, width: number, height: number): FloorMap | undefined {
+  const tiles: Tile[][] = Array.from({ length: height }, () => Array<Tile>(width).fill(Tile.Wall));
   const rooms: Room[] = [];
   const target = rng.int(6, 9);
 
   for (let tries = 0; tries < 300 && rooms.length < target; tries++) {
     const w = rng.int(4, 9);
     const h = rng.int(3, 6);
-    const room = { x: rng.int(1, MAP_W - w - 2), y: rng.int(1, MAP_H - h - 2), w, h };
+    const room = { x: rng.int(1, width - w - 2), y: rng.int(1, height - h - 2), w, h };
     if (rooms.some((r) => overlaps(r, room))) continue;
     rooms.push(room);
   }
@@ -91,6 +103,6 @@ function tryGenerate(rng: Rng): FloorMap | undefined {
 }
 
 export function isWalkable(map: FloorMap, x: number, y: number): boolean {
-  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return false;
+  if (x < 0 || y < 0 || y >= map.tiles.length || x >= map.tiles[0].length) return false;
   return map.tiles[y][x] !== Tile.Wall;
 }

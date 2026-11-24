@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import { activeHunter, AfterRunNews, gradeIn, settleDeath, settleReturn } from '../core/agency';
-import { MAP_H, MAP_W, Tile } from '../core/dungeon';
+import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { CONSUMABLE_KINDS, CONSUMABLES, offerLabel } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
@@ -73,7 +73,7 @@ export class TowerScene extends Phaser.Scene {
     this.uiCam = null;
     if (PORTRAIT) {
       const cam = this.cameras.main;
-      cam.setViewport(0, P_TOP_H, GW, P_MAP_H).setZoom(P_ZOOM).setBounds(0, 0, MAP_W * TILE, MAP_H * TILE);
+      cam.setViewport(0, P_TOP_H, GW, P_MAP_H).setZoom(P_ZOOM);
       this.uiCam = this.cameras.add(0, 0, GW, GH);
     }
     this.mapLayer = this.world(this.add.graphics());
@@ -115,6 +115,44 @@ export class TowerScene extends Phaser.Scene {
     this.redraw();
   }
 
+  /** Tap the minimap to make it larger or smaller again. */
+  private bigMinimap = false;
+
+  /** Where the minimap sits: top right corner of the map view, upright layout only. */
+  private minimapRect() {
+    if (!PORTRAIT || !this.run) return undefined;
+    const px = this.bigMinimap ? 6 : 3;
+    const w = mapWidth(this.run.map) * px + 8;
+    const h = mapHeight(this.run.map) * px + 8;
+    return { x: GW - w - 8, y: P_TOP_H + 8, w, h, px };
+  }
+
+  /** The explored part of the floor in small: walls, stairs, enemies in sight, the hunter. */
+  private drawMinimap() {
+    const r = this.minimapRect();
+    if (!r) return;
+    const run = this.run;
+    const g = this.ui(this.add.graphics().setDepth(30));
+    this.dynamic.push(g);
+    g.fillStyle(0x000000, 0.55).fillRect(r.x, r.y, r.w, r.h);
+    g.lineStyle(1, PALETTE.line, 1).strokeRect(r.x, r.y, r.w, r.h);
+    const ox = r.x + 4;
+    const oy = r.y + 4;
+    const dot = (x: number, y: number, color: number, alpha = 1) => g.fillStyle(color, alpha).fillRect(ox + x * r.px, oy + y * r.px, r.px, r.px);
+    for (let y = 0; y < mapHeight(run.map); y++) {
+      for (let x = 0; x < mapWidth(run.map); x++) {
+        if (!run.seen[y][x]) continue;
+        const t = run.map.tiles[y][x];
+        if (t === Tile.Floor) dot(x, y, 0x8a7560, 0.8);
+        else if (t === Tile.Stairs) dot(x, y, PALETTE.gold);
+      }
+    }
+    for (const c of run.chests) if (run.seen[c.y][c.x]) dot(c.x, c.y, 0xc98a3a);
+    if (run.merchant && run.seen[run.merchant.y][run.merchant.x]) dot(run.merchant.x, run.merchant.y, 0x7fd67a);
+    for (const m of run.monsters) if (run.isVisible(m.x, m.y)) dot(m.x, m.y, m.kind.boss || m.kind.elite ? 0xff5040 : 0xd0603a);
+    dot(run.pos.x, run.pos.y, 0xffffff);
+  }
+
   /** Map objects: drawn only by the main (following) camera. */
   private world<T extends Phaser.GameObjects.GameObject>(o: T): T {
     this.uiCam?.ignore(o);
@@ -135,7 +173,13 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private joyStart(p: Phaser.Input.Pointer) {
-    if (!this.joyArea(p) || this.overlay.length || this.joy) return;
+    if (this.overlay.length || this.joy) return;
+    const mm = this.minimapRect();
+    if (mm && p.x >= mm.x && p.x <= mm.x + mm.w && p.y >= mm.y && p.y <= mm.y + mm.h) {
+      this.bigMinimap = !this.bigMinimap;
+      return this.redraw();
+    }
+    if (!this.joyArea(p)) return;
     const gfx = this.ui(this.add.graphics().setDepth(50));
     this.joy = { id: p.id, ox: p.x, oy: p.y, dir: null, used: false, pauseUntil: 0, gfx, timer: null };
     this.drawJoy(p.x, p.y);
@@ -233,7 +277,11 @@ export class TowerScene extends Phaser.Scene {
 
   /** Continue the run saved in the game state if there is one, otherwise start a new one. */
   private resumeOrStart(): TowerRun {
-    const options = { rivals: state.rival.roster, rivalAgency: state.rival.name };
+    const options = {
+      rivals: state.rival.roster,
+      rivalAgency: state.rival.name,
+      mapSize: PORTRAIT ? { w: TALL_MAP_W, h: TALL_MAP_H } : undefined,
+    };
     const saved = state.run;
     if (saved) {
       const slot = state.slots.findIndex((h) => h?.id === saved.hunterId);
@@ -241,6 +289,8 @@ export class TowerScene extends Phaser.Scene {
       if (run) {
         state.activeSlot = slot;
         run.log.push('— 저장된 곳에서 이어서 진행 —');
+        // A tall floor saved on an upright phone doesn't fit the wide screen: lay this floor out again.
+        if (!PORTRAIT && mapHeight(run.map) > MAP_H) run.enterFloor(run.floor);
         return run;
       }
       state.run = undefined;
@@ -284,8 +334,10 @@ export class TowerScene extends Phaser.Scene {
     g.clear();
     this.clearDynamic();
 
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
+    const mw = mapWidth(run.map);
+    const mh = mapHeight(run.map);
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
         if (!run.seen[y][x]) continue;
         const tile = run.map.tiles[y][x];
         if (tile === Tile.Wall && !this.touchesFloor(x, y)) continue;
@@ -316,7 +368,12 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
-    if (PORTRAIT) this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
+    if (PORTRAIT) {
+      // Bounds follow the floor, since a run saved sideways keeps its wide floor.
+      this.cameras.main.setBounds(0, 0, mw * TILE, mh * TILE);
+      this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
+      this.drawMinimap();
+    }
 
     if (PORTRAIT) this.drawHudPortrait();
     else this.drawHud();

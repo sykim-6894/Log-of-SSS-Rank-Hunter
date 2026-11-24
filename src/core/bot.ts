@@ -1,11 +1,12 @@
-import { isWalkable, MAP_H, MAP_W, Point } from './dungeon';
+import { isWalkable, mapWidth, Point } from './dungeon';
 import { Action, SKILL_COST, TowerRun } from './run';
 
 /** First step of a shortest walkable path from the hunter to the goal (monsters treated as passable). */
 export function stepTowards(run: TowerRun, goal: Point): Action | undefined {
   const start = run.pos;
   const prev = new Map<number, number>();
-  const key = (x: number, y: number) => y * MAP_W + x;
+  const W = mapWidth(run.map);
+  const key = (x: number, y: number) => y * W + x;
   const queue: Point[] = [start];
   prev.set(key(start.x, start.y), -1);
   for (let head = 0; head < queue.length; head++) {
@@ -14,7 +15,6 @@ export function stepTowards(run: TowerRun, goal: Point): Action | undefined {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = p.x + dx;
       const ny = p.y + dy;
-      if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
       if (!isWalkable(run.map, nx, ny) || prev.has(key(nx, ny))) continue;
       prev.set(key(nx, ny), key(p.x, p.y));
       queue.push({ x: nx, y: ny });
@@ -28,7 +28,7 @@ export function stepTowards(run: TowerRun, goal: Point): Action | undefined {
     if (p === undefined || p === -1) return undefined;
     cur = p;
   }
-  return { type: 'move', dx: (cur % MAP_W) - start.x, dy: Math.floor(cur / MAP_W) - start.y };
+  return { type: 'move', dx: (cur % W) - start.x, dy: Math.floor(cur / W) - start.y };
 }
 
 /** A simple autoplayer used to test balance: fight what it sees, then head for the stairs. */
