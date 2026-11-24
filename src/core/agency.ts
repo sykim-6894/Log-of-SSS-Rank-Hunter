@@ -3,7 +3,7 @@ import {
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -14,6 +14,8 @@ export interface Agent {
   gold: number;
   /** False until the player names the agency on the first screen. Older saves never had this. */
   named?: boolean;
+  /** 마력석 in the agency's store, for enhancing gear. Kept between runs. */
+  stones?: number;
 }
 
 /** A hunter who is gone for good: died unrescued, or was finished off. */
@@ -397,6 +399,80 @@ export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): Purch
 
 // ---------- After a run ----------
 
+// ---------- Enhancement ----------
+
+/** Chance to reach +1 … +10. */
+export const ENHANCE_CHANCE = [1, 1, 1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
+/**
+ * What happens on a failed try, by the level the piece is at: chance it breaks, chance it drops
+ * a level, and the rest it stays. Below +5 a failure only costs the stones and gold.
+ */
+export const ENHANCE_FAIL: Record<number, { break: number; drop: number }> = {
+  5: { break: 0, drop: 0.5 },
+  6: { break: 0, drop: 0.5 },
+  7: { break: 0.2, drop: 0.4 },
+  8: { break: 0.3, drop: 0.4 },
+  9: { break: 0.4, drop: 0.4 },
+};
+
+/** Odds of each outcome if a try at this level fails. */
+export function failOdds(g: Gear): { break: number; drop: number; keep: number } {
+  const f = ENHANCE_FAIL[g.plus ?? 0] ?? { break: 0, drop: 0 };
+  return { ...f, keep: Math.max(0, 1 - f.break - f.drop) };
+}
+
+/** Stones and agency gold to take a piece one level up. */
+export function enhanceCost(g: Gear): { stones: number; gold: number } {
+  const to = (g.plus ?? 0) + 1;
+  return { stones: to, gold: 10 * to * g.tier };
+}
+
+export function enhanceChance(g: Gear): number {
+  return ENHANCE_CHANCE[Math.min(MAX_PLUS, (g.plus ?? 0) + 1) - 1];
+}
+
+export interface EnhanceResult {
+  success: boolean;
+  /** The piece broke and is gone. */
+  broken: boolean;
+  from: number;
+  to: number;
+  gear: Gear;
+}
+
+/** The worst a failure at this level can do: nothing, a level, or the piece. */
+export function enhanceRisk(g: Gear): 'none' | 'drop' | 'break' {
+  const f = failOdds(g);
+  return f.break > 0 ? 'break' : f.drop > 0 ? 'drop' : 'none';
+}
+
+/** Tries to enhance the active hunter's piece in a slot, paid from the agency's stones and gold. */
+export function enhanceGear(state: GameState, rng: Rng, slot: GearSlot): EnhanceResult | undefined {
+  const h = activeHunter(state);
+  const g = h?.gear[slot];
+  if (!h || !g || (g.plus ?? 0) >= MAX_PLUS) return undefined;
+  const cost = enhanceCost(g);
+  const stones = state.agent.stones ?? 0;
+  if (stones < cost.stones || state.agent.gold < cost.gold) return undefined;
+  state.agent.stones = stones - cost.stones;
+  state.agent.gold -= cost.gold;
+  const from = g.plus ?? 0;
+  const success = rng.chance(enhanceChance(g));
+  if (success) {
+    setPlus(h, slot, from + 1);
+    return { success, broken: false, from, to: from + 1, gear: g };
+  }
+  const odds = failOdds(g);
+  const roll = rng.next();
+  if (roll < odds.break) {
+    unequip(h, slot);
+    return { success, broken: true, from, to: 0, gear: g };
+  }
+  const to = roll < odds.break + odds.drop ? from - 1 : from;
+  setPlus(h, slot, to);
+  return { success, broken: false, from, to, gear: g };
+}
+
 export interface GachaResult {
   gear: Gear;
   equipped: boolean;
@@ -445,9 +521,10 @@ export interface ReturnResult extends AfterRunNews {
 
 /** Hunter came back alive: pay tribute under the current contract, then re-contract on promotion. */
 export function settleReturn(
-  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false,
+  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0,
 ): ReturnResult {
   const { agent } = state;
+  agent.stones = (agent.stones ?? 0) + stones;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
   const rate = TRIBUTE_RATE[hunter.contractGrade];

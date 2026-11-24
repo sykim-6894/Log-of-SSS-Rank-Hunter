@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, AGENCY_NAME_MAX, buyItem, drawGear, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS } from '../core/monsters';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, GEAR_SLOT_NAMES, makeGear } from '../core/items';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
 import { sfx, soundOn, toggleSound } from '../game/sfx';
@@ -25,6 +25,8 @@ export interface HQData {
   gates?: boolean;
   /** Show the gear draw, with the last result if there is one. */
   gacha?: { result?: GachaResult };
+  /** Show the gear enhancement screen, with the last try if there is one. */
+  enhance?: { result?: EnhanceResult };
 }
 
 let welcomed = false;
@@ -60,6 +62,7 @@ export class HQScene extends Phaser.Scene {
   private hiring?: HQData['hire'];
   private showingGates = false;
   private gacha?: HQData['gacha'];
+  private enhancing?: HQData['enhance'];
 
   constructor() {
     super('HQ');
@@ -72,6 +75,7 @@ export class HQScene extends Phaser.Scene {
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
     this.gacha = data.gacha;
+    this.enhancing = data.enhance;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
@@ -107,6 +111,7 @@ export class HQScene extends Phaser.Scene {
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
     if (this.gacha) return this.drawGacha(this.gacha.result);
+    if (this.enhancing) return this.drawEnhance(this.enhancing.result);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -524,12 +529,105 @@ export class HQScene extends Phaser.Scene {
       showGear = !showGear;
       this.scene.restart({ messages: this.messages });
     });
-    button(this, x + 118, y + 14, 112, 26, '장비 뽑기', () => this.openGacha(), { primary: true, size: 12 });
+    button(this, x + 116, y + 14, 60, 26, '뽑기', () => this.openGacha(), { primary: true, size: 12 });
+    button(this, x + 182, y + 14, 56, 26, '강화', () => this.openEnhance(), { primary: true, size: 12 });
     text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
       button(this, x + w - 196 + i * 92, y + 16, 86, 44, `${c.name.slice(0, 2)} 물약\n${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
     });
+  }
+
+  private openEnhance() {
+    this.scene.restart({ messages: this.messages, enhance: {} });
+  }
+
+  /** Enhance worn gear with the agency's 마력석 and gold. Higher levels can drop or break. */
+  private drawEnhance(result?: EnhanceResult) {
+    const h = activeHunter(state);
+    const w = PORTRAIT ? GW - 28 : 720;
+    const x = (GW - w) / 2;
+    const stones = state.agent.stones ?? 0;
+    title(this, GW / 2, 18, '장비 강화', 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 50, `마력석 ${stones}개 · 운영 자금 ${state.agent.gold}G`, 12, INK.gold).setOrigin(0.5, 0);
+    text(this, GW / 2, 70, '+5부터 실패하면 한 단계 떨어질 수 있고, +7부터는 부서질 수도 있다.', 12, INK.faint)
+      .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
+
+    let y = PORTRAIT ? 112 : 96;
+    if (result) {
+      const g = result.gear;
+      const [line, color] = result.success
+        ? [`성공! ${g.name} +${result.from} → +${result.to}`, INK.gold]
+        : result.broken
+          ? [`실패... +${result.from} ${g.name}이(가) 부서졌다!`, INK.red]
+          : result.to < result.from
+            ? [`실패... ${g.name} +${result.from} → +${result.to}`, INK.red]
+            : [`실패... ${g.name}은(는) +${result.from} 그대로.`, INK.quiet];
+      const t = title(this, GW / 2, y, line, 15, color).setOrigin(0.5, 0);
+      if (t.width > w) t.setFontSize(12);
+      this.tweens.add({ targets: t, scale: { from: 1.25, to: 1 }, duration: 250 });
+      if (result.broken) this.cameras.main.shake(300, 0.01);
+      if (result.success && result.to >= 7) this.cameras.main.flash(250, 255, 210, 150);
+    }
+    y += 30;
+
+    const rowH = PORTRAIT ? 86 : 64;
+    GEAR_SLOTS.forEach((slot, i) => {
+      const ry = y + i * rowH;
+      const g = h?.gear[slot];
+      panel(this, x, ry, w, rowH - 6);
+      if (!g) {
+        text(this, x + 14, ry + 10, GEAR_SLOT_NAMES[slot], 12, INK.faint);
+        text(this, x + 14, ry + 30, '비어 있음', 12, INK.faint);
+        return;
+      }
+      const icon = this.add.graphics();
+      drawGearIcon(g)(icon, x + 8, ry + 6);
+      const tx = x + 58;
+      const bw = 76;
+      const tw = w - (tx - x) - bw - 20;
+      fit(title(this, tx, ry + 6, `${GEAR_SLOT_NAMES[slot]} · ${gearLabel(g)}`, 12, tierColor(g.tier)), tw);
+      fit(text(this, tx, ry + 24, describeGear(g), 12, INK.text), tw);
+      const plus = g.plus ?? 0;
+      if (plus >= MAX_PLUS) {
+        text(this, tx, ry + 42, '최대 강화', 12, INK.gold);
+        return;
+      }
+      const cost = enhanceCost(g);
+      const risk = enhanceRisk(g);
+      const ok = stones >= cost.stones && state.agent.gold >= cost.gold;
+      const pct = (v: number) => Math.round(v * 100);
+      const f = failOdds(g);
+      const failText = risk === 'none' ? '' : `실패하면 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`;
+      const chance = enhanceChance(g);
+      const costText = `마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(chance)}% · 실패 ${pct(1 - chance)}%`;
+      const riskColor = risk === 'break' ? INK.red : risk === 'drop' ? INK.rust : INK.quiet;
+      if (PORTRAIT) {
+        fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
+        if (failText) fit(text(this, tx, ry + 60, failText, 12, riskColor), tw);
+      } else {
+        const c = fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
+        if (failText) fit(text(this, tx + c.width + 6, ry + 42, `· ${failText}`, 12, riskColor), tw - c.width - 6);
+      }
+      button(this, x + w - bw - 10, ry + (rowH - 6) / 2 - 17, bw, 34, `+${plus + 1}`, () => {
+        const r = enhanceGear(state, rng, slot);
+        if (!r) return;
+        persist();
+        if (r.success) (r.to >= 7 ? sfx.levelup : sfx.gear)();
+        else if (r.broken) sfx.death();
+        else sfx.curse();
+        const msg = r.success
+          ? `강화 성공: ${r.gear.name} +${r.to}`
+          : r.broken ? `강화 실패: +${r.from} ${r.gear.name}이(가) 부서졌다.` : `강화 실패: ${r.gear.name} +${r.to}`;
+        this.messages = [msg, ...this.messages];
+        this.scene.restart({ messages: this.messages, enhance: { result: r } });
+      }, { primary: risk !== 'break', size: 15, enabled: ok });
+    });
+
+    const by = y + GEAR_SLOTS.length * rowH + 6;
+    text(this, GW / 2, by, '마력석은 몬스터, 중간보스, 층 보스, 게이트 클리어에서 얻는다.', 12, INK.faint)
+      .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
+    button(this, x, GH - 70, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
   }
 
   private openGacha() {
@@ -616,7 +714,10 @@ export class HQScene extends Phaser.Scene {
     const h = activeHunter(state);
     if (!h) return;
     panel(this, x, y, w, DOLL_H + 40, '장비');
-    if (PORTRAIT) button(this, x + w - 112, y + 8, 100, 26, '장비 뽑기', () => this.openGacha(), { primary: true, size: 12 });
+    if (PORTRAIT) {
+      button(this, x + w - 160, y + 8, 70, 26, '뽑기', () => this.openGacha(), { primary: true, size: 12 });
+      button(this, x + w - 84, y + 8, 72, 26, '강화', () => this.openEnhance(), { primary: true, size: 12 });
+    }
     else text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
     drawPaperDoll(this, x + 12, y + 32, w - 24, h);
   }

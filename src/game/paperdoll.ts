@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Hunter } from '../core/hunter';
-import { describeGear, Gear, GEAR_SLOT_NAMES, GearSlot, TOP_TIER } from '../core/items';
+import { describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, GearSlot, gearStats, TOP_TIER } from '../core/items';
 import { INK, PALETTE, text } from './ui';
 
 /** Height of the paper doll drawn by drawPaperDoll. */
@@ -78,7 +78,7 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
     if (gear) {
       const color = tierColor(gear.tier);
       objs.push(text(scene, bx + boxW - 8, by + 5, `${gear.tier}단계`, 12, color).setOrigin(1, 0));
-      objs.push(fit(text(scene, bx + 8, by + 19, gear.name, 12, color, true), boxW - 16));
+      objs.push(fit(text(scene, bx + 8, by + 19, gearLabel(gear), 12, color, true), boxW - 16));
       objs.push(fit(text(scene, bx + 8, by + 34, describeGear(gear), 12, INK.gate), boxW - 16));
     } else {
       objs.push(text(scene, bx + 8, by + 24, '비어 있음', 12, INK.faint));
@@ -125,7 +125,7 @@ export function drawGearIcon(gear: Gear) {
 export function gearDiff(gear: Gear, old?: Gear): string {
   const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', '공격'], ['def', '방어'], ['hp', '체력'], ['mp', '마나']];
   return names
-    .map(([k, label]) => [label, gear[k] - (old?.[k] ?? 0)] as const)
+    .map(([k, label]) => [label, gearStats(gear)[k] - (old ? gearStats(old)[k] : 0)] as const)
     .filter(([, d]) => d !== 0)
     .map(([label, d]) => `${label} ${d > 0 ? '+' : ''}${d}`)
     .join(' · ');
