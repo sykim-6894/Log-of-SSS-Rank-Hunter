@@ -53,6 +53,8 @@ export class TowerScene extends Phaser.Scene {
   } | null = null;
   /** Level when the screen was last drawn, to notice level ups. */
   private shownLevel = 0;
+  /** The gate master just fell: offer to leave with the reward at the next quiet moment. */
+  private clearPending = false;
   /** Center pop-ups for finds and curses, shown one after another. */
   private notices: Notice[] = [];
   private noticeUp?: Phaser.GameObjects.Container;
@@ -78,6 +80,7 @@ export class TowerScene extends Phaser.Scene {
     this.metKinds = new Set();
     this.notices = [];
     this.noticeUp = undefined;
+    this.clearPending = false;
     this.run = this.resumeOrStart();
     this.overlay = [];
     this.dynamic = [];
@@ -403,6 +406,7 @@ export class TowerScene extends Phaser.Scene {
     this.shownLevel = run.hunter.level;
 
     if (run.hunter.picks > 0 && run.status !== 'dead' && !this.overlay.length) this.showCards();
+    if (this.clearPending && run.status === 'playing' && !this.overlay.length) this.showGateClear();
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
     this.saveRun();
@@ -733,6 +737,11 @@ export class TowerScene extends Phaser.Scene {
         case 'floor':
           sfx.floor();
           break;
+        case 'gateClear':
+          this.clearPending = true;
+          cam.flash(300, 229, 174, 70);
+          sfx.levelup();
+          break;
       }
     }
     if (hurt > 0) {
@@ -950,19 +959,29 @@ export class TowerScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Right after the gate master falls (and again from the stairs): leave with the reward,
+   * or stay to finish the floor. The reward can be taken later from the stairs.
+   */
+  private showGateClear() {
+    const run = this.run;
+    this.clearPending = false;
+    if (!run.gate) return;
+    this.joyClear();
+    this.dialog('게이트 클리어!', [
+      `${gateName(run.gate)}의 주인을 쓰러뜨렸다. 이번 수입 ${run.runGold}G`,
+      `클리어 보상 ${gateClearGold(run.gate)}G와 장비 하나를 챙겨서 나간다.`,
+      '남아도 보상은 사라지지 않는다. 나중에 계단에서 나갈 수 있다.',
+    ], [
+      ['보상 받고 귀환하기', () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
+      ['남아서 더 둘러보기', () => { this.closeOverlay(); run.stay(); this.redraw(); }],
+    ], INK.gold);
+  }
+
   private showStairs() {
     const run = this.run;
     const h = run.hunter;
-    if (run.gate && run.isTopFloor) {
-      this.dialog('게이트 주인을 쓰러뜨렸다', [
-        `${gateName(run.gate)} 클리어! 이번 수입 ${run.runGold}G`,
-        `클리어 보상 ${gateClearGold(run.gate)}G와 장비 하나를 챙겨서 나간다.`,
-      ], [
-        ['보상 받고 귀환하기', () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
-        ['이 층을 더 둘러보기', () => { this.closeOverlay(); run.stay(); this.redraw(); }],
-      ], INK.gold);
-      return;
-    }
+    if (run.gateCleared) return this.showGateClear();
     const lines = [
       `${run.placeName} 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.danger}G)`,
       `체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`,
@@ -1019,6 +1038,7 @@ export class TowerScene extends Phaser.Scene {
     if (r.promotedTo) {
       msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
     }
+    msgs.push('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.');
     msgs.push(...this.newsLines(r));
     state.run = undefined;
     persist();

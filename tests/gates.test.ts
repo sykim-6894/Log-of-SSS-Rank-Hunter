@@ -227,3 +227,54 @@ describe('chest feedback', () => {
     ]);
   });
 });
+
+describe('clearing a gate', () => {
+  it('felling the master announces the clear, and the reward can be taken right there', () => {
+    const g = gate();
+    const h = hunter();
+    const run = new TowerRun(h, new Rng(3), { gate: g });
+    run.enterFloor(gateFloors(g));
+    const boss = run.monsters.find((m) => m.kind.boss)!;
+    run.monsters = [boss];
+    boss.hp = 1;
+    boss.atk = 0;
+    boss.x = run.pos.x + 1;
+    boss.y = run.pos.y;
+    if (run.map.tiles[boss.y][boss.x] === 0) run.map.tiles[boss.y][boss.x] = 1;
+    expect(run.clearGate()).toBe(false);
+    run.drainEvents();
+    h.atk = 999;
+    run.act({ type: 'move', dx: 1, dy: 0 });
+    expect(run.gateCleared).toBe(true);
+    expect(run.drainEvents().some((e) => e.type === 'gateClear')).toBe(true);
+    expect(run.status).toBe('playing');
+    const before = run.runGold;
+    expect(run.clearGate()).toBe(true);
+    expect(run.runGold).toBe(before + gateClearGold(g));
+    expect(run.status).toBe('returned');
+  });
+
+  it('the tower has no gate clear', () => {
+    const run = new TowerRun(hunter(), new Rng(3));
+    expect(run.gateCleared).toBe(false);
+    expect(run.clearGate()).toBe(false);
+  });
+});
+
+describe('bag after a trip', () => {
+  it('new hunters carry one health potion', () => {
+    expect(hunter().bag).toEqual({ hp: 1, mp: 0, guard: 0, escape: 0 });
+  });
+
+  it('coming back from the tower or a gate leaves only one health potion', () => {
+    const rng = new Rng(11);
+    const state = newGame(rng);
+    const h = state.slots[0]!;
+    h.bag = { hp: 5, mp: 3, guard: 2, escape: 1 };
+    settleReturn(state, rng, 50);
+    expect(h.bag).toEqual({ hp: 1, mp: 0, guard: 0, escape: 0 });
+    h.bag.hp = 0;
+    settleReturn(state, rng, 0);
+    expect(h.bag.hp).toBe(1);
+  });
+});

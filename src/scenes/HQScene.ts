@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { activeHunter, buyItem, changeClass, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, AGENCY_NAME_MAX, buyItem, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS } from '../core/monsters';
@@ -10,7 +10,7 @@ import { drawLook, lookOf } from '../game/looks';
 import { soundOn, toggleSound } from '../game/sfx';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
-import { bar, button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
+import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 
 export interface HQData {
   messages?: string[];
@@ -67,6 +67,8 @@ export class HQScene extends Phaser.Scene {
     this.pickingStart = !!data.pickStart;
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
+    // The welcome waits until the agency has a name.
+    if (state.agent.named === false) return;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
       this.messages = [
         `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
@@ -95,6 +97,7 @@ export class HQScene extends Phaser.Scene {
       return;
     }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
+    if (state.agent.named === false) return this.drawFounding();
     if (!state.gates) refreshGates(state, rng);
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
@@ -161,6 +164,72 @@ export class HQScene extends Phaser.Scene {
     });
     button(this, x, GH - 130, w, 50, '직업 다시 고르기', () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change } }));
     button(this, x, GH - 70, w, 50, '취소', back);
+  }
+
+  /**
+   * First launch: name the agency. The name box is a real text field laid over the canvas,
+   * so phones bring up their keyboard and Korean input works.
+   */
+  private drawFounding() {
+    const w = Math.min(GW - 28, 520);
+    const left = (GW - w) / 2;
+    const top = PORTRAIT ? 150 : 120;
+    title(this, GW / 2, top - 90, 'SSS급 헌터의 성장기', PORTRAIT ? 23 : 28, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, top - 54, '— 과연 너일까', 12, INK.rust).setOrigin(0.5, 0);
+    panel(this, left, top, w, 262, '에이전시 설립');
+    text(this, GW / 2, top + 34, '헌터를 키워 SSS급으로 만들 에이전시입니다.\n이름을 지어 주세요.', 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setLineSpacing(4);
+    const boxY = top + 96;
+    const boxH = 52;
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.paper, 1).fillRect(left + 20, boxY, w - 40, boxH);
+    g.lineStyle(2, PALETTE.rust, 1).strokeRect(left + 20, boxY, w - 40, boxH);
+    const hint = text(this, GW / 2, boxY + boxH + 8, `${AGENCY_NAME_MAX}자까지`, 12, INK.faint).setOrigin(0.5, 0);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = AGENCY_NAME_MAX;
+    input.value = randomAgencyName(rng);
+    input.setAttribute('aria-label', '에이전시 이름');
+    input.autocomplete = 'off';
+    Object.assign(input.style, {
+      position: 'fixed', border: 'none', outline: 'none', background: 'transparent', color: '#2a211a',
+      fontFamily: FONT, textAlign: 'center', padding: '0', margin: '0', zIndex: '10',
+    });
+    document.body.appendChild(input);
+    // Keep the field over its box when the canvas is scaled or the window resizes.
+    const place = () => {
+      const r = this.game.canvas.getBoundingClientRect();
+      const k = r.width / GW;
+      Object.assign(input.style, {
+        left: `${r.left + (left + 24) * k}px`, top: `${r.top + boxY * k}px`,
+        width: `${(w - 48) * k}px`, height: `${boxH * k}px`, fontSize: `${Math.round(22 * k)}px`,
+      });
+    };
+    place();
+    window.addEventListener('resize', place);
+    this.events.once('shutdown', () => {
+      window.removeEventListener('resize', place);
+      input.remove();
+    });
+
+    const found = () => {
+      if (!foundAgency(state, rng, input.value)) {
+        hint.setText('이름을 입력해 주세요.').setColor(INK.red);
+        input.focus();
+        return;
+      }
+      persist();
+      this.scene.restart({});
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') found();
+    });
+    const bw = (w - 52) / 2;
+    button(this, left + 20, boxY + boxH + 40, bw, 50, '랜덤 이름', () => {
+      input.value = randomAgencyName(rng, [input.value]);
+    }, { size: 15 });
+    button(this, left + 32 + bw, boxY + boxH + 40, bw, 50, '설립하기', found, { primary: true, size: 15 });
   }
 
   /** The board of open gates. Going into one closes it, cleared or not. */
@@ -460,7 +529,8 @@ export class HQScene extends Phaser.Scene {
     this.drawGearPanel(x, y, w);
 
     const py = y + DOLL_H + 60;
-    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52, '물약 · 상점');
+    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52 + 22, '물약 · 상점');
+    text(this, x + 16, py + 32 + CONSUMABLE_KINDS.length * 52, '귀환하면 가방은 체력 물약 1개로 돌아갑니다.', 12, INK.faint);
     text(this, x + w - 16, py + 14, `헌터 소지금 ${h.gold}G`, 12, INK.gold).setOrigin(1, 0);
     CONSUMABLE_KINDS.forEach((kind, i) => {
       const c = CONSUMABLES[kind];
