@@ -58,7 +58,22 @@ export interface Gate {
   rule?: GateRule;
   /** Last day it can be entered. */
   closesOn: number;
+  /** A rival agency's team went in on this day. It tries to clear the gate when the next day comes. */
+  rival?: RivalRaid;
 }
+
+/** A rival agency's team working on a gate. */
+export interface RivalRaid {
+  agency: string;
+  /** Named hunter leading the team, if the agency has one strong enough. */
+  hunter?: string;
+  hunterId?: number;
+  level: number;
+  since: number;
+}
+
+/** Clearing a gate a rival team is already in pays this much more. */
+export const INTERCEPT_BONUS = 1.3;
 
 export function gateName(g: Gate): string {
   return `${g.grade}급 ${GATE_THEMES[g.theme].name}`;
@@ -80,7 +95,7 @@ export function gateLevel(g: Gate): number {
 /** Gold for clearing the gate, on top of what was picked up inside. */
 export function gateClearGold(g: Gate): number {
   const base = 40 * gateDanger(g, gateFloors(g));
-  return Math.round(base * (g.rule ? 1.5 : 1));
+  return Math.round(base * (g.rule ? 1.5 : 1) * (g.rival ? INTERCEPT_BONUS : 1));
 }
 
 /** The grade that suits a hunter of this level best. */
@@ -88,6 +103,11 @@ export function gradeForLevel(level: number): GateGrade {
   let best: GateGrade = 'E';
   for (const gr of GATE_GRADES) if (recommendedLevel(GATE_INFO[gr].danger) <= level + 1) best = gr;
   return best;
+}
+
+/** Chance a rival team at this level clears the gate. */
+export function raidSuccess(g: Gate, level: number): number {
+  return Math.max(0.25, Math.min(0.9, 0.6 + 0.1 * (level - gateLevel(g))));
 }
 
 export function rollGate(rng: Rng, id: number, grade: GateGrade, day: number): Gate {

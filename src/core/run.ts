@@ -395,6 +395,7 @@ export class TowerRun {
       this.say(`${this.placeName}에 들어섰다.`);
       if (n === 1 && this.gate.rule === 'sealed') this.say('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.');
       if (n === 1 && this.gate.rule === 'dark') this.say('짙은 어둠 때문에 앞이 잘 보이지 않는다.');
+      if (n === 1 && this.gate.rival) this.say(`${this.gate.rival.agency} 팀이 먼저 와 있다. 먼저 끝내면 보상 +30%!`);
     } else this.say(`성장의 탑 ${n}층에 들어섰다.`);
     this.events.push({ type: 'floor' });
     this.updateSight();

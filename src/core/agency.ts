@@ -4,7 +4,7 @@ import {
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind, startingBag } from './items';
-import { Gate, GATE_GRADES, GATE_SLOTS, rollGate, rollGateGrade } from './gates';
+import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, rollGate, rollGateGrade } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { RunSnapshot } from './run';
@@ -97,6 +97,53 @@ export interface GameState {
   /** Days passed: one for every return from the tower or a gate. */
   day?: number;
   nextGateId?: number;
+  /** Gates cleared by us and by the rival agency. */
+  gateRecord?: { ours: number; rival: number };
+}
+
+/** Each day the rival agency sends a team into one open gate with this chance. */
+export const RIVAL_RAID_CHANCE = 0.5;
+
+/** The team the rival agency would send: its strongest hunter if it keeps up with ours, else its own crew. */
+function rivalTeam(state: GameState, rng: Rng): { hunter?: string; hunterId?: number; level: number } {
+  const ours = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
+  const best = [...state.rival.roster].sort((a, b) => b.level - a.level)[0];
+  if (best && best.level >= ours - 2) return { hunter: best.name, hunterId: best.id, level: best.level };
+  return { level: Math.max(1, ours + rng.int(-1, 1)) };
+}
+
+/** Rival teams that went in yesterday come out: the gate is theirs, or they fall back. */
+function resolveRaids(state: GameState, rng: Rng, news: string[]) {
+  const gates = state.gates ?? [];
+  const record = (state.gateRecord ??= { ours: 0, rival: 0 });
+  for (const g of [...gates]) {
+    const r = g.rival;
+    if (!r) continue;
+    const who = r.hunter ? `${r.agency}의 ${r.hunter}` : r.agency;
+    if (rng.chance(raidSuccess(g, r.level))) {
+      gates.splice(gates.indexOf(g), 1);
+      record.rival++;
+      const h = state.rival.roster.find((x) => x.id === r.hunterId);
+      if (h) levelUp(h);
+      news.push(`${who}이(가) ${gateName(g)}을(를) 먼저 클리어했다.`);
+    } else {
+      g.rival = undefined;
+      news.push(`${who}은(는) ${gateName(g)} 공략에 실패하고 물러났다.`);
+    }
+  }
+}
+
+/** Some days the rival agency picks the hardest open gate its team can handle and goes in. */
+function startRaid(state: GameState, rng: Rng, news: string[]) {
+  if (!rng.chance(RIVAL_RAID_CHANCE)) return;
+  const open = (state.gates ?? []).filter((g) => !g.rival);
+  if (!open.length) return;
+  const team = rivalTeam(state, rng);
+  const fits = open.filter((g) => gateLevel(g) <= team.level + 1);
+  const g = fits.length ? fits[fits.length - 1] : open[0];
+  g.rival = { agency: state.rival.name, ...team, since: state.day ?? 0 };
+  const who = team.hunter ? `${state.rival.name}의 ${team.hunter}` : state.rival.name;
+  news.push(`${who}이(가) ${gateName(g)}에 들어갔다. 다음 날이면 끝낼지도 모른다.`);
 }
 
 /** Drops gates past their last day and opens new ones until there are GATE_SLOTS. */
@@ -363,6 +410,8 @@ export interface AfterRunNews {
   rivalCreated?: Hunter;
   finished: string[];
   grewStronger: string[];
+  /** What rival teams did at the gates. */
+  gateNews: string[];
 }
 
 export interface ReturnResult extends AfterRunNews {
@@ -373,8 +422,11 @@ export interface ReturnResult extends AfterRunNews {
 }
 
 /** Hunter came back alive: pay tribute under the current contract, then re-contract on promotion. */
-export function settleReturn(state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = []): ReturnResult {
+export function settleReturn(
+  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false,
+): ReturnResult {
   const { agent } = state;
+  if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
   const rate = TRIBUTE_RATE[hunter.contractGrade];
   const tribute = Math.floor(earned * rate);
@@ -448,7 +500,7 @@ function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
 
 /** Shared bookkeeping at the end of every run. */
 function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): AfterRunNews {
-  const news: AfterRunNews = { signingSupport: 0, finished: [], grewStronger: [] };
+  const news: AfterRunNews = { signingSupport: 0, finished: [], grewStronger: [], gateNews: [] };
 
   // Rival hunters met in the tower: finished for good, or back and stronger.
   for (const o of encounters) {
@@ -499,7 +551,9 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
 
   markSSS(state);
   state.day = (state.day ?? 0) + 1;
+  resolveRaids(state, rng, news.gateNews);
   refreshGates(state, rng);
+  startRaid(state, rng, news.gateNews);
   return news;
 }
 
