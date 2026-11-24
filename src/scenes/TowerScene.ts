@@ -7,7 +7,8 @@ import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { sfx, toggleSound } from '../game/sfx';
 import { recommendedLevel } from '../core/monsters';
-import { Action, REWARDS, RunEvent, SKILL_COST, SKILL_NAME, TowerRun } from '../core/run';
+import { Action, REWARDS, RunEvent, TowerRun } from '../core/run';
+import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -23,7 +24,7 @@ const P_CTL_H = 210;
 const P_MAP_H = GH - P_TOP_H - P_LOG_H - P_CTL_H;
 const P_LOG_Y = P_TOP_H + P_MAP_H;
 const P_CTL_Y = P_LOG_Y + P_LOG_H;
-const P_BTN_X = GW - 212; // action buttons start here
+const P_BTN_X = GW - 252; // action buttons start here
 const P_ZOOM = 1.25;
 const JOY_RADIUS = 44;
 const JOY_DEADZONE = 14;
@@ -88,7 +89,10 @@ export class TowerScene extends Phaser.Scene {
       s: { type: 'move', dx: 0, dy: 1 },
       a: { type: 'move', dx: -1, dy: 0 },
       d: { type: 'move', dx: 1, dy: 0 },
-      q: { type: 'skill' },
+      q: { type: 'skill', slot: 0 },
+      1: { type: 'skill', slot: 0 },
+      2: { type: 'skill', slot: 1 },
+      3: { type: 'skill', slot: 2 },
       e: { type: 'use', item: 'hp' },
       r: { type: 'use', item: 'mp' },
       f: { type: 'use', item: 'guard' },
@@ -380,6 +384,7 @@ export class TowerScene extends Phaser.Scene {
     if (run.hunter.level > this.shownLevel) this.showLevelUp(run.hunter.level);
     this.shownLevel = run.hunter.level;
 
+    if (run.hunter.picks > 0 && run.status !== 'dead' && !this.overlay.length) this.showCards();
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
     if (run.status === 'dead' && !this.overlay.length) this.showDeath();
     this.saveRun();
@@ -471,10 +476,10 @@ export class TowerScene extends Phaser.Scene {
       k(text(this, 296, HUD_Y + 20 + i * 21, line, 12, i === arr.length - 1 ? INK.text : INK.faint)),
     );
 
-    k(button(this, 700, HUD_Y + 12, 120, 46, `${SKILL_NAME} Q\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' })));
-    k(button(this, 828, HUD_Y + 12, 116, 46, `가방 B\n물약 E·R·F`, () => this.showBag()));
+    this.skillButtons(700, HUD_Y + 12, 244, 46, true).forEach(k);
+    k(button(this, 700, HUD_Y + 64, 120, 44, `가방 B`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, 700, HUD_Y + 64, 244, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
+    k(button(this, 828, HUD_Y + 64, 116, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
   }
 
   private drawHudPortrait() {
@@ -515,10 +520,84 @@ export class TowerScene extends Phaser.Scene {
     g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
     g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
     k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
-    k(button(this, P_BTN_X, P_CTL_Y + 22, 96, 72, `${SKILL_NAME}\n마나 ${SKILL_COST}`, () => this.perform({ type: 'skill' }), { enabled: h.mp >= SKILL_COST }));
-    k(button(this, GW - 110, P_CTL_Y + 22, 96, 72, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
+    const bw = GW - 14 - P_BTN_X;
+    this.skillButtons(P_BTN_X, P_CTL_Y + 18, bw, 66, false).forEach(k);
+    k(button(this, P_BTN_X, P_CTL_Y + 94, (bw - 6) / 2, 52, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, P_BTN_X, P_CTL_Y + 104, GW - 14 - P_BTN_X, 56, '대기 (한 턴)', () => this.perform({ type: 'wait' })));
+    k(button(this, P_BTN_X + (bw + 6) / 2, P_CTL_Y + 94, (bw - 6) / 2, 52, '대기\n(한 턴)', () => this.perform({ type: 'wait' })));
+    const buffs = this.buffLine();
+    if (buffs) k(text(this, 14, P_TOP_H + (run.guardTurns > 0 ? 26 : 8), buffs, 12, INK.gate, true));
+  }
+
+  /** Three skill slot buttons in a row: name and upgrade, mana cost; locked slots say when they open. */
+  private skillButtons(x: number, y: number, w: number, hgt: number, keysShown: boolean) {
+    const h = this.run.hunter;
+    const bw = (w - 12) / 3;
+    const open = slotCount(h.level);
+    return [0, 1, 2].map((i) => {
+      const s = h.skills[i];
+      const bx = x + i * (bw + 6);
+      if (!s) {
+        const label = i < open ? '빈 칸\n레벨업 때' : `Lv.${i === 1 ? 5 : 10}에\n열림`;
+        return button(this, bx, y, bw, hgt, label, () => {}, { enabled: false });
+      }
+      const cost = skillCost(s);
+      const key = keysShown ? `${i + 1} ` : '';
+      return button(this, bx, y, bw, hgt, `${key}${SKILLS[s.id].name}\n${s.lv}단·마나${cost}`, () => this.perform({ type: 'skill', slot: i }), {
+        enabled: h.mp >= cost,
+      });
+    });
+  }
+
+  /** Effects the hunter has up right now, for the status line. */
+  private buffLine(): string {
+    const b = this.run.buffs;
+    const parts: string[] = [];
+    if (b.stance) parts.push(`반격 ${b.stance.turns}`);
+    if (b.rage) parts.push(`함성 ${b.rage.turns}`);
+    if (b.shield) parts.push(`보호막 ${b.shield.turns}`);
+    if (b.block) parts.push(`막기 ${b.block.charges}회`);
+    if (b.defUp) parts.push(`방어+${b.defUp.amount} ${b.defUp.turns}`);
+    if (b.sanctuary) parts.push(`성역 ${b.sanctuary.turns}`);
+    if (this.run.traps.length) parts.push(`덫 ${this.run.traps.length}`);
+    return parts.join(' · ');
+  }
+
+  /** Level-up cards: pick one of three. A new skill with full slots asks which one to drop. */
+  private showCards() {
+    const h = this.run.hunter;
+    const cards = pendingCards(h, rng);
+    if (!cards) return;
+    this.joyClear();
+    persist();
+    const pick = (i: number, replace?: number) => {
+      const msg = chooseCard(h, i, replace);
+      if (msg) this.run.log.push(`카드 선택: ${msg}.`);
+      this.closeOverlay();
+      this.redraw();
+    };
+    const buttons: Array<[string, () => void, boolean?, boolean?]> = cards.map((c, i) => [
+      `${cardTitle(c, h)}\n${cardText(c, h)}`,
+      () => {
+        if (c.type === 'learn' && h.skills.length >= slotCount(h.level)) {
+          this.closeOverlay();
+          this.showReplace(i, pick);
+        } else pick(i);
+      },
+      c.type !== 'stat',
+    ]);
+    const more = h.picks > 1 ? ` · 남은 선택 ${h.picks}` : '';
+    this.dialog(`Lv.${h.level} 카드 고르기`, [`스킬 칸 ${h.skills.length}/${slotCount(h.level)}${more}`], buttons, INK.gold);
+  }
+
+  private showReplace(card: number, pick: (i: number, replace?: number) => void) {
+    const h = this.run.hunter;
+    const buttons: Array<[string, () => void, boolean?, boolean?]> = h.skills.map((s, j) => [`${skillLabel(s)}단계 버리고 바꾸기`, () => pick(card, j)]);
+    buttons.push(['다른 카드 고르기', () => {
+      this.closeOverlay();
+      this.showCards();
+    }, true]);
+    this.dialog('어떤 스킬과 바꿀까?', ['버린 스킬의 강화는 사라진다.'], buttons, INK.gold);
   }
 
   /** The wandering merchant's wares, paid from this run's earnings. */
@@ -565,7 +644,18 @@ export class TowerScene extends Phaser.Scene {
           } else sfx.kill();
           break;
         case 'shot':
-          this.shot(e.x, e.y);
+          this.shot(e.x, e.y, e.fromHunter);
+          break;
+        case 'miss':
+          this.floatText(e.x, e.y, '빗나감', INK.faint);
+          break;
+        case 'dodge':
+          this.floatText(at.x, at.y, '회피', INK.gate);
+          sfx.block();
+          break;
+        case 'skill':
+          this.floatText(at.x, at.y, e.name, INK.gold);
+          sfx.skill();
           break;
         case 'hurt':
           hurt += e.amount;
@@ -637,9 +727,12 @@ export class TowerScene extends Phaser.Scene {
   }
 
   /** A white blink over a tile that was hit. */
-  /** An arrow or bolt that flies from a ranged monster to the hunter. */
-  private shot(x: number, y: number) {
-    const to = this.run.pos;
+  /** An arrow or bolt between (x, y) and the hunter: toward the hunter, or out from them. */
+  private shot(tx: number, ty: number, fromHunter = false) {
+    const a = this.run.pos;
+    const x = fromHunter ? a.x : tx;
+    const y = fromHunter ? a.y : ty;
+    const to = fromHunter ? { x: tx, y: ty } : a;
     const p = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, 8, 3, 0xe5ae46).setDepth(26));
     p.setRotation(Math.atan2(to.y - y, to.x - x));
     this.tweens.add({

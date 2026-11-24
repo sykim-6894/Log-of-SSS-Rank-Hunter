@@ -2,6 +2,7 @@ import {
   combatPower, createHunter, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
   TrainingKind, TRIBUTE_RATE,
 } from './hunter';
+import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
 import { Rng } from './rng';
 import type { RunSnapshot } from './run';
@@ -41,6 +42,7 @@ export interface WorldRanker {
   bestFloor: number;
   /** Ranking score, which is combat power. */
   score: number;
+  cls?: ClassId;
 }
 
 export const SLOT_COUNT = 3;
@@ -62,12 +64,14 @@ export function worldRankers(): WorldRanker[] {
     ['진무열', '독립 헌터', 35, 16, 2350],
     ['나세아', '독립 헌터', 33, 15, 2150],
   ];
-  return list.map(([name, agency, level, bestFloor, score], i) => ({ id: -1 - i, name, agency, level, bestFloor, score }));
+  return list.map(([name, agency, level, bestFloor, score], i) => ({
+    id: -1 - i, name, agency, level, bestFloor, score, cls: CLASS_IDS[(i * 3 + 1) % CLASS_IDS.length],
+  }));
 }
 
 /** Saves from before the rankers were raised hold rankers weaker than A grade: swap in the new ones. */
 export function refreshWorldRankers(state: GameState) {
-  if (state.world.some((w) => w.score < GRADE_A_POWER)) state.world = worldRankers();
+  if (state.world.some((w) => w.score < GRADE_A_POWER || !w.cls)) state.world = worldRankers();
 }
 
 /** Everything that survives between runs. */
@@ -119,13 +123,32 @@ function allNames(state: GameState): string[] {
 }
 
 /** Sign a new hunter into an empty slot. */
-export function hire(state: GameState, rng: Rng, slot: number): Hunter | undefined {
+export function hire(state: GameState, rng: Rng, slot: number, cls?: ClassId, firstSkill?: SkillId): Hunter | undefined {
   if (state.slots[slot]) return undefined;
-  const h = createHunter(rng, state.nextHunterId++, allNames(state));
+  const h = createHunter(rng, state.nextHunterId++, allNames(state), cls, firstSkill);
   h.contractGrade = powerGrade(h);
   state.slots[slot] = h;
   state.hunterNumber += 1;
   state.activeSlot = slot;
+  return h;
+}
+
+/** A hunter who has done nothing yet: hired automatically, never trained, never in the tower. */
+export function untouched(h: Hunter): boolean {
+  const trained = Object.values(h.training).some((n) => n > 0);
+  return h.level === 1 && h.exp === 0 && h.bestFloor === 0 && h.kills === 0 && !trained && Object.keys(h.gear).length === 0;
+}
+
+/** Re-sign an untouched hunter in another class. Name and number stay. */
+export function changeClass(state: GameState, rng: Rng, slot: number, cls: ClassId, firstSkill: SkillId): Hunter | undefined {
+  const old = state.slots[slot];
+  if (!old || !untouched(old)) return undefined;
+  const h = createHunter(rng, old.id, [], cls, firstSkill);
+  h.name = old.name;
+  h.bag = old.bag;
+  h.gold = old.gold;
+  h.contractGrade = powerGrade(h);
+  state.slots[slot] = h;
   return h;
 }
 
@@ -160,23 +183,24 @@ export interface RankRow {
   score: number;
   status: RankStatus;
   note: string;
+  cls?: ClassId;
 }
 
 /** Live top 10 by combat power over every named hunter: ours, the rival agency's, the fallen, the rankers. */
 export function ranking(state: GameState): RankRow[] {
   const rows: RankRow[] = [];
   for (const h of state.slots) {
-    if (h) rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'ours', note: '우리 소속' });
+    if (h) rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'ours', note: '우리 소속', cls: h.cls });
   }
   for (const h of state.rival.roster) {
     const note = h.origin === 'rival' ? '라이벌' : h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
-    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'rival', note });
+    rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score: combatPower(h), status: 'rival', note, cls: h.cls });
   }
   for (const e of state.hallOfFame) {
     rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score: e.power ?? estimatePower(e.level), status: 'gone', note: e.fate });
   }
   for (const w of state.world) {
-    rows.push({ id: w.id, name: w.name, level: w.level, bestFloor: w.bestFloor, score: w.score, status: 'world', note: w.agency });
+    rows.push({ id: w.id, name: w.name, level: w.level, bestFloor: w.bestFloor, score: w.score, status: 'world', note: w.agency, cls: w.cls });
   }
   return rows.sort((a, b) => b.score - a.score || a.id - b.id).slice(0, 10);
 }
@@ -387,6 +411,9 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
     if (rng.chance(0.5)) levelUp(h);
   }
 
+  // Hunters nobody plays pick their own level-up cards.
+  for (const h of state.rival.roster) autoPick(h, rng);
+
   // Rival hunters keep pace with the hunter they shadow.
   for (const r of state.rival.roster.filter((h) => h.origin === 'rival')) {
     const target = state.slots.find((h) => h?.id === r.rivalOf);
@@ -396,6 +423,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
     r.bestFloor = Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1));
     r.killScore = Math.max(r.killScore, Math.round(target.killScore * (0.9 + rng.next() * 0.2)));
     r.kills = Math.max(r.kills, target.kills);
+    autoPick(r, rng);
   }
 
   // Our hunters who just reached S get a rival.
@@ -413,7 +441,8 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
 }
 
 function createRival(state: GameState, rng: Rng, mine: Hunter): Hunter {
-  const r = createHunter(rng, state.nextHunterId++, allNames(state));
+  const cls = COUNTER_CLASS[mine.cls];
+  const r = createHunter(rng, state.nextHunterId++, allNames(state), cls);
   r.origin = 'rival';
   r.rivalOf = mine.id;
   const f = 0.95 + rng.next() * 0.1;
@@ -427,6 +456,9 @@ function createRival(state: GameState, rng: Rng, mine: Hunter): Hunter {
   r.bestFloor = mine.bestFloor;
   r.killScore = Math.round(mine.killScore * f);
   r.kills = mine.kills;
+  // As many skills as ours, upgraded about as far.
+  const pool = classSkills(cls);
+  r.skills = pool.slice(0, slotCount(r.level)).map((id, i) => ({ id, lv: mine.skills[i]?.lv ?? 1 }));
   state.rival.roster.push(r);
   return r;
 }

@@ -22,6 +22,10 @@ import {
   rollGear,
 } from './items';
 import { Rng } from './rng';
+import {
+  ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAX_SKILL_LV,
+  OwnedSkill, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
+} from './classes';
 
 export interface Monster {
   id: number;
@@ -35,12 +39,34 @@ export interface Monster {
   atk: number;
   def: number;
   awake: boolean;
+  /** Turns left stunned or frozen: no moving, no attacking. */
+  stun?: number;
+  /** Turns left held in place: can still attack. */
+  root?: number;
+  /** Burn or poison: damage at the start of each of its turns. */
+  dot?: { turns: number; dmg: number };
+}
+
+/** Effects the hunter's own skills put on the hunter. */
+export interface Buffs {
+  stance?: { turns: number; mult: number; half: boolean };
+  rage?: { turns: number; mult: number };
+  shield?: { turns: number; ratio: number };
+  block?: { charges: number; mult: number };
+  defUp?: { turns: number; amount: number; breakOnMove?: boolean };
+  sanctuary?: { turns: number };
+}
+
+export interface Trap {
+  x: number;
+  y: number;
+  mult: number;
 }
 
 export type Action =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'wait' }
-  | { type: 'skill' }
+  | { type: 'skill'; slot?: number }
   | { type: 'use'; item: ConsumableKind };
 
 export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'trading' | 'dead' | 'returned';
@@ -50,7 +76,7 @@ export type RewardKind = 'item' | 'gold' | 'skill' | 'rescue';
 export const REWARDS: Record<RewardKind, { label: string; describe: (level: number) => string }> = {
   item: { label: '아이템', describe: () => '높은 층 수준의 장비 1개' },
   gold: { label: '골드', describe: (lv) => `${lv * 15}G (헌터 소지금)` },
-  skill: { label: '스킬', describe: () => '회전베기 위력 +25%' },
+  skill: { label: '스킬 강화', describe: () => '가진 스킬 하나를 바로 한 단계 강화' },
   rescue: { label: '위기 시 1회 지원', describe: () => '쓰러질 때 한 번 체력 30%로 버팀' },
 };
 
@@ -86,15 +112,17 @@ export interface Merchant {
 }
 
 export const SIGHT = 7;
-export const SKILL_NAME = '회전베기';
-export const SKILL_COST = 5;
 const MP_REGEN_EVERY = 4;
+const MAGE_MP_REGEN_EVERY = 2;
 
 /** Things that happened during a turn, for the screen to show and play sounds for. */
 export type RunEvent =
   | { type: 'hit'; x: number; y: number; amount: number }
   | { type: 'hurt'; amount: number }
-  | { type: 'shot'; x: number; y: number; missed?: boolean }
+  | { type: 'shot'; x: number; y: number; fromHunter?: boolean }
+  | { type: 'miss'; x: number; y: number }
+  | { type: 'dodge' }
+  | { type: 'skill'; name: string }
   | { type: 'block' }
   | { type: 'kill'; x: number; y: number; big: boolean }
   | { type: 'heal'; amount: number }
@@ -127,6 +155,9 @@ export interface RunSnapshot {
   encounters: EncounterOutcome[];
   nextId: number;
   met: number[];
+  facing?: Point;
+  buffs?: Buffs;
+  traps?: Trap[];
 }
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -155,6 +186,12 @@ export class TowerRun {
   events: RunEvent[] = [];
   private nextId = 1;
   private met = new Set<number>();
+  /** Way the hunter last moved: aimed skills and the archer's shot go this way. */
+  facing: Point = { x: 1, y: 0 };
+  buffs: Buffs = {};
+  traps: Trap[] = [];
+  /** Mana handed back by the skill just used (a finishing smash at upgrade 5). */
+  private refund = 0;
 
   constructor(
     public hunter: Hunter,
@@ -194,6 +231,9 @@ export class TowerRun {
       encounters: this.encounters,
       nextId: this.nextId,
       met: [...this.met],
+      facing: this.facing,
+      buffs: this.buffs,
+      traps: this.traps,
     };
   }
 
@@ -223,6 +263,9 @@ export class TowerRun {
     run.encounters = s.encounters;
     run.nextId = s.nextId;
     run.met = new Set(s.met);
+    run.facing = s.facing ?? { x: 1, y: 0 };
+    run.buffs = s.buffs ?? {};
+    run.traps = s.traps ?? [];
     return run;
   }
 
@@ -246,6 +289,7 @@ export class TowerRun {
     this.monsters = [];
     this.seen = Array.from({ length: mapHeight(this.map) }, () => Array<boolean>(mapWidth(this.map)).fill(false));
     this.status = 'playing';
+    this.traps = [];
     this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
 
     const pool = monsterPool(n);
@@ -306,6 +350,7 @@ export class TowerRun {
       exp: h.level * 12,
       gold: h.level * 8,
       score: 40 + h.level * 10,
+      range: h.cls === 'mage' || h.cls === 'archer' ? 4 : undefined,
     };
     this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
     const tag = h.origin === 'rival' ? '라이벌' : '옛 동료';
@@ -509,9 +554,27 @@ export class TowerRun {
     // While a choice is pending the world waits; enemies act once it is made.
     this.turn += 1;
     if (this.guardTurns > 0) this.guardTurns -= 1;
-    if (this.turn % MP_REGEN_EVERY === 0) this.hunter.mp = Math.min(this.hunter.maxMp, this.hunter.mp + 1);
+    this.tickBuffs();
+    const regen = this.hunter.cls === 'mage' ? MAGE_MP_REGEN_EVERY : MP_REGEN_EVERY;
+    if (this.turn % regen === 0) this.hunter.mp = Math.min(this.hunter.maxMp, this.hunter.mp + 1);
     this.updateSight();
     return true;
+  }
+
+  private tickBuffs() {
+    const b = this.buffs;
+    const h = this.hunter;
+    if (b.sanctuary && h.hp > 0) {
+      const heal = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * 0.05));
+      if (heal > 0) {
+        h.hp += heal;
+        this.events.push({ type: 'heal', amount: heal });
+      }
+    }
+    for (const key of ['stance', 'rage', 'shield', 'defUp', 'sanctuary'] as const) {
+      const buff = b[key];
+      if (buff && --buff.turns <= 0) delete b[key];
+    }
   }
 
   private playerAct(action: Action): boolean {
@@ -521,26 +584,12 @@ export class TowerRun {
         return true;
       case 'use':
         return this.useItem(action.item);
-      case 'skill': {
-        const targets = this.monsters.filter(
-          (m) => Math.abs(m.x - this.pos.x) <= 1 && Math.abs(m.y - this.pos.y) <= 1,
-        );
-        if (targets.length === 0) {
-          this.say(`${SKILL_NAME}: 주변에 적이 없다.`);
-          return false;
-        }
-        if (h.mp < SKILL_COST) {
-          this.say(`마나가 부족하다. (${SKILL_COST} 필요)`);
-          return false;
-        }
-        h.mp -= SKILL_COST;
-        this.say(`${SKILL_NAME}!`);
-        for (const m of targets) this.hitMonster(m, this.damage(h.atk, m.def, h.skillPower));
-        return true;
-      }
+      case 'skill':
+        return this.useSkill(action.slot ?? 0);
       case 'move': {
         const nx = this.pos.x + action.dx;
         const ny = this.pos.y + action.dy;
+        this.facing = { x: action.dx, y: action.dy };
         if (this.merchantAt(nx, ny)) {
           // Talking to the merchant takes no time; the world waits.
           this.status = 'trading';
@@ -549,22 +598,339 @@ export class TowerRun {
         }
         const target = this.monsterAt(nx, ny);
         if (target) {
-          this.hitMonster(target, this.damage(h.atk, target.def));
+          this.hitMonster(target, this.damage(this.atkNow(), target.def));
           return true;
         }
+        if (h.cls === 'archer' && this.archerShot(action.dx, action.dy)) return true;
         if (!isWalkable(this.map, nx, ny)) return false;
-        this.pos = { x: nx, y: ny };
-        const chest = this.chestAt(nx, ny);
-        if (chest >= 0) this.openChest(chest);
-        if (this.map.tiles[ny][nx] === Tile.Stairs) {
-          if (this.bossAlive) {
-            this.say('수호자가 살아있는 한 계단은 열리지 않는다.');
-          } else {
-            this.status = 'onStairs';
+        this.moveTo(nx, ny);
+        return true;
+      }
+    }
+  }
+
+  /** Steps onto a tile: chests open, the stairs may open, a standing guard breaks. */
+  private moveTo(nx: number, ny: number) {
+    this.pos = { x: nx, y: ny };
+    if (this.buffs.defUp?.breakOnMove) delete this.buffs.defUp;
+    const chest = this.chestAt(nx, ny);
+    if (chest >= 0) this.openChest(chest);
+    if (this.map.tiles[ny][nx] === Tile.Stairs) {
+      if (this.bossAlive) {
+        this.say('수호자가 살아있는 한 계단은 열리지 않는다.');
+      } else {
+        this.status = 'onStairs';
+      }
+    }
+  }
+
+  private atkNow(): number {
+    return this.hunter.atk * (this.buffs.rage?.mult ?? 1);
+  }
+
+  /** Hits with the hunter's attack times mult. Returns true if it killed. */
+  private strike(m: Monster, mult: number, ignoreDef = false): boolean {
+    if (!this.monsters.includes(m)) return false;
+    this.hitMonster(m, this.damage(this.atkNow(), ignoreDef ? 0 : m.def, mult));
+    return !this.monsters.includes(m);
+  }
+
+  private alive(m: Monster): boolean {
+    return this.monsters.includes(m);
+  }
+
+  private free(x: number, y: number): boolean {
+    return isWalkable(this.map, x, y) && !this.blocked(x, y);
+  }
+
+  private static cheb(a: Point, b: Point): number {
+    return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  }
+
+  /** Monsters in sight within `range` tiles, nearest first. */
+  private near(range: number, from: Point = this.pos): Monster[] {
+    return this.monsters
+      .filter((m) => this.isVisible(m.x, m.y) && TowerRun.cheb(m, from) <= range)
+      .sort((a, b) => TowerRun.cheb(a, from) - TowerRun.cheb(b, from));
+  }
+
+  /** Monsters along a straight line from the hunter, up to the first wall. */
+  private inLine(dx: number, dy: number, len: number): Monster[] {
+    const out: Monster[] = [];
+    for (let i = 1; i <= len; i++) {
+      const x = this.pos.x + dx * i;
+      const y = this.pos.y + dy * i;
+      if (!isWalkable(this.map, x, y) || this.merchantAt(x, y)) break;
+      const m = this.monsterAt(x, y);
+      if (m) out.push(m);
+    }
+    return out;
+  }
+
+  /** The monster right in front, or else any one next to the hunter (sideways only if orthogonal). */
+  private frontTarget(orthogonal = false): Monster | undefined {
+    const front = this.monsterAt(this.pos.x + this.facing.x, this.pos.y + this.facing.y);
+    if (front) return front;
+    return this.monsters.find((m) =>
+      orthogonal ? Math.abs(m.x - this.pos.x) + Math.abs(m.y - this.pos.y) === 1 : TowerRun.cheb(m, this.pos) === 1,
+    );
+  }
+
+  /** The archer's basic attack at a monster 2 or 3 tiles away in a clear line. Returns true if a shot was taken. */
+  private archerShot(dx: number, dy: number): boolean {
+    for (let d = 1; d <= ARCHER_RANGE; d++) {
+      const x = this.pos.x + dx * d;
+      const y = this.pos.y + dy * d;
+      if (!isWalkable(this.map, x, y) || this.merchantAt(x, y)) return false;
+      const m = this.monsterAt(x, y);
+      if (!m) continue;
+      this.events.push({ type: 'shot', x, y, fromHunter: true });
+      if (!this.rng.chance(archerHitChance(d))) {
+        m.awake = true;
+        this.events.push({ type: 'miss', x, y });
+        this.say(`화살이 ${m.kind.name}을(를) 빗나갔다.`);
+        return true;
+      }
+      this.strike(m, ARCHER_FAR_DAMAGE);
+      return true;
+    }
+    return false;
+  }
+
+  private useSkill(slot: number): boolean {
+    const h = this.hunter;
+    const s = h.skills[slot];
+    if (!s) {
+      this.say('그 칸에는 아직 스킬이 없다.');
+      return false;
+    }
+    const info = SKILLS[s.id];
+    const cost = skillCost(s);
+    if (h.mp < cost) {
+      this.say(`마나가 부족하다. (${info.name} ${cost} 필요)`);
+      return false;
+    }
+    this.refund = 0;
+    h.mp -= cost;
+    this.events.push({ type: 'skill', name: info.name });
+    this.say(`${info.name}!`);
+    if (!this.castSkill(s)) {
+      h.mp += cost; // nothing to hit: no mana, no turn
+      this.events.pop();
+      this.log.splice(this.log.lastIndexOf(`${info.name}!`), 1);
+      return false;
+    }
+    h.mp = Math.min(h.maxMp, h.mp + this.refund);
+    return true;
+  }
+
+  /** Does the skill. Returns false (after saying why) when it had nothing to act on. */
+  private castSkill(s: OwnedSkill): boolean {
+    const h = this.hunter;
+    const max = s.lv >= MAX_SKILL_LV;
+    const p = (1 + SKILL_LV_POWER * (s.lv - 1)) * (h.skillPower / 1.5);
+    const name = SKILLS[s.id].name;
+    const none = (why = '주변에 적이 없다.') => {
+      this.say(`${name}: ${why}`);
+      return false;
+    };
+    const f = this.facing;
+    switch (s.id) {
+      // ---- 검사 ----
+      case 'spin': {
+        const targets = this.near(max ? 2 : 1);
+        if (!targets.length) return none();
+        targets.forEach((m) => this.strike(m, 1.5 * p));
+        return true;
+      }
+      case 'charge': {
+        let landing: Point | undefined;
+        let hit = false;
+        for (let i = 1; i <= 3; i++) {
+          const x = this.pos.x + f.x * i;
+          const y = this.pos.y + f.y * i;
+          if (!isWalkable(this.map, x, y) || this.merchantAt(x, y)) break;
+          const m = this.monsterAt(x, y);
+          if (m) {
+            hit = true;
+            if (!this.strike(m, 2 * p)) m.stun = Math.max(m.stun ?? 0, 1);
+            if (!max) break;
+            if (this.monsterAt(x, y)) continue;
           }
+          if (!this.monsterAt(x, y)) landing = { x, y };
+        }
+        if (!hit) return none('돌진할 방향에 적이 없다.');
+        if (landing) this.moveTo(landing.x, landing.y);
+        return true;
+      }
+      case 'smash': {
+        const t = this.frontTarget();
+        if (!t) return none();
+        if (this.strike(t, 2.5 * p, true) && max) this.refund = skillCost(s);
+        return true;
+      }
+      case 'stance':
+        this.buffs.stance = { turns: 3, mult: 1.2 * p, half: max };
+        return true;
+      case 'warcry':
+        this.buffs.rage = { turns: 4, mult: 1 + 0.3 * p };
+        if (max) for (const m of this.near(1)) m.stun = Math.max(m.stun ?? 0, 1);
+        return true;
+      case 'storm': {
+        const targets = this.near(2);
+        if (!targets.length) return none('2칸 안에 적이 없다.');
+        targets.forEach((m) => this.strike(m, 2.5 * p));
+        return true;
+      }
+      // ---- 마법사 ----
+      case 'fireball': {
+        const t = this.near(4)[0];
+        if (!t) return none('4칸 안에 적이 없다.');
+        const around = this.monsters.filter((m) => m !== t && TowerRun.cheb(m, t) === 1);
+        this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
+        this.strike(t, 2 * p);
+        around.forEach((m) => this.strike(m, p));
+        if (max && this.alive(t)) t.dot = { turns: 3, dmg: Math.ceil(h.atk * 0.3 * p) };
+        return true;
+      }
+      case 'icebolt': {
+        const line = this.inLine(f.x, f.y, 5);
+        if (!line.length) return none('바라보는 방향에 적이 없다.');
+        const last = max ? line[line.length - 1] : line[0];
+        this.events.push({ type: 'shot', x: last.x, y: last.y, fromHunter: true });
+        for (const m of max ? line : [line[0]]) {
+          if (!this.strike(m, 1.3 * p)) m.stun = Math.max(m.stun ?? 0, max ? 3 : 2);
         }
         return true;
       }
+      case 'chain': {
+        let cur = this.near(5)[0];
+        if (!cur) return none('5칸 안에 적이 없다.');
+        const done = new Set<Monster>();
+        for (let i = 0; i < (max ? 5 : 3) && cur; i++) {
+          done.add(cur);
+          const from: Point = { x: cur.x, y: cur.y };
+          this.strike(cur, 1.2 * p);
+          cur = this.monsters.filter((m) => !done.has(m) && TowerRun.cheb(m, from) <= 3)
+            .sort((a, b) => TowerRun.cheb(a, from) - TowerRun.cheb(b, from))[0];
+        }
+        return true;
+      }
+      case 'manashield':
+        this.buffs.shield = { turns: 5, ratio: max ? 2 : 1 };
+        return true;
+      case 'blink': {
+        let landing: Point | undefined;
+        for (let i = 1; i <= 4; i++) {
+          const x = this.pos.x + f.x * i;
+          const y = this.pos.y + f.y * i;
+          if (!this.free(x, y)) break;
+          landing = { x, y };
+        }
+        if (!landing) return none('그쪽으로는 갈 수 없다.');
+        const origin = { ...this.pos };
+        this.moveTo(landing.x, landing.y);
+        if (max) this.monsters.filter((m) => TowerRun.cheb(m, origin) <= 1).forEach((m) => this.strike(m, 1.5 * p));
+        return true;
+      }
+      case 'meteor': {
+        const targets = this.near(99);
+        if (!targets.length) return none('보이는 적이 없다.');
+        targets.forEach((m) => this.strike(m, 1.8 * p));
+        return true;
+      }
+      // ---- 궁수 ----
+      case 'pierce': {
+        const line = this.inLine(f.x, f.y, 6);
+        if (!line.length) return none('바라보는 방향에 적이 없다.');
+        const last = line[line.length - 1];
+        this.events.push({ type: 'shot', x: last.x, y: last.y, fromHunter: true });
+        line.forEach((m) => this.strike(m, 1.4 * p, max));
+        return true;
+      }
+      case 'backshot': {
+        const t = this.frontTarget(true);
+        if (!t) return none('붙어 있는 적이 없다.');
+        const dx = Math.sign(this.pos.x - t.x);
+        const dy = Math.sign(this.pos.y - t.y);
+        if (!this.strike(t, 1.2 * p) && max) t.stun = Math.max(t.stun ?? 0, 1);
+        for (let i = 0; i < 2 && this.free(this.pos.x + dx, this.pos.y + dy); i++) this.moveTo(this.pos.x + dx, this.pos.y + dy);
+        return true;
+      }
+      case 'poison': {
+        const t = this.near(5)[0];
+        if (!t) return none('5칸 안에 적이 없다.');
+        const dot = () => ({ turns: 4, dmg: Math.ceil(h.atk * 0.3 * p) });
+        const around = max ? this.monsters.filter((m) => m !== t && TowerRun.cheb(m, t) === 1) : [];
+        this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
+        if (!this.strike(t, p)) t.dot = dot();
+        around.forEach((m) => (m.dot = dot()));
+        return true;
+      }
+      case 'volley': {
+        const t = this.near(5)[0];
+        if (!t) return none('5칸 안에 적이 없다.');
+        this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
+        for (let i = 0; i < (max ? 4 : 3) && this.alive(t); i++) this.strike(t, 0.7 * p);
+        return true;
+      }
+      case 'trap': {
+        if (this.traps.some((t) => t.x === this.pos.x && t.y === this.pos.y)) return none('이미 덫이 있다.');
+        this.traps.push({ x: this.pos.x, y: this.pos.y, mult: 2 * p });
+        while (this.traps.length > (max ? 2 : 1)) this.traps.shift();
+        return true;
+      }
+      case 'rain': {
+        const c = this.near(99)[0];
+        if (!c) return none('보이는 적이 없다.');
+        const center: Point = { x: c.x, y: c.y };
+        this.monsters.filter((m) => TowerRun.cheb(m, center) <= (max ? 2 : 1)).forEach((m) => this.strike(m, 2 * p));
+        return true;
+      }
+      // ---- 기사 ----
+      case 'block':
+        this.buffs.block = { charges: max ? 3 : 2, mult: p };
+        return true;
+      case 'taunt': {
+        const pulled = this.near(3);
+        if (!pulled.length) return none('3칸 안에 적이 없다.');
+        for (const m of pulled) {
+          m.awake = true;
+          for (let i = 0; i < 3 && TowerRun.cheb(m, this.pos) > 1; i++) this.stepToward(m);
+          if (max) m.stun = Math.max(m.stun ?? 0, 1);
+        }
+        this.buffs.defUp = { turns: 3, amount: 3 };
+        return true;
+      }
+      case 'bash': {
+        const t = this.frontTarget(true);
+        if (!t) return none('붙어 있는 적이 없다.');
+        if (this.strike(t, 1.3 * p)) return true;
+        const dx = Math.sign(t.x - this.pos.x);
+        const dy = Math.sign(t.y - this.pos.y);
+        let moved = 0;
+        while (moved < 2 && this.free(t.x + dx, t.y + dy)) {
+          t.x += dx;
+          t.y += dy;
+          moved++;
+        }
+        if (moved < 2 || max) t.stun = Math.max(t.stun ?? 0, 1);
+        return true;
+      }
+      case 'heal': {
+        if (h.hp >= h.maxHp) return none('체력이 가득 차 있다.');
+        const heal = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * (0.3 + 0.05 * (s.lv - 1))));
+        h.hp += heal;
+        this.events.push({ type: 'heal', amount: heal });
+        if (max) this.buffs.defUp = { turns: 3, amount: 3 };
+        return true;
+      }
+      case 'bulwark':
+        this.buffs.defUp = { turns: 4, amount: 5, breakOnMove: !max };
+        return true;
+      case 'sanctuary':
+        this.buffs.sanctuary = { turns: max ? 7 : 5 };
+        return true;
     }
   }
 
@@ -615,6 +981,11 @@ export class TowerRun {
     }
     this.monsters = this.monsters.filter((o) => o !== m);
     this.events.push({ type: 'kill', x: m.x, y: m.y, big: !!(m.kind.boss || m.kind.elite || m.hunter) });
+    if (this.hunter.cls === 'sword' && this.hunter.hp > 0 && this.hunter.hp < this.hunter.maxHp) {
+      const heal = Math.min(SWORD_KILL_HEAL, this.hunter.maxHp - this.hunter.hp);
+      this.hunter.hp += heal;
+      this.events.push({ type: 'heal', amount: heal });
+    }
     const scale = m.hunter ? 1 : floorScale(this.floor);
     const gold = Math.round(m.kind.gold * scale);
     this.runGold += gold;
@@ -654,7 +1025,11 @@ export class TowerRun {
       const kind = c.rewards[index];
       if (kind === 'item') this.takeGear(rollGear(this.rng, this.floor + 3));
       if (kind === 'gold') h.gold += c.hunter.level * 15;
-      if (kind === 'skill') h.skillPower = Math.round((h.skillPower + 0.25) * 100) / 100;
+      if (kind === 'skill') {
+        const open = h.skills.filter((sk) => sk.lv < MAX_SKILL_LV);
+        if (open.length) this.rng.pick(open).lv += 1;
+        else h.skillPower = Math.round((h.skillPower + 0.25) * 100) / 100;
+      }
       if (kind === 'rescue') h.rescues += 1;
       this.encounters.push({ hunterId: c.hunter.id, finished: false });
       msg = `${REWARDS[kind].label}: ${REWARDS[kind].describe(c.hunter.level)}. ${c.hunter.name}은(는) 물러났다... 더 강해져서 돌아올 것이다.`;
@@ -666,8 +1041,19 @@ export class TowerRun {
   }
 
   private monstersAct() {
-    for (const m of this.monsters) {
+    for (const m of [...this.monsters]) {
       if (this.status === 'dead') return;
+      if (!this.alive(m)) continue; // killed earlier this turn (a counter, a trap)
+      if (m.dot) {
+        const dmg = m.dot.dmg;
+        if (--m.dot.turns <= 0) m.dot = undefined;
+        this.hitMonster(m, dmg);
+        if (!this.alive(m)) continue;
+      }
+      if (m.stun) {
+        m.stun -= 1;
+        continue;
+      }
       const dx = this.pos.x - m.x;
       const dy = this.pos.y - m.y;
       if (!m.awake && dx * dx + dy * dy <= SIGHT * SIGHT) m.awake = true;
@@ -676,34 +1062,91 @@ export class TowerRun {
       const shoots = !adjacent && this.canShoot(m);
       if (adjacent || shoots) {
         if (shoots) this.events.push({ type: 'shot', x: m.x, y: m.y });
-        if (this.guardTurns > 0) {
-          this.say(`${m.kind.name}의 공격! 무적이라 피해가 없다.`);
-          this.events.push({ type: 'block' });
-          continue;
-        }
-        const dmg = this.damage(m.atk, this.hunter.def);
-        this.hunter.hp -= dmg;
-        this.events.push({ type: 'hurt', amount: dmg });
-        this.say(shoots ? `${m.kind.name}의 원거리 공격! ${dmg} 피해.` : `${m.kind.name}의 공격! ${dmg} 피해.`);
-        if (this.hunter.hp <= 0 && this.hunter.rescues > 0) {
-          this.hunter.rescues -= 1;
-          this.hunter.hp = Math.ceil(this.hunter.maxHp * 0.3);
-          this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
-          this.events.push({ type: 'rescue' });
-          continue;
-        }
-        if (this.hunter.hp <= 0) {
-          this.hunter.hp = 0;
-          this.status = 'dead';
-          this.killer = m.kind.name;
-          this.runGold = 0;
-          this.say(`${this.hunter.name}은(는) ${m.kind.name}에게 쓰러졌다...`);
-          this.events.push({ type: 'death' });
-        }
+        this.attackHunter(m, shoots, adjacent);
+        continue;
+      }
+      if (m.root) {
+        m.root -= 1;
         continue;
       }
       this.stepToward(m);
+      this.checkTrap(m);
     }
+  }
+
+  /** A monster that steps on the archer's trap takes the hit and is held in place. */
+  private checkTrap(m: Monster) {
+    const i = this.traps.findIndex((t) => t.x === m.x && t.y === m.y);
+    if (i < 0) return;
+    const trap = this.traps.splice(i, 1)[0];
+    this.say(`${m.kind.name}이(가) 덫에 걸렸다!`);
+    if (!this.strike(m, trap.mult)) m.root = 2;
+  }
+
+  /** One enemy attack on the hunter, through every defense the hunter has up. */
+  private attackHunter(m: Monster, ranged: boolean, adjacent: boolean) {
+    const h = this.hunter;
+    const b = this.buffs;
+    let mult = 1;
+    let label = ranged ? '원거리 공격' : '공격';
+    // Enemy hunters use a skill now and then.
+    if (m.hunter && m.hunter.skills?.length && this.turn % 3 === 0) {
+      mult = 1.6;
+      label = SKILLS[m.hunter.skills[0].id].name;
+    }
+    if (this.guardTurns > 0) {
+      this.say(`${m.kind.name}의 ${label}! 무적이라 피해가 없다.`);
+      this.events.push({ type: 'block' });
+      return;
+    }
+    if (h.cls === 'archer' && this.rng.chance(ARCHER_DODGE)) {
+      this.say(`${m.kind.name}의 ${label}을(를) 피했다.`);
+      this.events.push({ type: 'dodge' });
+      return;
+    }
+    if (b.block && b.block.charges > 0) {
+      b.block.charges -= 1;
+      const mul = b.block.mult;
+      if (b.block.charges <= 0) delete b.block;
+      this.say(`방패로 ${m.kind.name}의 ${label}을(를) 막았다!`);
+      this.events.push({ type: 'block' });
+      this.strike(m, mul);
+      return;
+    }
+    let def = h.def + (b.defUp?.amount ?? 0);
+    if (h.cls === 'knight' && h.hp <= h.maxHp * KNIGHT_LOW_HP) def += KNIGHT_LOW_DEF;
+    let dmg = this.damage(m.atk * mult, def);
+    if (b.sanctuary || b.stance?.half) dmg = Math.ceil(dmg / 2);
+    if (b.shield && h.mp > 0) {
+      const absorbed = Math.min(dmg, h.mp * b.shield.ratio);
+      h.mp -= Math.ceil(absorbed / b.shield.ratio);
+      dmg -= absorbed;
+      if (absorbed > 0) this.say(`마나 보호막이 ${absorbed} 피해를 막았다.`);
+    }
+    if (dmg <= 0) {
+      this.events.push({ type: 'block' });
+      return;
+    }
+    h.hp -= dmg;
+    this.events.push({ type: 'hurt', amount: dmg });
+    this.say(`${m.kind.name}의 ${label}! ${dmg} 피해.`);
+    if (h.hp <= 0 && h.rescues > 0) {
+      h.rescues -= 1;
+      h.hp = Math.ceil(h.maxHp * 0.3);
+      this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
+      this.events.push({ type: 'rescue' });
+      return;
+    }
+    if (h.hp <= 0) {
+      h.hp = 0;
+      this.status = 'dead';
+      this.killer = m.kind.name;
+      this.runGold = 0;
+      this.say(`${h.name}은(는) ${m.kind.name}에게 쓰러졌다...`);
+      this.events.push({ type: 'death' });
+      return;
+    }
+    if (b.stance && adjacent) this.strike(m, b.stance.mult);
   }
 
   /** A ranged monster fires along a row or column when nothing stands in between. */
