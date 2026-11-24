@@ -1,15 +1,16 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleReturn } from '../core/agency';
+import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleDuel, settleReturn } from '../core/agency';
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
+import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
-import { recommendedLevel, TRAITS } from '../core/monsters';
-import { Action, REWARDS, RunEvent, TowerRun } from '../core/run';
+import { recommendedLevel, TOP_FLOOR, TRAITS } from '../core/monsters';
+import { Action, Duel, REWARDS, RunEvent, TowerRun } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
@@ -68,10 +69,13 @@ export class TowerScene extends Phaser.Scene {
   private startFloor = 1;
   /** Gate picked at the agency, if this trip goes into a gate. */
   private gateId?: number;
+  /** Ranker challenge set up at the agency, if this trip is a duel. */
+  private duel?: Duel;
 
-  init(data: { startFloor?: number; gateId?: number }) {
+  init(data: { startFloor?: number; gateId?: number; duel?: Duel }) {
     this.startFloor = data?.startFloor ?? 1;
     this.gateId = data?.gateId;
+    this.duel = data?.duel;
   }
 
   create() {
@@ -315,8 +319,10 @@ export class TowerScene extends Phaser.Scene {
       state.run = undefined;
     }
     const gate = this.gateId !== undefined ? enterGate(state, this.gateId) : undefined;
-    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor, gate });
-    if (this.startFloor > 1) run.log.push(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
+    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel });
+    if (this.startFloor > 1 && !this.duel) {
+      run.log.push(this.startFloor > TOP_FLOOR ? `이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.` : `이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
+    }
     return run;
   }
 
@@ -377,6 +383,7 @@ export class TowerScene extends Phaser.Scene {
       if (!run.canSee(m)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
       if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
+      else if (m.kind.ranker) this.keep(this.figure(m.x, m.y, CLASSES[run.duel?.cls ?? 'sword'].look, 0xffd27a));
       else if (hasMonsterArt(m.kind.id)) {
         // Mid-bosses: the same creature, bigger and gold. Sleeping monsters are a little dim.
         const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE - 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
@@ -416,7 +423,10 @@ export class TowerScene extends Phaser.Scene {
     this.saveRun();
     if (run.status === 'choosing' && !this.overlay.length) this.showChoice();
     if (run.status === 'trading' && !this.overlay.length) this.showMerchant();
-    if (run.status === 'returned' && !this.overlay.length) this.finishReturn();
+    if (run.status === 'returned' && !this.overlay.length) {
+      if (run.duel) this.showDuelEnd();
+      else this.finishReturn();
+    }
   }
 
   /** Stone floor with a little speckle; bricked walls. Remembered tiles are drawn dark. */
@@ -494,9 +504,9 @@ export class TowerScene extends Phaser.Scene {
     k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    const status = k(text(this, 16, HUD_Y + 88, `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    const status = k(text(this, 16, HUD_Y + 88, `${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
     // Keep clear of the log beside it: drop what the bag button already shows.
-    if (status.width > 258) status.setText(`${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G`);
+    if (status.width > 258) status.setText(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G`);
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -525,9 +535,9 @@ export class TowerScene extends Phaser.Scene {
     const gradeText = k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
     // Long lines (gates, big earnings) lose the words the bag button already shows.
     const room = GW - 14 - (gradeText.x + gradeText.width + 10);
-    const full = `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : '');
+    const full = `${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : '');
     const status = k(text(this, GW - 14, 13, full, 12, INK.gold).setOrigin(1, 0));
-    if (status.width > room) status.setText(`${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)}) · ${run.runGold}G`);
+    if (status.width > room) status.setText(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · ${run.runGold}G`);
     k(text(this, 14, 38, '체력', 12, INK.quiet));
     k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
@@ -908,6 +918,7 @@ export class TowerScene extends Phaser.Scene {
    * Under the minimap in portrait, top right of the map in landscape.
    */
   private drawStalkerClock() {
+    if (this.run.duel) return;
     const run = this.run;
     const r = this.minimapRect();
     const x = r ? r.x + r.w : GW - 10;
@@ -1024,6 +1035,16 @@ export class TowerScene extends Phaser.Scene {
     ], INK.gold);
   }
 
+  /** The challenge is over: say how it went, then back to the agency. */
+  private showDuelEnd() {
+    const d = this.run.duel!;
+    this.joyClear();
+    const lines = d.won
+      ? [`${d.agency}의 ${d.rank}위 ${d.name}을(를) 꺾었다!`, '이제 순위표에서 그보다 위에 선다.', d.rank === 1 ? '협회 1위. 그래, 너였구나.' : '다음 랭커에게는 내일 도전할 수 있다.']
+      : [`${d.name}에게 졌다.`, '심판이 결투를 멈춰 목숨은 건졌다.', '더 강해져서 내일 다시 도전하자.'];
+    this.dialog(d.won ? '도전 성공!' : '도전 실패', lines, [['본부로 돌아가기', () => { this.closeOverlay(); this.finishReturn(); }, true]], d.won ? INK.gold : INK.red);
+  }
+
   private showStairs() {
     const run = this.run;
     const h = run.hunter;
@@ -1036,7 +1057,11 @@ export class TowerScene extends Phaser.Scene {
     const buttons: Array<[string, () => void, boolean?]> = [];
     if (run.gate) lines.push('지금 나가면 이 게이트는 닫힙니다.');
     if (!run.isTopFloor) {
-      buttons.push([run.gate ? `더 들어가기 (${run.floor + 1}층)` : `더 올라가기 (${run.floor + 1}층)`, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
+      const next = run.floor + 1;
+      const label = run.gate ? `더 들어가기 (${next}층)`
+        : next > TOP_FLOOR ? `${next === TOP_FLOOR + 1 ? '심연으로' : '더 올라가기'} (심연 ${next - TOP_FLOOR}층)`
+        : `더 올라가기 (${next}층)`;
+      buttons.push([label, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
     } else {
       lines.push('지금 갈 수 있는 탑의 꼭대기입니다.');
     }
@@ -1077,9 +1102,12 @@ export class TowerScene extends Phaser.Scene {
 
   private finishReturn(cleared = false) {
     const run = this.run;
+    const duelWon = run.duel ? settleDuel(state, run.duel) : false;
     const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones);
     const stolen = cleared && run.gate?.rival ? ` ${run.gate.rival.agency}보다 먼저 해냈다!` : '';
-    const where = run.gate ? (cleared ? `${gateName(run.gate)} 클리어!${stolen}` : `${run.placeName}에서 귀환.`) : `${run.floor}층에서 귀환.`;
+    const where = run.duel
+      ? (duelWon ? `${run.duel.rank}위 ${run.duel.name}에게 도전해 이겼다! 지금 ${gradeIn(state, run.hunter)}급.` : `${run.duel.rank}위 ${run.duel.name}에게 도전했지만 졌다.`)
+      : run.gate ? (cleared ? `${gateName(run.gate)} 클리어!${stolen}` : `${run.placeName}에서 귀환.`) : `${run.placeName}에서 귀환.`;
     const msgs = [
       `${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
     ];

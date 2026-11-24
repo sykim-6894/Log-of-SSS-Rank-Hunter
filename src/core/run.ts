@@ -3,7 +3,7 @@ import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import {
-  bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
+  abyssDepth, bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
   stalkerKind, TOP_FLOOR, TRAIT_RULES,
 } from './monsters';
 import {
@@ -29,7 +29,7 @@ import {
 import { Rng } from './rng';
 import {
   ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAX_SKILL_LV,
-  OwnedSkill, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
+  ClassId, OwnedSkill, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
 
 export interface Monster {
@@ -108,7 +108,27 @@ export interface RunOptions {
   startFloor?: number;
   /** Go into this gate instead of the tower. */
   gate?: Gate;
+  /** Fight an association ranker in the arena instead. */
+  duel?: Duel;
 }
+
+/** A challenge against an association ranker: one fight in a closed arena. Losing is not death. */
+export interface Duel {
+  rankerId: number;
+  rank: number;
+  name: string;
+  agency: string;
+  cls?: ClassId;
+  level: number;
+  hp: number;
+  atk: number;
+  def: number;
+  /** Set when the fight is over. */
+  won?: boolean;
+}
+
+/** The ranker's health is this many times their stat sheet: they don't fall in a few hits. */
+export const DUEL_HP = 2.5;
 
 export interface Merchant {
   x: number;
@@ -157,7 +177,9 @@ export type RunEvent =
   /** The hunter's hit did nothing (the abyss stalker). */
   | { type: 'immune'; x: number; y: number }
   /** An abyss stalker has come for the hunter. */
-  | { type: 'stalker'; nth: number };
+  | { type: 'stalker'; nth: number }
+  /** A ranker challenge is over. */
+  | { type: 'duelEnd'; won: boolean };
 
 /** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
 export interface RunSnapshot {
@@ -187,6 +209,7 @@ export interface RunSnapshot {
   buffs?: Buffs;
   traps?: Trap[];
   gate?: Gate;
+  duel?: Duel;
 }
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -231,6 +254,8 @@ export class TowerRun {
   private refund = 0;
   /** Set when this run is a gate dungeon rather than the tower. Floors then count from the gate's entrance. */
   gate?: Gate;
+  /** Set when this run is a ranker challenge in the arena. */
+  duel?: Duel;
 
   constructor(
     public hunter: Hunter,
@@ -239,7 +264,9 @@ export class TowerRun {
     start = true,
   ) {
     this.gate = options.gate;
-    if (start) this.enterFloor(this.gate ? 1 : Math.max(1, Math.min(TOP_FLOOR, options.startFloor ?? 1)));
+    this.duel = options.duel;
+    if (start && this.duel) this.enterArena();
+    else if (start) this.enterFloor(this.gate ? 1 : Math.max(1, options.startFloor ?? 1));
   }
 
   drainEvents(): RunEvent[] {
@@ -279,6 +306,7 @@ export class TowerRun {
       stalkers: this.stalkers,
       regenAcc: this.regenAcc,
       gate: this.gate,
+      duel: this.duel,
     };
   }
 
@@ -316,6 +344,7 @@ export class TowerRun {
     run.stalkers = s.stalkers ?? 0;
     run.regenAcc = s.regenAcc ?? { hp: 0, mp: 0 };
     run.gate = s.gate;
+    run.duel = s.duel;
     return run;
   }
 
@@ -323,8 +352,14 @@ export class TowerRun {
     return this.monsters.some((m) => m.kind.boss);
   }
 
+  /** Last floor of a gate. The tower has none: above floor 20 the abyss goes on. */
   get isTopFloor(): boolean {
-    return this.floor >= (this.gate ? gateFloors(this.gate) : TOP_FLOOR);
+    return this.duel ? true : this.gate ? this.floor >= gateFloors(this.gate) : false;
+  }
+
+  /** In the abyss above the tower's last floor. */
+  get inAbyss(): boolean {
+    return !this.gate && !this.duel && this.floor > TOP_FLOOR;
   }
 
   /** The tower floor this floor is as dangerous as. In the tower that is the floor itself. */
@@ -334,16 +369,22 @@ export class TowerRun {
 
   /** How far the hunter sees. Dark gates cut it short. */
   get sight(): number {
+    // The arena is lit: both fighters see each other from the start.
+    if (this.duel) return 20;
     return this.gate?.rule === 'dark' ? DARK_SIGHT : SIGHT;
   }
 
   /** Where the hunter is, for the screen: "7층" or "C급 독안개 늪 2/4층". */
   get placeName(): string {
+    if (this.duel) return '결투장';
+    if (this.inAbyss) return `심연 ${abyssDepth(this.floor)}층`;
     return this.gate ? `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
   }
 
   /** Short form for the top bar: "7층" or "게이트 2/4층". */
   get placeShort(): string {
+    if (this.duel) return '결투장';
+    if (this.inAbyss) return `심연 ${abyssDepth(this.floor)}층`;
     return this.gate ? `게이트 ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
   }
 
@@ -366,7 +407,10 @@ export class TowerRun {
     this.traps = [];
     this.floorTurn = 0;
     this.stalkers = 0;
-    if (!this.gate) this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
+    if (!this.gate) {
+      this.hunter.bestFloor = Math.max(this.hunter.bestFloor, Math.min(TOP_FLOOR, n));
+      if (n > TOP_FLOOR) this.hunter.abyssBest = Math.max(this.hunter.abyssBest ?? 0, abyssDepth(n));
+    }
 
     const danger = this.danger;
     const pool = this.pool;
@@ -387,7 +431,8 @@ export class TowerRun {
     this.maybeSpawnElite(danger);
     this.maybePlaceMerchant(danger);
 
-    const boss = this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
+    let boss = this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
+    if (boss && n > TOP_FLOOR) boss = { ...boss, name: `심연의 군주 (${abyssDepth(n)}층)` };
     if (boss) {
       const c = center(this.map.rooms[this.map.rooms.length - 1]);
       const spot = [
@@ -398,7 +443,7 @@ export class TowerRun {
       ].find((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y));
       if (spot) {
         this.spawn(boss, spot.x, spot.y, danger);
-        this.say(`${this.gate ? '마지막 층' : `${n}층`}에 ${boss.name}의 기척이 느껴진다.`);
+        this.say(`${this.gate ? '마지막 층' : this.placeName}에 ${boss.name}의 기척이 느껴진다.`);
       }
     }
     if (this.gate) {
@@ -406,7 +451,53 @@ export class TowerRun {
       if (n === 1 && this.gate.rule === 'sealed') this.say('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.');
       if (n === 1 && this.gate.rule === 'dark') this.say('짙은 어둠 때문에 앞이 잘 보이지 않는다.');
       if (n === 1 && this.gate.rival) this.say(`${this.gate.rival.agency} 팀이 먼저 와 있다. 먼저 끝내면 보상 +30%!`);
+    } else if (n > TOP_FLOOR) {
+      this.say(`${this.placeName}에 들어섰다.${n === TOP_FLOOR + 1 ? ' 탑 위로 끝없는 심연이 펼쳐져 있다.' : ''}`);
     } else this.say(`성장의 탑 ${n}층에 들어섰다.`);
+    this.events.push({ type: 'floor' });
+    this.updateSight();
+  }
+
+  /** A closed arena with the ranker across from the hunter. No stairs: it ends when one falls. */
+  enterArena() {
+    const d = this.duel!;
+    this.floor = 1;
+    const W = this.options.mapSize?.w ?? MAP_W;
+    const H = this.options.mapSize?.h ?? MAP_H;
+    const rw = Math.min(15, W - 4);
+    const rh = Math.min(11, H - 4);
+    const room = { x: Math.floor((W - rw) / 2), y: Math.floor((H - rh) / 2), w: rw, h: rh };
+    const tiles: Tile[][] = Array.from({ length: H }, (_, y) =>
+      Array.from({ length: W }, (_, x) => (x >= room.x && x < room.x + rw && y >= room.y && y < room.y + rh ? Tile.Floor : Tile.Wall)));
+    const c = center(room);
+    const tall = rh > rw;
+    const start = tall ? { x: c.x, y: room.y + rh - 2 } : { x: room.x + 1, y: c.y };
+    const foe = tall ? { x: c.x, y: room.y + 1 } : { x: room.x + rw - 2, y: c.y };
+    this.map = { tiles, rooms: [room], start, stairs: { x: 0, y: 0 } };
+    this.pos = { ...start };
+    this.monsters = [];
+    this.chests = [];
+    this.merchant = undefined;
+    this.traps = [];
+    this.floorTurn = 0;
+    this.stalkers = 0;
+    this.seen = Array.from({ length: H }, () => Array<boolean>(W).fill(false));
+    this.status = 'playing';
+    const hp = Math.round(d.hp * DUEL_HP);
+    const kind: MonsterKind = {
+      id: `ranker-${d.rankerId}`,
+      name: `${d.rank}위 ${d.name}`,
+      glyph: 'R',
+      hp, atk: d.atk, def: d.def,
+      exp: d.level * 30,
+      gold: d.level * 20,
+      score: 200 + d.level * 20,
+      range: d.cls === 'mage' || d.cls === 'archer' ? 4 : undefined,
+      ranker: true,
+    };
+    this.monsters.push({ id: this.nextId++, kind, x: foe.x, y: foe.y, hp, maxHp: hp, atk: d.atk, def: d.def, awake: true });
+    this.say(`결투장에 들어섰다. ${d.agency}의 ${d.rank}위 ${d.name}(Lv.${d.level})이(가) 기다리고 있다.`);
+    this.say('쓰러뜨리면 순위를 빼앗는다. 져도 목숨은 잃지 않는다.');
     this.events.push({ type: 'floor' });
     this.updateSight();
   }
@@ -806,7 +897,7 @@ export class TowerRun {
     if (this.guardTurns > 0) this.guardTurns -= 1;
     this.tickBuffs();
     this.regenerate();
-    if (this.status === 'playing' || this.status === 'onStairs') this.tickFloor();
+    if (!this.duel && (this.status === 'playing' || this.status === 'onStairs')) this.tickFloor();
     this.updateSight();
     return true;
   }
@@ -1266,7 +1357,21 @@ export class TowerRun {
       return;
     }
     this.monsters = this.monsters.filter((o) => o !== m);
-    this.events.push({ type: 'kill', x: m.x, y: m.y, big: !!(m.kind.boss || m.kind.elite || m.hunter) });
+    this.events.push({ type: 'kill', x: m.x, y: m.y, big: !!(m.kind.boss || m.kind.elite || m.hunter || m.kind.ranker) });
+    if (m.kind.ranker && this.duel) {
+      this.duel.won = true;
+      const gold = m.kind.gold;
+      this.runGold += gold;
+      this.hunter.kills += 1;
+      this.hunter.killScore += m.kind.score;
+      this.say(`${m.kind.name}을(를) 쓰러뜨렸다! 순위를 빼앗았다. +${gold}G`);
+      const levels = gainExp(this.hunter, m.kind.exp);
+      if (levels > 0) this.events.push({ type: 'levelup' });
+      this.gainStones(5, m.x, m.y);
+      this.events.push({ type: 'duelEnd', won: true });
+      this.status = 'returned';
+      return;
+    }
     if (this.hunter.cls === 'sword' && this.hunter.hp > 0 && this.hunter.hp < this.hunter.maxHp) {
       const heal = Math.min(SWORD_KILL_HEAL, this.hunter.maxHp - this.hunter.hp);
       this.hunter.hp += heal;
@@ -1442,11 +1547,19 @@ export class TowerRun {
     h.hp -= dmg;
     this.events.push({ type: 'hurt', amount: dmg });
     this.say(`${m.kind.name}의 ${label}! ${dmg} 피해.`);
-    if (h.hp <= 0 && h.rescues > 0) {
+    if (h.hp <= 0 && h.rescues > 0 && !this.duel) {
       h.rescues -= 1;
       h.hp = Math.ceil(h.maxHp * 0.3);
       this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
       this.events.push({ type: 'rescue' });
+      return;
+    }
+    if (h.hp <= 0 && this.duel) {
+      h.hp = 1;
+      this.duel.won = false;
+      this.status = 'returned';
+      this.say(`${m.kind.name}에게 졌다... 심판이 결투를 멈췄다.`);
+      this.events.push({ type: 'duelEnd', won: false });
       return;
     }
     if (h.hp <= 0) {

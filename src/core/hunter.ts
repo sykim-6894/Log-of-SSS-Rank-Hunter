@@ -37,6 +37,12 @@ export interface Hunter {
   kills: number;
   killScore: number;
   bestFloor: number;
+  /** Deepest floor of the abyss above floor 20 reached, counted from 1. */
+  abyssBest?: number;
+  /** Association rankers (by id) this hunter has beaten in a challenge. */
+  beaten?: number[];
+  /** Day of the last ranker challenge: one a day. */
+  duelDay?: number;
   totalTribute: number;
   /** How many times each kind of training the agent has paid for. */
   training: Record<TrainingKind, number>;

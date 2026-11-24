@@ -272,6 +272,9 @@ describe('ranking and grades', () => {
     h.bestFloor = 20;
     expect(gradeIn(state, h)).toBe('F');
     h.atk = 2000;
+    // Strength alone stops just under the rankers: they have to be beaten in challenges.
+    expect(gradeIn(state, h)).toBe('A');
+    h.beaten = state.world.map((w) => w.id);
     expect(gradeIn(state, h)).toBe('SSS');
   });
 
