@@ -1,6 +1,8 @@
 import * as Phaser from 'phaser';
-import { activeHunter, buyItem, changeClass, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { activeHunter, buyItem, changeClass, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
+import { Gate, gateClearGold, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
+import { MONSTERS } from '../core/monsters';
 import { combatPower, expToNext, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, GEAR_SLOTS } from '../core/items';
 import { DOLL_H, drawPaperDoll } from '../game/paperdoll';
@@ -18,6 +20,8 @@ export interface HQData {
   pickStart?: boolean;
   /** Hiring screen: the slot being filled, and whether it re-signs an untouched hunter in another class. */
   hire?: { slot: number; change?: boolean; cls?: ClassId; skills?: SkillId[] };
+  /** Show the board of open gates. */
+  gates?: boolean;
 }
 
 let welcomed = false;
@@ -51,6 +55,7 @@ export class HQScene extends Phaser.Scene {
   private releaseArmed = false;
   private pickingStart = false;
   private hiring?: HQData['hire'];
+  private showingGates = false;
 
   constructor() {
     super('HQ');
@@ -61,6 +66,7 @@ export class HQScene extends Phaser.Scene {
     this.releaseArmed = !!data.armRelease;
     this.pickingStart = !!data.pickStart;
     this.hiring = data.hire;
+    this.showingGates = !!data.gates;
     if (!welcomed && isNewAgency && this.messages.length === 0) {
       this.messages = [
         `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
@@ -89,7 +95,9 @@ export class HQScene extends Phaser.Scene {
       return;
     }
     this.cameras.main.setBackgroundColor(PALETTE.bg);
+    if (!state.gates) refreshGates(state, rng);
     if (this.hiring) return this.drawHiring(this.hiring);
+    if (this.showingGates) return this.drawGates();
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -155,6 +163,40 @@ export class HQScene extends Phaser.Scene {
     button(this, x, GH - 70, w, 50, '취소', back);
   }
 
+  /** The board of open gates. Going into one closes it, cleared or not. */
+  private drawGates() {
+    const x = 14;
+    const w = GW - 28;
+    const h = activeHunter(state);
+    const day = state.day ?? 0;
+    title(this, GW / 2, 18, '열린 게이트', 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 52, '들어가면 클리어하든 못 하든 닫힌다. 귀환할 때마다 하루가 지나고 새 게이트가 열린다.', 12, INK.quiet)
+      .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
+    const gates = state.gates ?? [];
+    const cardH = 136;
+    const cols = PORTRAIT ? 1 : 3;
+    const cw = (w - (cols - 1) * 12) / cols;
+    gates.forEach((g: Gate, i) => {
+      const cx = x + (i % cols) * (cw + 12);
+      const cy = (PORTRAIT ? 100 : 96) + Math.floor(i / cols) * (cardH + 10);
+      panel(this, cx, cy, cw, cardH);
+      const lvl = gateLevel(g);
+      const hard = !!h && h.level < lvl - 1;
+      title(this, cx + 14, cy + 12, gateName(g), 15, g.rule ? INK.red : INK.gold);
+      const left = g.closesOn - day;
+      text(this, cx + cw - 14, cy + 14, left <= 0 ? '오늘까지' : `${left + 1}일 남음`, 12, INK.quiet).setOrigin(1, 0);
+      fit(text(this, cx + 14, cy + 38, `${gateFloors(g)}층 · 적정 Lv.${lvl}${hard ? ' (위험)' : ''}`, 12, hard ? INK.red : INK.text), cw - 28);
+      fit(text(this, cx + 14, cy + 56, `출몰: ${GATE_THEMES[g.theme].pool.map((id) => MONSTERS[id].name).join(', ')}`, 12, INK.quiet), cw - 28);
+      fit(text(this, cx + 14, cy + 74, g.rule ? `특수 규칙 [${GATE_RULES[g.rule].name}] ${GATE_RULES[g.rule].text}` : '특수 규칙 없음', 12, g.rule ? INK.rust : INK.faint), cw - 28);
+      button(this, cx + 14, cy + cardH - 40, cw - 28, 30, `입장 · 클리어 보상 ${gateClearGold(g)}G+장비`, () => {
+        persist();
+        this.scene.start('Tower', { gateId: g.id });
+      }, { primary: true, size: 12, enabled: !!h });
+    });
+    if (h) text(this, GW / 2, GH - 96, `보낼 헌터: ${h.name} · Lv.${h.level}`, 12, INK.text).setOrigin(0.5, 0);
+    button(this, x, GH - 70, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+  }
+
   /**
    * Enter the tower. When the hunter's grade lets them skip low floors, the first press
    * turns the button into one button per start floor.
@@ -167,10 +209,13 @@ export class HQScene extends Phaser.Scene {
     };
     const floors = h ? startFloors(state, h) : [1];
     if (!this.pickingStart || floors.length < 2) {
-      button(this, x, y, w, hgt, '▶  성장의 탑 입장', () => {
+      const gw = Math.round(w * 0.36);
+      button(this, x, y, w - gw - 8, hgt, '▶  성장의 탑', () => {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
       }, { primary: true, size, enabled: !!h });
+      button(this, x + w - gw, y, gw, hgt, `게이트 ${state.gates?.length ?? 0}`, () =>
+        this.scene.restart({ messages: this.messages, gates: true }), { size: Math.min(size, 18), enabled: !!h });
       return;
     }
     const cancelW = 56;

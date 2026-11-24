@@ -4,6 +4,8 @@ import {
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind } from './items';
+import { Gate, GATE_GRADES, GATE_SLOTS, rollGate, rollGateGrade } from './gates';
+import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { RunSnapshot } from './run';
 
@@ -88,6 +90,31 @@ export interface GameState {
   hunterNumber: number;
   /** A tower run that was still going when the game was last saved. */
   run?: { hunterId: number; data: RunSnapshot };
+  /** Gates open right now. Filled in by refreshGates; older saves have none. */
+  gates?: Gate[];
+  /** Days passed: one for every return from the tower or a gate. */
+  day?: number;
+  nextGateId?: number;
+}
+
+/** Drops gates past their last day and opens new ones until there are GATE_SLOTS. */
+export function refreshGates(state: GameState, rng: Rng) {
+  const day = state.day ?? 0;
+  const best = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
+  state.gates = (state.gates ?? []).filter((g) => g.closesOn >= day);
+  while (state.gates.length < GATE_SLOTS) {
+    const id = state.nextGateId ?? 1;
+    state.nextGateId = id + 1;
+    state.gates.push(rollGate(rng, id, rollGateGrade(rng, best), day));
+  }
+  state.gates.sort((a, b) => GATE_GRADES.indexOf(a.grade) - GATE_GRADES.indexOf(b.grade));
+}
+
+/** Takes a gate off the board for the hunter going in. Win or lose, it is gone. */
+export function enterGate(state: GameState, id: number): Gate | undefined {
+  const gates = state.gates ?? [];
+  const i = gates.findIndex((g) => g.id === id);
+  return i < 0 ? undefined : gates.splice(i, 1)[0];
 }
 
 const AGENCY_NAMES = ['새벽 에이전시', '청람 헌터스', '북극성 매니지먼트', '흑요 에이전시', '은하 헌터 협회'];
@@ -106,6 +133,7 @@ export function newGame(rng: Rng): GameState {
     hunterNumber: 0,
   };
   hire(state, rng, 0);
+  refreshGates(state, rng);
   return state;
 }
 
@@ -420,7 +448,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
     if (!target) continue;
     const goal = combatPower(target) * (0.92 + rng.next() * 0.16);
     for (let i = 0; i < 20 && combatPower(r) < goal; i++) levelUp(r);
-    r.bestFloor = Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1));
+    r.bestFloor = Math.min(TOP_FLOOR, Math.max(r.bestFloor, target.bestFloor + rng.int(-1, 1)));
     r.killScore = Math.max(r.killScore, Math.round(target.killScore * (0.9 + rng.next() * 0.2)));
     r.kills = Math.max(r.kills, target.kills);
     autoPick(r, rng);
@@ -437,6 +465,8 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[]): A
   }
 
   markSSS(state);
+  state.day = (state.day ?? 0) + 1;
+  refreshGates(state, rng);
   return news;
 }
 

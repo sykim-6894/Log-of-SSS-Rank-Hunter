@@ -1,6 +1,7 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth, Point, Tile, center } from './dungeon';
 import { gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
+import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import { bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, TOP_FLOOR } from './monsters';
 import {
   addToBag,
@@ -8,6 +9,7 @@ import {
   CONSUMABLES,
   ConsumableKind,
   CURSES,
+  CurseKind,
   describeGear,
   equipIfBetter,
   Gear,
@@ -101,6 +103,8 @@ export interface RunOptions {
   mapSize?: { w: number; h: number };
   /** Floor to start on. Lower floors can be skipped once the hunter's grade allows it. */
   startFloor?: number;
+  /** Go into this gate instead of the tower. */
+  gate?: Gate;
 }
 
 export interface Merchant {
@@ -128,7 +132,13 @@ export type RunEvent =
   | { type: 'heal'; amount: number }
   | { type: 'mana'; amount: number }
   | { type: 'chest'; cursed: boolean }
-  | { type: 'gear' }
+  /** Gear picked up: worn if better (old is what it replaced), otherwise left behind. */
+  | { type: 'gear'; gear: Gear; equipped: boolean; old?: Gear }
+  /** A potion or scroll found; got is false when the bag had no room. */
+  | { type: 'loot'; item: ConsumableKind; got: boolean; count: number }
+  | { type: 'gold'; amount: number }
+  /** A cursed chest, with what it took in numbers. */
+  | { type: 'curse'; curse: CurseKind; detail: string }
   | { type: 'buy' }
   | { type: 'levelup' }
   | { type: 'rescue' }
@@ -158,6 +168,7 @@ export interface RunSnapshot {
   facing?: Point;
   buffs?: Buffs;
   traps?: Trap[];
+  gate?: Gate;
 }
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -192,6 +203,8 @@ export class TowerRun {
   traps: Trap[] = [];
   /** Mana handed back by the skill just used (a finishing smash at upgrade 5). */
   private refund = 0;
+  /** Set when this run is a gate dungeon rather than the tower. Floors then count from the gate's entrance. */
+  gate?: Gate;
 
   constructor(
     public hunter: Hunter,
@@ -199,7 +212,8 @@ export class TowerRun {
     private options: RunOptions = {},
     start = true,
   ) {
-    if (start) this.enterFloor(Math.max(1, Math.min(TOP_FLOOR, options.startFloor ?? 1)));
+    this.gate = options.gate;
+    if (start) this.enterFloor(this.gate ? 1 : Math.max(1, Math.min(TOP_FLOOR, options.startFloor ?? 1)));
   }
 
   drainEvents(): RunEvent[] {
@@ -234,6 +248,7 @@ export class TowerRun {
       facing: this.facing,
       buffs: this.buffs,
       traps: this.traps,
+      gate: this.gate,
     };
   }
 
@@ -266,6 +281,7 @@ export class TowerRun {
     run.facing = s.facing ?? { x: 1, y: 0 };
     run.buffs = s.buffs ?? {};
     run.traps = s.traps ?? [];
+    run.gate = s.gate;
     return run;
   }
 
@@ -274,7 +290,31 @@ export class TowerRun {
   }
 
   get isTopFloor(): boolean {
-    return this.floor >= TOP_FLOOR;
+    return this.floor >= (this.gate ? gateFloors(this.gate) : TOP_FLOOR);
+  }
+
+  /** The tower floor this floor is as dangerous as. In the tower that is the floor itself. */
+  get danger(): number {
+    return this.gate ? gateDanger(this.gate, this.floor) : this.floor;
+  }
+
+  /** How far the hunter sees. Dark gates cut it short. */
+  get sight(): number {
+    return this.gate?.rule === 'dark' ? DARK_SIGHT : SIGHT;
+  }
+
+  /** Where the hunter is, for the screen: "7층" or "C급 독안개 늪 2/4층". */
+  get placeName(): string {
+    return this.gate ? `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
+  }
+
+  /** Short form for the top bar: "7층" or "게이트 2/4층". */
+  get placeShort(): string {
+    return this.gate ? `게이트 ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
+  }
+
+  private get pool(): MonsterKind[] {
+    return this.gate ? gatePool(this.gate, this.danger) : monsterPool(this.floor);
   }
 
   private say(msg: string) {
@@ -290,25 +330,26 @@ export class TowerRun {
     this.seen = Array.from({ length: mapHeight(this.map) }, () => Array<boolean>(mapWidth(this.map)).fill(false));
     this.status = 'playing';
     this.traps = [];
-    this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
+    if (!this.gate) this.hunter.bestFloor = Math.max(this.hunter.bestFloor, n);
 
-    const pool = monsterPool(n);
-    const count = 4 + n;
+    const danger = this.danger;
+    const pool = this.pool;
+    const count = Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1));
     const rooms = this.map.rooms.slice(1);
     for (let i = 0; i < count; i++) {
       const room = this.rng.pick(rooms);
       const x = this.rng.int(room.x, room.x + room.w - 1);
       const y = this.rng.int(room.y, room.y + room.h - 1);
       if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) continue;
-      this.spawn(this.rng.pick(pool), x, y, n);
+      this.spawn(this.rng.pick(pool), x, y, danger);
     }
 
-    this.maybeSpawnRival(n);
-    this.placeChests(n);
-    this.maybeSpawnElite(n);
-    this.maybePlaceMerchant(n);
+    this.maybeSpawnRival(danger);
+    this.placeChests(danger);
+    this.maybeSpawnElite(danger);
+    this.maybePlaceMerchant(danger);
 
-    const boss = bossFor(n);
+    const boss = this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
     if (boss) {
       const c = center(this.map.rooms[this.map.rooms.length - 1]);
       const spot = [
@@ -318,11 +359,15 @@ export class TowerRun {
         { x: c.x, y: c.y + 1 },
       ].find((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y));
       if (spot) {
-        this.spawn(boss, spot.x, spot.y, n);
-        this.say(`${n}층에 ${boss.name}의 기척이 느껴진다.`);
+        this.spawn(boss, spot.x, spot.y, danger);
+        this.say(`${this.gate ? '마지막 층' : `${n}층`}에 ${boss.name}의 기척이 느껴진다.`);
       }
     }
-    this.say(`성장의 탑 ${n}층에 들어섰다.`);
+    if (this.gate) {
+      this.say(`${this.placeName}에 들어섰다.`);
+      if (n === 1 && this.gate.rule === 'sealed') this.say('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.');
+      if (n === 1 && this.gate.rule === 'dark') this.say('짙은 어둠 때문에 앞이 잘 보이지 않는다.');
+    } else this.say(`성장의 탑 ${n}층에 들어섰다.`);
     this.events.push({ type: 'floor' });
     this.updateSight();
   }
@@ -370,17 +415,20 @@ export class TowerRun {
   }
 
   private maybeSpawnElite(floor: number) {
-    if (floor < 3 || bossFor(floor) || !this.rng.chance(this.options.eliteChance ?? 0.35)) return;
+    if (this.gate) {
+      if (this.isTopFloor) return;
+      if (this.gate.rule !== 'elite' && (floor < 3 || !this.rng.chance(this.options.eliteChance ?? 0.35))) return;
+    } else if (floor < 3 || bossFor(floor) || !this.rng.chance(this.options.eliteChance ?? 0.35)) return;
     const spot = this.randomFreeSpot();
     if (!spot) return;
-    const kind = eliteOf(this.rng.pick(monsterPool(floor)));
+    const kind = eliteOf(this.rng.pick(this.pool));
     this.spawn(kind, spot.x, spot.y, floor);
     this.say(`강한 기척이 느껴진다... ${kind.name}!`);
   }
 
   private maybePlaceMerchant(floor: number) {
     this.merchant = undefined;
-    if (floor < 2 || !this.rng.chance(this.options.merchantChance ?? 0.35)) return;
+    if (this.gate || floor < 2 || !this.rng.chance(this.options.merchantChance ?? 0.35)) return;
     const spot = this.randomFreeSpot();
     if (!spot) return;
     const offers = rollOffers(this.rng, floor);
@@ -448,7 +496,7 @@ export class TowerRun {
 
   private openChest(index: number) {
     this.chests.splice(index, 1);
-    const c = rollChest(this.rng, this.floor);
+    const c = rollChest(this.rng, this.danger);
     this.events.push({ type: 'chest', cursed: c.type === 'curse' });
     this.applyChest(c);
   }
@@ -459,10 +507,12 @@ export class TowerRun {
     switch (c.type) {
       case 'gold':
         this.runGold += c.amount;
+        this.events.push({ type: 'gold', amount: c.amount });
         this.say(`보물상자: ${c.amount}G!`);
         return;
       case 'consumable': {
         const got = addToBag(h, c.kind);
+        this.events.push({ type: 'loot', item: c.kind, got: got > 0, count: h.bag[c.kind] });
         this.say(got ? `보물상자: ${CONSUMABLES[c.kind].name}!` : `보물상자: ${CONSUMABLES[c.kind].name}... 가방이 가득 차서 두고 왔다.`);
         return;
       }
@@ -472,17 +522,35 @@ export class TowerRun {
         return;
       case 'curse':
         this.say(`저주받은 상자였다! ${CURSES[c.curse]}`);
-        if (c.curse === 'drain') h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
-        if (c.curse === 'mana') h.mp = 0;
-        if (c.curse === 'greed') this.runGold = Math.floor(this.runGold * 0.7);
-        if (c.curse === 'ambush') this.ambush();
+        let detail = '';
+        if (c.curse === 'drain') {
+          const before = h.hp;
+          h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
+          detail = `체력 -${before - h.hp}  (${before} → ${h.hp})`;
+        }
+        if (c.curse === 'mana') {
+          detail = `마나 -${h.mp}  (${h.mp} → 0)`;
+          h.mp = 0;
+        }
+        if (c.curse === 'greed') {
+          const before = this.runGold;
+          this.runGold = Math.floor(this.runGold * 0.7);
+          detail = `이번 수입 -${before - this.runGold}G  (${before}G → ${this.runGold}G)`;
+        }
+        if (c.curse === 'ambush') {
+          const before = this.monsters.length;
+          this.ambush();
+          detail = `몬스터 ${this.monsters.length - before}마리가 바로 옆에 나타났다`;
+        }
+        this.events.push({ type: 'curse', curse: c.curse, detail });
         return;
     }
   }
 
   private takeGear(g: Gear) {
+    const old = this.hunter.gear[g.slot];
     const r = equipIfBetter(this.hunter, g);
-    if (r.equipped) this.events.push({ type: 'gear' });
+    this.events.push({ type: 'gear', gear: g, equipped: r.equipped, old });
     const slot = GEAR_SLOT_NAMES[g.slot];
     if (r.equipped) {
       this.say(`${slot} 장착: ${g.name} (${describeGear(g)})` + (r.discarded ? `. ${r.discarded.name}은(는) 버렸다.` : ''));
@@ -493,12 +561,12 @@ export class TowerRun {
 
   /** Two awake monsters of this floor appear next to the hunter. */
   private ambush() {
-    const pool = monsterPool(this.floor);
+    const pool = this.pool;
     const spots = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]
       .map(([dx, dy]) => ({ x: this.pos.x + dx, y: this.pos.y + dy }))
       .filter((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y) && this.map.tiles[p.y][p.x] !== Tile.Stairs);
     for (const p of spots.slice(0, 2)) {
-      this.spawn(this.rng.pick(pool), p.x, p.y, this.floor);
+      this.spawn(this.rng.pick(pool), p.x, p.y, this.danger);
       this.monsters[this.monsters.length - 1].awake = true;
     }
   }
@@ -530,12 +598,13 @@ export class TowerRun {
   isVisible(x: number, y: number): boolean {
     const dx = x - this.pos.x;
     const dy = y - this.pos.y;
-    return dx * dx + dy * dy <= SIGHT * SIGHT;
+    return dx * dx + dy * dy <= this.sight * this.sight;
   }
 
   private updateSight() {
-    for (let y = Math.max(0, this.pos.y - SIGHT); y <= Math.min(mapHeight(this.map) - 1, this.pos.y + SIGHT); y++) {
-      for (let x = Math.max(0, this.pos.x - SIGHT); x <= Math.min(mapWidth(this.map) - 1, this.pos.x + SIGHT); x++) {
+    const r = this.sight;
+    for (let y = Math.max(0, this.pos.y - r); y <= Math.min(mapHeight(this.map) - 1, this.pos.y + r); y++) {
+      for (let x = Math.max(0, this.pos.x - r); x <= Math.min(mapWidth(this.map) - 1, this.pos.x + r); x++) {
         if (this.isVisible(x, y)) this.seen[y][x] = true;
       }
     }
@@ -942,6 +1011,10 @@ export class TowerRun {
       return false;
     }
     if (kind === 'hp') {
+      if (this.gate?.rule === 'sealed') {
+        this.say('봉인 때문에 체력 물약이 듣지 않는다.');
+        return false;
+      }
       if (h.hp >= h.maxHp) {
         this.say('체력이 가득 차 있다.');
         return false;
@@ -986,19 +1059,19 @@ export class TowerRun {
       this.hunter.hp += heal;
       this.events.push({ type: 'heal', amount: heal });
     }
-    const scale = m.hunter ? 1 : floorScale(this.floor);
+    const scale = m.hunter ? 1 : floorScale(this.danger);
     const gold = Math.round(m.kind.gold * scale);
     this.runGold += gold;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
     this.say(`${m.kind.name} 처치! +${gold}G`);
-    const expScale = m.hunter ? 1 : floorExpScale(this.floor) * overLevelFactor(this.hunter.level, this.floor);
+    const expScale = m.hunter ? 1 : floorExpScale(this.danger) * overLevelFactor(this.hunter.level, this.danger);
     const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
     if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
     if (m.kind.elite) {
       this.say('중간보스가 장비를 떨어뜨렸다!');
-      this.takeGear(rollGear(this.rng, this.floor + 2));
+      this.takeGear(rollGear(this.rng, this.danger + 2));
     }
     if (m.hunter) this.offerChoice(m.hunter);
   }
@@ -1023,7 +1096,7 @@ export class TowerRun {
       msg = `${c.hunter.name}을(를) 완전히 쓰러뜨렸다. 경험치 +${c.finishExp}`;
     } else {
       const kind = c.rewards[index];
-      if (kind === 'item') this.takeGear(rollGear(this.rng, this.floor + 3));
+      if (kind === 'item') this.takeGear(rollGear(this.rng, this.danger + 3));
       if (kind === 'gold') h.gold += c.hunter.level * 15;
       if (kind === 'skill') {
         const open = h.skills.filter((sk) => sk.lv < MAX_SKILL_LV);
@@ -1056,7 +1129,7 @@ export class TowerRun {
       }
       const dx = this.pos.x - m.x;
       const dy = this.pos.y - m.y;
-      if (!m.awake && dx * dx + dy * dy <= SIGHT * SIGHT) m.awake = true;
+      if (!m.awake && dx * dx + dy * dy <= this.sight * this.sight) m.awake = true;
       if (!m.awake) continue;
       const adjacent = Math.abs(dx) + Math.abs(dy) === 1;
       const shoots = !adjacent && this.canShoot(m);
@@ -1191,7 +1264,7 @@ export class TowerRun {
   /** Go up from the stairs. Gives a floor-clear bonus. */
   climb(): boolean {
     if (this.status !== 'onStairs' || this.isTopFloor) return false;
-    const bonus = 10 * this.floor;
+    const bonus = 10 * this.danger;
     this.runGold += bonus;
     this.say(`${this.floor}층 돌파 보상 +${bonus}G`);
     this.enterFloor(this.floor + 1);
@@ -1201,9 +1274,20 @@ export class TowerRun {
   /** Leave the tower from the stairs, keeping this run's gold. */
   retreat(): boolean {
     if (this.status !== 'onStairs') return false;
-    const bonus = 10 * this.floor;
+    const bonus = 10 * this.danger;
     this.runGold += bonus;
     this.say(`${this.floor}층 돌파 보상 +${bonus}G`);
+    this.status = 'returned';
+    return true;
+  }
+
+  /** Gold and gear for clearing a gate. Only from the last floor's stairs, once its master is down. */
+  clearGate(): boolean {
+    if (!this.gate || !this.isTopFloor || this.status !== 'onStairs') return false;
+    const gold = gateClearGold(this.gate);
+    this.runGold += gold;
+    this.say(`${gateName(this.gate)} 클리어! 보상 +${gold}G`);
+    this.takeGear(rollGear(this.rng, this.danger + 4));
     this.status = 'returned';
     return true;
   }

@@ -2,6 +2,7 @@ import { GameState, HallOfFameEntry, refreshWorldRankers, SLOT_COUNT, worldRanke
 import { Grade, Hunter, powerGrade } from './hunter';
 import { CLASS_IDS, CLASSES, classSkills } from './classes';
 import { emptyBag } from './items';
+import { TOP_FLOOR } from './monsters';
 
 export const SAVE_KEY = 'sss-hunter-save-v1';
 
@@ -93,7 +94,12 @@ export function loadGame(storage: Storage): GameState | undefined {
     const state = data.version === 1 ? migrateV1(data) : data.version === 2 ? migrateV2(data) : data.version === 3 ? data : undefined;
     if (state) {
       refreshWorldRankers(state);
-      for (const h of [...state.slots, ...state.rival.roster]) if (h) giveClass(h);
+      for (const h of [...state.slots, ...state.rival.roster]) {
+        if (!h) continue;
+        giveClass(h);
+        // Rivals used to be able to pass the top floor by one.
+        h.bestFloor = Math.min(TOP_FLOOR, h.bestFloor);
+      }
     }
     return state;
   } catch {
