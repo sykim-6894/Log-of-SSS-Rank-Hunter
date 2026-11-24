@@ -8,6 +8,7 @@ import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, G
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
 import { sfx, soundOn, toggleSound } from '../game/sfx';
+import { moveControl, setMoveControl } from '../game/controls';
 import { isNewAgency, persist, rng, state } from '../game/store';
 import { Rng } from '../core/rng';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
@@ -25,6 +26,8 @@ export interface HQData {
   gates?: boolean;
   /** Show the gear draw, with the last result if there is one. */
   gacha?: { result?: GachaResult };
+  /** Show the settings screen. */
+  settings?: boolean;
   /** Show the gear enhancement screen, with the last try if there is one. */
   enhance?: { result?: EnhanceResult };
 }
@@ -62,6 +65,7 @@ export class HQScene extends Phaser.Scene {
   private hiring?: HQData['hire'];
   private showingGates = false;
   private gacha?: HQData['gacha'];
+  private settings = false;
   private enhancing?: HQData['enhance'];
 
   constructor() {
@@ -75,6 +79,7 @@ export class HQScene extends Phaser.Scene {
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
     this.gacha = data.gacha;
+    this.settings = !!data.settings;
     this.enhancing = data.enhance;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
@@ -110,6 +115,7 @@ export class HQScene extends Phaser.Scene {
     if (!state.gates) refreshGates(state, rng);
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
+    if (this.settings) return this.drawSettings();
     if (this.gacha) return this.drawGacha(this.gacha.result);
     if (this.enhancing) return this.drawEnhance(this.enhancing.result);
     if (PORTRAIT) return this.createPortrait();
@@ -380,10 +386,35 @@ export class HQScene extends Phaser.Scene {
   }
 
   private soundButton(x: number, y: number, w: number) {
-    button(this, x, y, w, 28, soundOn() ? '소리 켬' : '소리 끔', () => {
-      toggleSound();
-      this.scene.restart({ messages: this.messages });
-    });
+    button(this, x, y, w, 28, '설정', () => this.scene.restart({ settings: true, messages: this.messages }));
+  }
+
+  /** Sound and how to move on a touch screen. */
+  private drawSettings() {
+    const w = Math.min(GW - 28, 520);
+    const x = (GW - w) / 2;
+    title(this, GW / 2, 18, '설정', 23, INK.text).setOrigin(0.5, 0);
+    const reopen = () => this.scene.restart({ settings: true, messages: this.messages });
+    const oy = PORTRAIT ? 80 : 84;
+    panel(this, x, oy, w, 96, '소리');
+    text(this, x + 18, oy + 26, '효과음', 13, INK.text);
+    const half = (w - 36 - 10) / 2;
+    const on = soundOn();
+    button(this, x + 18, oy + 48, half, 34, '켬', () => { if (!soundOn()) toggleSound(); reopen(); }, { primary: on });
+    button(this, x + 28 + half, oy + 48, half, 34, '끔', () => { if (soundOn()) toggleSound(); reopen(); }, { primary: !on });
+
+    const my = oy + 112;
+    panel(this, x, my, w, 144, '이동 방식 (터치 화면)');
+    const mode = moveControl();
+    button(this, x + 18, my + 26, half, 34, '조이스틱', () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });
+    button(this, x + 28 + half, my + 26, half, 34, '십자 버튼', () => { setMoveControl('dpad'); reopen(); }, { primary: mode === 'dpad' });
+    const note = mode === 'joystick'
+      ? '화면을 누른 곳에 조이스틱이 생기고, 끄는 방향으로 걷는다.'
+      : '왼쪽 아래 고정된 십자 버튼을 눌러 걷는다. 누르고 있으면 계속 걷는다.';
+    text(this, x + 18, my + 74, note, 12, INK.quiet).setWordWrapWidth(w - 36, true);
+    text(this, x + 18, my + 116, '키보드는 어느 쪽이든 방향키·WASD로 움직인다.', 12, INK.faint);
+
+    button(this, x, my + 162, w, 44, '돌아가기', () => this.scene.restart({ messages: this.messages }));
   }
 
   /** Three hunter slots, like save slots. Empty ones hire a new hunter. */
