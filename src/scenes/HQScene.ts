@@ -598,8 +598,9 @@ export class HQScene extends Phaser.Scene {
       const ok = stones >= cost.stones && state.agent.gold >= cost.gold;
       const pct = (v: number) => Math.round(v * 100);
       const f = failOdds(g);
-      const failText = risk === 'none' ? '' : `실패 시 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`;
-      const costText = `마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(enhanceChance(g))}%`;
+      const failText = risk === 'none' ? '' : `실패하면 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`;
+      const chance = enhanceChance(g);
+      const costText = `마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(chance)}% · 실패 ${pct(1 - chance)}%`;
       const riskColor = risk === 'break' ? INK.red : risk === 'drop' ? INK.rust : INK.quiet;
       if (PORTRAIT) {
         fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
