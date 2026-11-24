@@ -1105,6 +1105,7 @@ export class TowerScene extends Phaser.Scene {
       : `${h.name}의 이름은 기록으로만 남는다.`;
     const msgs = [
       d.scouted ? `${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.` : `${h.name}의 기록이 남았다.`,
+      ...(d.newGear?.length ? [`${state.rival.name}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`] : []),
       ...this.newsLines(d),
     ];
     this.dialog(
