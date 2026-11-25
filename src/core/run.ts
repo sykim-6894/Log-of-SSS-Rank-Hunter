@@ -122,6 +122,8 @@ export interface RunOptions {
   duel?: Duel;
   /** Survive waves in the closed arena instead. */
   survival?: Survival;
+  /** The agency has a gear storage: gear swapped out or not needed is kept for it, not thrown away. */
+  keepSpare?: boolean;
   /** A brand-new agency's first climb: floor 1 has only a couple of monsters and one chest. */
   easyFirst?: boolean;
 }
@@ -264,6 +266,7 @@ export interface RunSnapshot {
   gate?: Gate;
   duel?: Duel;
   survival?: Survival;
+  spare?: Gear[];
 }
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -314,6 +317,8 @@ export class TowerRun {
   duel?: Duel;
   /** Set when this run is the survival arena. */
   survival?: Survival;
+  /** Gear kept for the agency's storage. Lost if the hunter dies. */
+  spare: Gear[] = [];
 
   constructor(
     public hunter: Hunter,
@@ -369,6 +374,7 @@ export class TowerRun {
       gate: this.gate,
       duel: this.duel,
       survival: this.survival,
+      spare: this.spare,
     };
   }
 
@@ -409,6 +415,7 @@ export class TowerRun {
     run.gate = s.gate;
     run.duel = s.duel;
     run.survival = s.survival;
+    run.spare = s.spare ?? [];
     return run;
   }
 
@@ -870,10 +877,13 @@ export class TowerRun {
     const r = equipIfBetter(this.hunter, g);
     this.events.push({ type: 'gear', gear: g, equipped: r.equipped, old });
     const slot = GEAR_SLOT_NAMES[g.slot];
+    const keep = !!this.options.keepSpare && !!r.discarded;
+    if (keep) this.spare.push(r.discarded!);
+    const gone = (d: Gear) => keep ? L(`${gearLabel(d)}은(는) 창고로 보낸다.`, `${gearLabel(d)} goes to storage.`) : L(`${gearLabel(d)}은(는) 버렸다.`, `Discarded ${gearLabel(d)}.`);
     if (r.equipped) {
-      this.say(L(`${slot} 장착: ${gearLabel(g)} (${describeGear(g)})`, `${slot} equipped: ${gearLabel(g)} (${describeGear(g)})`) + (r.discarded ? L(`. ${gearLabel(r.discarded)}은(는) 버렸다.`, `. Discarded ${gearLabel(r.discarded)}.`) : ''));
+      this.say(L(`${slot} 장착: ${gearLabel(g)} (${describeGear(g)})`, `${slot} equipped: ${gearLabel(g)} (${describeGear(g)})`) + (r.discarded ? `. ${gone(r.discarded)}` : ''));
     } else {
-      this.say(L(`지금 ${slot}이(가) 더 좋다. ${gearLabel(g)}은(는) 버렸다.`, `Your current ${slot} is better. Discarded ${gearLabel(g)}.`));
+      this.say(L(`지금 ${slot}이(가) 더 좋다. `, `Your current ${slot} is better. `) + gone(g));
     }
   }
 

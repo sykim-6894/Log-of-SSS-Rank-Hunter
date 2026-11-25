@@ -81,6 +81,11 @@ export const MAX_TIER = 7;
 /** Tiers 8 and 9 only come from the gear draw. */
 export const TOP_TIER = 9;
 
+/** Hunter level needed to take a piece out of the agency's storage: 1, 2, 4, 6 ... 16 for tiers 1 to 9. */
+export function gearLevel(g: Pick<Gear, 'tier'>): number {
+  return Math.max(1, 2 * (g.tier - 1));
+}
+
 export const MAX_PLUS = 10;
 export const PLUS_BONUS = 0.1;
 
