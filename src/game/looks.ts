@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { CLASSES } from '../core/classes';
 import type { Hunter } from '../core/hunter';
+import { L } from '../core/lang';
 
 /**
  * Hunter looks: tiny 10×12 pixel figures. Each letter is a color from the look's palette;
@@ -16,7 +17,7 @@ const SHARED = { k: 0x1a1410, s: 0xe8b98a };
 
 export const LOOKS: Look[] = [
   {
-    name: '검사',
+    name: L('검사', 'Swordsman'),
     colors: { h: 0x6b4a2b, a: 0x3d6fa8, g: 0xe5ae46, p: 0x6e5a44, w: 0xd8d8d8 },
     rows: [
       '...hhhh...',
@@ -34,7 +35,7 @@ export const LOOKS: Look[] = [
     ],
   },
   {
-    name: '마법사',
+    name: L('마법사', 'Mage'),
     colors: { b: 0x6a4aa8, a: 0x4b3a7a, w: 0xa87a4a, o: 0x7fd6c9 },
     rows: [
       'o...b.....',
@@ -52,7 +53,7 @@ export const LOOKS: Look[] = [
     ],
   },
   {
-    name: '궁수',
+    name: L('궁수', 'Archer'),
     colors: { b: 0x4f7a3a, a: 0x6b8a4a, w: 0xa87a4a, g: 0x8a5a2b, p: 0x6e5a44 },
     rows: [
       '...bbbb...',
@@ -70,7 +71,7 @@ export const LOOKS: Look[] = [
     ],
   },
   {
-    name: '기사',
+    name: L('기사', 'Knight'),
     colors: { m: 0x9aa0a8, n: 0x6b7078, c: 0xa8403a, g: 0xe5ae46 },
     rows: [
       '...mmmm...',

@@ -1,5 +1,6 @@
 import type { Hunter } from './hunter';
 import { Rng } from './rng';
+import { L } from './lang';
 
 // ---------- Consumables: kept in the bag, used in the tower ----------
 
@@ -8,10 +9,10 @@ export const CONSUMABLE_KINDS: ConsumableKind[] = ['hp', 'mp', 'guard', 'escape'
 
 /** price: sold at the office. where: how to get the ones that are not. */
 export const CONSUMABLES: Record<ConsumableKind, { name: string; describe: string; price?: number; where?: string }> = {
-  hp: { name: '체력 물약', describe: '체력 40% 회복', price: 15 },
-  mp: { name: '마나 물약', describe: '마나 60% 회복', price: 15 },
-  guard: { name: '무적 물약', describe: '3턴 동안 피해 무시', where: '보물상자·상인' },
-  escape: { name: '귀환 주문서', describe: '바로 귀환, 돌파 보상 없음', where: '탑 속 상인' },
+  hp: { name: L('체력 물약', 'HP Potion'), describe: L('체력 40% 회복', 'Restores 40% HP'), price: 15 },
+  mp: { name: L('마나 물약', 'MP Potion'), describe: L('마나 60% 회복', 'Restores 60% MP'), price: 15 },
+  guard: { name: L('무적 물약', 'Guard Potion'), describe: L('3턴 동안 피해 무시', 'Ignore damage for 3 turns'), where: L('보물상자·상인', 'Chests · merchants') },
+  escape: { name: L('귀환 주문서', 'Return Scroll'), describe: L('바로 귀환, 돌파 보상 없음', 'Return at once, no clear reward'), where: L('탑 속 상인', 'Tower merchant') },
 };
 
 export const HP_POTION_HEAL = 0.4;
@@ -43,13 +44,13 @@ export function addToBag(h: Hunter, kind: ConsumableKind, count = 1): number {
 export type GearSlot = 'weapon' | 'shield' | 'helmet' | 'armor' | 'boots' | 'ring' | 'earring';
 export const GEAR_SLOTS: GearSlot[] = ['weapon', 'shield', 'helmet', 'armor', 'boots', 'ring', 'earring'];
 export const GEAR_SLOT_NAMES: Record<GearSlot, string> = {
-  weapon: '무기',
-  shield: '방패',
-  helmet: '투구',
-  armor: '갑옷',
-  boots: '신발',
-  ring: '반지',
-  earring: '귀걸이',
+  weapon: L('무기', 'Weapon'),
+  shield: L('방패', 'Shield'),
+  helmet: L('투구', 'Helmet'),
+  armor: L('갑옷', 'Armor'),
+  boots: L('신발', 'Boots'),
+  ring: L('반지', 'Ring'),
+  earring: L('귀걸이', 'Earring'),
 };
 
 export interface Gear {
@@ -67,13 +68,13 @@ export interface Gear {
 export type Equipment = Partial<Record<GearSlot, Gear>>;
 
 const GEAR_NAMES: Record<GearSlot, string[]> = {
-  weapon: ['녹슨 단검', '철검', '강철 장검', '기사의 검', '게이트 결정검', '마력의 대검', '균열의 검', '용살의 성검', '천공의 신검'],
-  shield: ['나무 방패', '철 방패', '강철 방패', '기사의 방패', '결정 방패', '마력의 방벽', '균열의 방패', '용비늘 방패', '천공의 방패'],
-  helmet: ['가죽 두건', '철 투구', '강철 투구', '기사의 투구', '결정 투구', '마력의 관', '균열의 투구', '용왕의 투구', '천공의 왕관'],
-  armor: ['가죽 조끼', '사슬 갑옷', '강철 흉갑', '기사의 갑주', '결정 갑주', '마력의 판금', '균열의 갑주', '용비늘 갑주', '천공의 갑주'],
-  boots: ['짚신', '가죽 장화', '강철 장화', '기사의 장화', '결정 장화', '마력의 장화', '균열의 장화', '질풍의 장화', '천공의 장화'],
-  ring: ['구리 반지', '은 반지', '금 반지', '루비 반지', '결정 반지', '마력의 반지', '균열의 반지', '용안의 반지', '천공의 반지'],
-  earring: ['나무 귀걸이', '구리 귀걸이', '은 귀걸이', '금 귀걸이', '결정 귀걸이', '마력의 귀걸이', '균열의 귀걸이', '용안의 귀걸이', '천공의 귀걸이'],
+  weapon: [L('녹슨 단검', 'Rusty Dagger'), L('철검', 'Iron Sword'), L('강철 장검', 'Steel Longsword'), L('기사의 검', "Knight's Sword"), L('게이트 결정검', 'Gate Crystal Sword'), L('마력의 대검', 'Mana Greatsword'), L('균열의 검', 'Rift Sword'), L('용살의 성검', 'Dragonslayer'), L('천공의 신검', 'Celestial Blade')],
+  shield: [L('나무 방패', 'Wooden Shield'), L('철 방패', 'Iron Shield'), L('강철 방패', 'Steel Shield'), L('기사의 방패', "Knight's Shield"), L('결정 방패', 'Crystal Shield'), L('마력의 방벽', 'Mana Barrier'), L('균열의 방패', 'Rift Shield'), L('용비늘 방패', 'Dragonscale Shield'), L('천공의 방패', 'Celestial Shield')],
+  helmet: [L('가죽 두건', 'Leather Hood'), L('철 투구', 'Iron Helm'), L('강철 투구', 'Steel Helm'), L('기사의 투구', "Knight's Helm"), L('결정 투구', 'Crystal Helm'), L('마력의 관', 'Mana Circlet'), L('균열의 투구', 'Rift Helm'), L('용왕의 투구', 'Dragon King Helm'), L('천공의 왕관', 'Celestial Crown')],
+  armor: [L('가죽 조끼', 'Leather Vest'), L('사슬 갑옷', 'Chainmail'), L('강철 흉갑', 'Steel Cuirass'), L('기사의 갑주', "Knight's Plate"), L('결정 갑주', 'Crystal Plate'), L('마력의 판금', 'Mana Plate'), L('균열의 갑주', 'Rift Plate'), L('용비늘 갑주', 'Dragonscale Plate'), L('천공의 갑주', 'Celestial Plate')],
+  boots: [L('짚신', 'Straw Sandals'), L('가죽 장화', 'Leather Boots'), L('강철 장화', 'Steel Boots'), L('기사의 장화', "Knight's Boots"), L('결정 장화', 'Crystal Boots'), L('마력의 장화', 'Mana Boots'), L('균열의 장화', 'Rift Boots'), L('질풍의 장화', 'Gale Boots'), L('천공의 장화', 'Celestial Boots')],
+  ring: [L('구리 반지', 'Copper Ring'), L('은 반지', 'Silver Ring'), L('금 반지', 'Gold Ring'), L('루비 반지', 'Ruby Ring'), L('결정 반지', 'Crystal Ring'), L('마력의 반지', 'Mana Ring'), L('균열의 반지', 'Rift Ring'), L('용안의 반지', 'Dragon Eye Ring'), L('천공의 반지', 'Celestial Ring')],
+  earring: [L('나무 귀걸이', 'Wooden Earring'), L('구리 귀걸이', 'Copper Earring'), L('은 귀걸이', 'Silver Earring'), L('금 귀걸이', 'Gold Earring'), L('결정 귀걸이', 'Crystal Earring'), L('마력의 귀걸이', 'Mana Earring'), L('균열의 귀걸이', 'Rift Earring'), L('용안의 귀걸이', 'Dragon Eye Earring'), L('천공의 귀걸이', 'Celestial Earring')],
 };
 /** Highest tier found in the tower, gates and shops. */
 export const MAX_TIER = 7;
@@ -106,10 +107,10 @@ export function gearScore(g: Gear): number {
 export function describeGear(g: Gear): string {
   const s = gearStats(g);
   const parts: string[] = [];
-  if (s.atk) parts.push(`공격 +${s.atk}`);
-  if (s.def) parts.push(`방어 +${s.def}`);
-  if (s.hp) parts.push(`체력 +${s.hp}`);
-  if (s.mp) parts.push(`마나 +${s.mp}`);
+  if (s.atk) parts.push(L(`공격 +${s.atk}`, `ATK +${s.atk}`));
+  if (s.def) parts.push(L(`방어 +${s.def}`, `DEF +${s.def}`));
+  if (s.hp) parts.push(L(`체력 +${s.hp}`, `HP +${s.hp}`));
+  if (s.mp) parts.push(L(`마나 +${s.mp}`, `MP +${s.mp}`));
   return parts.join(' ');
 }
 
@@ -207,15 +208,15 @@ export const GACHA_PRICE = 1000;
 /** A drawn piece that is no better than what is worn is sold back for this much. */
 export const GACHA_REFUND = 300;
 export const GACHA_ODDS: Array<{ tier: number; chance: number; label: string }> = [
-  { tier: 5, chance: 0.35, label: '희귀' },
-  { tier: 6, chance: 0.3, label: '희귀' },
-  { tier: 7, chance: 0.22, label: '영웅' },
-  { tier: 8, chance: 0.1, label: '전설' },
-  { tier: 9, chance: 0.03, label: '신화' },
+  { tier: 5, chance: 0.35, label: L('희귀', 'Rare') },
+  { tier: 6, chance: 0.3, label: L('희귀', 'Rare') },
+  { tier: 7, chance: 0.22, label: L('영웅', 'Epic') },
+  { tier: 8, chance: 0.1, label: L('전설', 'Legendary') },
+  { tier: 9, chance: 0.03, label: L('신화', 'Mythic') },
 ];
 
 export function gachaLabel(tier: number): string {
-  return GACHA_ODDS.find((o) => o.tier === tier)?.label ?? '일반';
+  return GACHA_ODDS.find((o) => o.tier === tier)?.label ?? L('일반', 'Common');
 }
 
 /** One random piece from the draw, any slot, tier by GACHA_ODDS. */
@@ -260,7 +261,7 @@ export function rollOffers(rng: Rng, floor: number): Offer[] {
 export function offerLabel(o: Offer): string {
   if (o.type === 'gear') return `${GEAR_SLOT_NAMES[o.gear.slot]} ${gearLabel(o.gear)} (${describeGear(o.gear)})`;
   if (o.type === 'item') return `${CONSUMABLES[o.item].name} (${CONSUMABLES[o.item].describe})`;
-  return '응급 치료 (체력·마나 모두 회복)';
+  return L('응급 치료 (체력·마나 모두 회복)', 'First aid (restore HP and MP)');
 }
 
 // ---------- Treasure chests ----------
@@ -271,10 +272,10 @@ export const CURSE_CHANCE = 0.25;
 
 export type CurseKind = 'drain' | 'mana' | 'ambush' | 'greed';
 export const CURSES: Record<CurseKind, string> = {
-  drain: '생명력이 빨려 나갔다. 체력 -25%',
-  mana: '마나가 흩어졌다. 마나 0',
-  ambush: '상자 속 몬스터들이 튀어나왔다!',
-  greed: '탐욕의 저주. 이번 수입 -30%',
+  drain: L('생명력이 빨려 나갔다. 체력 -25%', 'Your life is drained. HP -25%'),
+  mana: L('마나가 흩어졌다. 마나 0', 'Your mana scatters. MP 0'),
+  ambush: L('상자 속 몬스터들이 튀어나왔다!', 'Monsters burst out of the chest!'),
+  greed: L('탐욕의 저주. 이번 수입 -30%', 'Curse of greed. This run’s income -30%'),
 };
 
 export type ChestContent =

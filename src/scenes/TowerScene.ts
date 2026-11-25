@@ -16,6 +16,7 @@ import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, S
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
+import { L } from '../core/lang';
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
@@ -123,7 +124,7 @@ export class TowerScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
       if (ev.key.toLowerCase() === 'b') return this.showBag();
       if (ev.key.toLowerCase() === 'm') {
-        this.run.log.push(toggleSound() ? '소리를 켰다.' : '소리를 껐다.');
+        this.run.log.push(toggleSound() ? L('소리를 켰다.', 'Sound on.') : L('소리를 껐다.', 'Sound off.'));
         return this.redraw();
       }
       const action = keys[ev.key] ?? keys[ev.key.toLowerCase()];
@@ -363,7 +364,7 @@ export class TowerScene extends Phaser.Scene {
       const run = slot >= 0 ? TowerRun.restore(saved.data, state.slots[slot]!, rng, options) : undefined;
       if (run) {
         state.activeSlot = slot;
-        run.log.push('— 저장된 곳에서 이어서 진행 —');
+        run.log.push(L('— 저장된 곳에서 이어서 진행 —', '— Resumed from your save —'));
         // A tall floor saved on an upright phone doesn't fit the wide screen: lay this floor out again.
         if (!PORTRAIT && mapHeight(run.map) > MAP_H) run.enterFloor(run.floor);
         return run;
@@ -373,7 +374,7 @@ export class TowerScene extends Phaser.Scene {
     const gate = this.gateId !== undefined ? enterGate(state, this.gateId) : undefined;
     const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel });
     if (this.startFloor > 1 && !this.duel) {
-      run.log.push(this.startFloor > TOP_FLOOR ? `이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.` : `이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`);
+      run.log.push(this.startFloor > TOP_FLOOR ? L(`이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.`, `Skipped ahead past Abyss ${this.startFloor - TOP_FLOOR - 1}F, already cleared.`) : L(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`, `Skipped ahead past ${this.startFloor - 1}F, already cleared.`));
     }
     return run;
   }
@@ -549,16 +550,16 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.line, 1).fillRect(0, HUD_Y, 960, 2);
     g.fillStyle(PALETTE.shadow, 1).fillRect(0, HUD_Y + 2, 960, 2);
     const nameText = k(title(this, 16, HUD_Y + 12, h.name, 15, INK.text));
-    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
-    k(text(this, 16, HUD_Y + 40, `체력`, 12, INK.quiet));
+    k(text(this, 16 + nameText.width + 10, HUD_Y + 15, L(`${gradeIn(state, h)}급 · Lv.${h.level}`, `${gradeIn(state, h)}-Rank · Lv.${h.level}`), 12, INK.rust, true));
+    k(text(this, 16, HUD_Y + 40, L(`체력`, `HP`), 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 43, 150, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, 212, HUD_Y + 40, `${h.hp}/${h.maxHp}`, 12, INK.text));
-    k(text(this, 16, HUD_Y + 60, `마나`, 12, INK.quiet));
+    k(text(this, 16, HUD_Y + 60, L(`마나`, `MP`), 12, INK.quiet));
     k(bar(this, 54, HUD_Y + 63, 150, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, 212, HUD_Y + 60, `${h.mp}/${h.maxMp}`, 12, INK.text));
-    const status = k(text(this, 16, HUD_Y + 88, `${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : ''), 12, INK.gold));
+    const status = k(text(this, 16, HUD_Y + 88, L(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}`, `${run.duel ? run.placeShort : `${run.placeShort}(Lv.${recommendedLevel(run.danger)})`} · Income ${run.runGold}G · Pots ${this.bagLine()}`) + (h.rescues ? L(` · 지원 ${h.rescues}`, ` · Rescue ${h.rescues}`) : ''), 12, INK.gold));
     // Keep clear of the log beside it: drop what the bag button already shows.
-    if (status.width > 258) status.setText(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G`);
+    if (status.width > 258) status.setText(L(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G`, `${run.duel ? run.placeShort : `${run.placeShort}(Lv.${recommendedLevel(run.danger)})`} · Income ${run.runGold}G`));
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
@@ -568,10 +569,10 @@ export class TowerScene extends Phaser.Scene {
 
     this.skillButtons(700, HUD_Y + 12, 244, 46, true).forEach(k);
     this.drawDpad().forEach(k);
-    k(button(this, 700, HUD_Y + 64, 76, 44, `공격 Z`, () => this.perform({ type: 'attack' }), { primary: true }));
-    k(button(this, 784, HUD_Y + 64, 76, 44, `가방 B`, () => this.showBag()));
-    if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, 868, HUD_Y + 64, 76, 44, `대기 Spc`, () => this.perform({ type: 'wait' })));
+    k(button(this, 700, HUD_Y + 64, 76, 44, L(`공격 Z`, `Attack Z`), () => this.perform({ type: 'attack' }), { primary: true }));
+    k(button(this, 784, HUD_Y + 64, 76, 44, L(`가방 B`, `Bag B`), () => this.showBag()));
+    if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, L(`무적 ${run.guardTurns}턴`, `Guard ${run.guardTurns}t`), 12, INK.gate, true));
+    k(button(this, 868, HUD_Y + 64, 76, 44, L(`대기 Spc`, `Wait Spc`), () => this.perform({ type: 'wait' })));
   }
 
   private drawHudPortrait() {
@@ -586,16 +587,16 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.panel, 1).fillRect(0, 0, GW, P_TOP_H);
     g.fillStyle(PALETTE.line, 1).fillRect(0, P_TOP_H - 2, GW, 2);
     const nameText = k(title(this, 14, 10, h.name, 15, INK.text));
-    const gradeText = k(text(this, 14 + nameText.width + 8, 13, `${gradeIn(state, h)}급 · Lv.${h.level}`, 12, INK.rust, true));
+    const gradeText = k(text(this, 14 + nameText.width + 8, 13, L(`${gradeIn(state, h)}급 · Lv.${h.level}`, `${gradeIn(state, h)}-Rank · Lv.${h.level}`), 12, INK.rust, true));
     // Long lines (gates, big earnings) lose the words the bag button already shows.
     const room = GW - 14 - (gradeText.x + gradeText.width + 10);
-    const full = `${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}` + (h.rescues ? ` · 지원 ${h.rescues}` : '');
+    const full = L(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · 수입 ${run.runGold}G · 물약 ${this.bagLine()}`, `${run.duel ? run.placeShort : `${run.placeShort}(Lv.${recommendedLevel(run.danger)})`} · Income ${run.runGold}G · Pots ${this.bagLine()}`) + (h.rescues ? L(` · 지원 ${h.rescues}`, ` · Rescue ${h.rescues}`) : '');
     const status = k(text(this, GW - 14, 13, full, 12, INK.gold).setOrigin(1, 0));
-    if (status.width > room) status.setText(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · ${run.runGold}G`);
-    k(text(this, 14, 38, '체력', 12, INK.quiet));
+    if (status.width > room) status.setText(L(`${run.duel ? run.placeShort : `${run.placeShort}(적정 Lv.${recommendedLevel(run.danger)})`} · ${run.runGold}G`, `${run.duel ? run.placeShort : `${run.placeShort}(Lv.${recommendedLevel(run.danger)})`} · ${run.runGold}G`));
+    k(text(this, 14, 38, L('체력', 'HP'), 12, INK.quiet));
     k(bar(this, 52, 41, 300, 8, h.hp / h.maxHp, PALETTE.hp));
     k(text(this, GW - 14, 38, `${h.hp}/${h.maxHp}`, 12, INK.text).setOrigin(1, 0));
-    k(text(this, 14, 58, '마나', 12, INK.quiet));
+    k(text(this, 14, 58, L('마나', 'MP'), 12, INK.quiet));
     k(bar(this, 52, 61, 300, 8, h.mp / h.maxMp, PALETTE.mp));
     k(text(this, GW - 14, 58, `${h.mp}/${h.maxMp}`, 12, INK.text).setOrigin(1, 0));
 
@@ -618,16 +619,16 @@ export class TowerScene extends Phaser.Scene {
     } else {
       g.lineStyle(2, PALETTE.line, 1).strokeCircle(cx, cy, 60);
       g.fillStyle(PALETTE.dim, 1).fillCircle(cx, cy, 20);
-      k(text(this, cx, P_CTL_Y + 172, '여기를 끌어서 이동', 12, INK.faint).setOrigin(0.5, 0));
+      k(text(this, cx, P_CTL_Y + 172, L('여기를 끌어서 이동', 'Drag here to move'), 12, INK.faint).setOrigin(0.5, 0));
     }
     const bw = GW - 14 - P_BTN_X;
     this.skillButtons(P_BTN_X, P_CTL_Y + 18, bw, 66, false).forEach(k);
     const tw = (bw - 12) / 3;
-    const attack = h.cls === 'archer' ? '공격\n(3칸)' : '공격\n(옆 칸)';
+    const attack = h.cls === 'archer' ? L('공격\n(3칸)', 'Attack\n(3 tiles)') : L('공격\n(옆 칸)', 'Attack\n(adjacent)');
     k(button(this, P_BTN_X, P_CTL_Y + 94, tw, 52, attack, () => this.perform({ type: 'attack' }), { primary: true }));
-    k(button(this, P_BTN_X + tw + 6, P_CTL_Y + 94, tw, 52, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
-    if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, P_BTN_X + 2 * (tw + 6), P_CTL_Y + 94, tw, 52, '대기\n(한 턴)', () => this.perform({ type: 'wait' })));
+    k(button(this, P_BTN_X + tw + 6, P_CTL_Y + 94, tw, 52, L(`가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, `Bag\nPots ${h.bag.hp + h.bag.mp + h.bag.guard}`), () => this.showBag()));
+    if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, L(`무적 ${run.guardTurns}턴`, `Guard ${run.guardTurns}t`), 12, INK.gate, true));
+    k(button(this, P_BTN_X + 2 * (tw + 6), P_CTL_Y + 94, tw, 52, L('대기\n(한 턴)', 'Wait\n(1 turn)'), () => this.perform({ type: 'wait' })));
     const buffs = this.buffLine();
     if (buffs) k(text(this, 14, P_TOP_H + (run.guardTurns > 0 ? 26 : 8), buffs, 12, INK.gate, true));
   }
@@ -641,12 +642,12 @@ export class TowerScene extends Phaser.Scene {
       const s = h.skills[i];
       const bx = x + i * (bw + 6);
       if (!s) {
-        const label = i < open ? '빈 칸\n레벨업 때' : `Lv.${i === 1 ? 5 : 10}에\n열림`;
+        const label = i < open ? L('빈 칸\n레벨업 때', 'Empty\nLv up') : L(`Lv.${i === 1 ? 5 : 10}에\n열림`, `Opens\nLv.${i === 1 ? 5 : 10}`);
         return button(this, bx, y, bw, hgt, label, () => {}, { enabled: false });
       }
       const cost = skillCost(s);
       const key = keysShown ? `${i + 1} ` : '';
-      return button(this, bx, y, bw, hgt, `${key}${SKILLS[s.id].name}\n${s.lv}단·마나${cost}`, () => this.perform({ type: 'skill', slot: i }), {
+      return button(this, bx, y, bw, hgt, L(`${key}${SKILLS[s.id].name}\n${s.lv}단·마나${cost}`, `${key}${SKILLS[s.id].name}\nLv${s.lv}·MP${cost}`), () => this.perform({ type: 'skill', slot: i }), {
         enabled: h.mp >= cost,
       });
     });
@@ -656,13 +657,13 @@ export class TowerScene extends Phaser.Scene {
   private buffLine(): string {
     const b = this.run.buffs;
     const parts: string[] = [];
-    if (b.stance) parts.push(`반격 ${b.stance.turns}`);
-    if (b.rage) parts.push(`함성 ${b.rage.turns}`);
-    if (b.shield) parts.push(`보호막 ${b.shield.turns}`);
-    if (b.block) parts.push(`막기 ${b.block.charges}회`);
-    if (b.defUp) parts.push(`방어+${b.defUp.amount} ${b.defUp.turns}`);
-    if (b.sanctuary) parts.push(`성역 ${b.sanctuary.turns}`);
-    if (this.run.traps.length) parts.push(`덫 ${this.run.traps.length}`);
+    if (b.stance) parts.push(L(`반격 ${b.stance.turns}`, `Riposte ${b.stance.turns}`));
+    if (b.rage) parts.push(L(`함성 ${b.rage.turns}`, `War cry ${b.rage.turns}`));
+    if (b.shield) parts.push(L(`보호막 ${b.shield.turns}`, `Shield ${b.shield.turns}`));
+    if (b.block) parts.push(L(`막기 ${b.block.charges}회`, `Block x${b.block.charges}`));
+    if (b.defUp) parts.push(L(`방어+${b.defUp.amount} ${b.defUp.turns}`, `DEF+${b.defUp.amount} ${b.defUp.turns}`));
+    if (b.sanctuary) parts.push(L(`성역 ${b.sanctuary.turns}`, `Sanctuary ${b.sanctuary.turns}`));
+    if (this.run.traps.length) parts.push(L(`덫 ${this.run.traps.length}`, `Traps ${this.run.traps.length}`));
     return parts.join(' · ');
   }
 
@@ -675,7 +676,7 @@ export class TowerScene extends Phaser.Scene {
     persist();
     const pick = (i: number, replace?: number) => {
       const msg = chooseCard(h, i, replace);
-      if (msg) this.run.log.push(`카드 선택: ${msg}.`);
+      if (msg) this.run.log.push(L(`카드 선택: ${msg}.`, `Card: ${msg}.`));
       this.closeOverlay();
       this.redraw();
     };
@@ -689,18 +690,18 @@ export class TowerScene extends Phaser.Scene {
       },
       c.type !== 'stat',
     ]);
-    const more = h.picks > 1 ? ` · 남은 선택 ${h.picks}` : '';
-    this.dialog(`Lv.${h.level} 카드 고르기`, [`스킬 칸 ${h.skills.length}/${slotCount(h.level)}${more}`], buttons, INK.gold);
+    const more = h.picks > 1 ? L(` · 남은 선택 ${h.picks}`, ` · ${h.picks} picks left`) : '';
+    this.dialog(L(`Lv.${h.level} 카드 고르기`, `Lv.${h.level} Pick a card`), [L(`스킬 칸 ${h.skills.length}/${slotCount(h.level)}${more}`, `Skill slots ${h.skills.length}/${slotCount(h.level)}${more}`)], buttons, INK.gold);
   }
 
   private showReplace(card: number, pick: (i: number, replace?: number) => void) {
     const h = this.run.hunter;
-    const buttons: Array<[string, () => void, boolean?, boolean?]> = h.skills.map((s, j) => [`${skillLabel(s)}단계 버리고 바꾸기`, () => pick(card, j)]);
-    buttons.push(['다른 카드 고르기', () => {
+    const buttons: Array<[string, () => void, boolean?, boolean?]> = h.skills.map((s, j) => [L(`${skillLabel(s)}단계 버리고 바꾸기`, `Replace ${skillLabel(s)}`), () => pick(card, j)]);
+    buttons.push([L('다른 카드 고르기', 'Pick another card'), () => {
       this.closeOverlay();
       this.showCards();
     }, true]);
-    this.dialog('어떤 스킬과 바꿀까?', ['버린 스킬의 강화는 사라진다.'], buttons, INK.gold);
+    this.dialog(L('어떤 스킬과 바꿀까?', 'Replace which skill?'), [L('버린 스킬의 강화는 사라진다.', 'Upgrades on the dropped skill are lost.')], buttons, INK.gold);
   }
 
   /** The wandering merchant's wares, paid from this run's earnings. */
@@ -710,7 +711,7 @@ export class TowerScene extends Phaser.Scene {
     if (!m) return;
     this.joyClear();
     const buttons: Array<[string, () => void, boolean?, boolean?]> = m.offers.map((o, i) => [
-      m.sold[i] ? `${offerLabel(o)} · 판매 완료` : `${offerLabel(o)} · ${o.price}G`,
+      m.sold[i] ? L(`${offerLabel(o)} · 판매 완료`, `${offerLabel(o)} · Sold`) : `${offerLabel(o)} · ${o.price}G`,
       () => {
         run.buyOffer(i);
         this.closeOverlay();
@@ -719,12 +720,12 @@ export class TowerScene extends Phaser.Scene {
       false,
       !m.sold[i] && run.runGold >= o.price,
     ]);
-    buttons.push(['거래 끝내기 (상인이 떠남)', () => {
+    buttons.push([L('거래 끝내기 (상인이 떠남)', 'Done trading (merchant leaves)'), () => {
       run.leaveMerchant();
       this.closeOverlay();
       this.redraw();
     }, true]);
-    this.dialog('떠돌이 상인', [`이번 수입 ${run.runGold}G로 살 수 있다.`, '거래를 끝내면 상인은 떠난다.'], buttons, INK.gold);
+    this.dialog(L('떠돌이 상인', 'Wandering Merchant'), [L(`이번 수입 ${run.runGold}G로 살 수 있다.`, `Pay with this run's income: ${run.runGold}G.`), L('거래를 끝내면 상인은 떠난다.', 'The merchant leaves when you are done.')], buttons, INK.gold);
   }
 
   /** Floating numbers, flashes, shakes and sounds for what just happened. */
@@ -735,7 +736,7 @@ export class TowerScene extends Phaser.Scene {
     for (const e of events) {
       switch (e.type) {
         case 'element':
-          this.floatText(e.x, e.y - 1, e.weak ? '약점!' : '저항', e.weak ? INK.gold : '#9a8f84');
+          this.floatText(e.x, e.y - 1, e.weak ? L('약점!', 'Weak!') : L('저항', 'Resist'), e.weak ? INK.gold : '#9a8f84');
           break;
         case 'hit':
           this.floatText(e.x, e.y, `${e.amount}`, '#fff4e2');
@@ -753,10 +754,10 @@ export class TowerScene extends Phaser.Scene {
           this.shot(e.x, e.y, e.fromHunter);
           break;
         case 'miss':
-          this.floatText(e.x, e.y, '빗나감', INK.faint);
+          this.floatText(e.x, e.y, L('빗나감', 'Miss'), INK.faint);
           break;
         case 'dodge':
-          this.floatText(at.x, at.y, '회피', INK.gate);
+          this.floatText(at.x, at.y, L('회피', 'Dodge'), INK.gate);
           sfx.block();
           break;
         case 'skill':
@@ -768,7 +769,7 @@ export class TowerScene extends Phaser.Scene {
           this.floatText(at.x, at.y, `-${e.amount}`, INK.red);
           break;
         case 'block':
-          this.floatText(at.x, at.y, '막음', INK.gate);
+          this.floatText(at.x, at.y, L('막음', 'Block'), INK.gate);
           sfx.block();
           break;
         case 'heal':
@@ -793,10 +794,10 @@ export class TowerScene extends Phaser.Scene {
           this.notice(lootNotice(e.item, e.got, e.count));
           break;
         case 'stone':
-          this.floatText(e.x, e.y, `마력석 +${e.amount}`, '#b98cff');
+          this.floatText(e.x, e.y, L(`마력석 +${e.amount}`, `Stone +${e.amount}`), '#b98cff');
           break;
         case 'gold':
-          this.notice({ heading: '보물상자', color: INK.gold, lines: [[`+${e.amount}G`, INK.gold, 20]], ms: 1400 });
+          this.notice({ heading: L('보물상자', 'Chest'), color: INK.gold, lines: [[`+${e.amount}G`, INK.gold, 20]], ms: 1400 });
           break;
         case 'curse':
           this.notice(curseNotice(e.curse, e.detail));
@@ -808,7 +809,7 @@ export class TowerScene extends Phaser.Scene {
           sfx.levelup();
           break;
         case 'rescue':
-          this.floatText(at.x, at.y, '긴급 지원!', INK.gold);
+          this.floatText(at.x, at.y, L('긴급 지원!', 'Rescue!'), INK.gold);
           sfx.rescue();
           break;
         case 'death':
@@ -822,7 +823,7 @@ export class TowerScene extends Phaser.Scene {
           if (this.run.isVisible(e.x, e.y)) this.floatText(e.x, e.y, `+${e.amount}`, '#8fdc7a');
           break;
         case 'immune':
-          this.floatText(e.x, e.y, '무효', INK.faint);
+          this.floatText(e.x, e.y, L('무효', 'Immune'), INK.faint);
           sfx.block();
           break;
         case 'stalker':
@@ -830,12 +831,12 @@ export class TowerScene extends Phaser.Scene {
           cam.flash(400, 90, 30, 140);
           sfx.curse();
           this.notice({
-            heading: `${e.nth}차 던전 붕괴!`,
+            heading: L(`${e.nth}차 던전 붕괴!`, `Dungeon collapse #${e.nth}!`),
             color: '#c98bff',
             lines: [
-              [e.nth > 1 ? '더 강한 심연의 추적자가 나타났다.' : '심연의 추적자가 나타났다.', INK.text],
-              ['쓰러뜨릴 수 없는 적이 당신을 찾아 나섰다.', INK.quiet],
-              ['계단을 찾아 이 층을 떠나라!', INK.red, 15],
+              [e.nth > 1 ? L('더 강한 심연의 추적자가 나타났다.', 'A stronger Abyss Stalker appeared.') : L('심연의 추적자가 나타났다.', 'An Abyss Stalker appeared.'), INK.text],
+              [L('쓰러뜨릴 수 없는 적이 당신을 찾아 나섰다.', 'An enemy that cannot be killed is hunting you.'), INK.quiet],
+              [L('계단을 찾아 이 층을 떠나라!', 'Find the stairs and leave this floor!'), INK.red, 15],
             ],
             ms: 3200,
           });
@@ -911,8 +912,8 @@ export class TowerScene extends Phaser.Scene {
     g.fillStyle(PALETTE.shadow, 0.85).fillRect(-150, -34, 300, 70);
     g.lineStyle(2, PALETTE.gold, 1).strokeRect(-150, -34, 300, 70);
     banner.add(g);
-    banner.add(title(this, 0, -24, `레벨 업!  Lv.${level}`, 23, INK.gold).setOrigin(0.5, 0));
-    banner.add(text(this, 0, 10, '체력·마나 모두 회복', 12, INK.gate, true).setOrigin(0.5, 0));
+    banner.add(title(this, 0, -24, L(`레벨 업!  Lv.${level}`, `Level up!  Lv.${level}`), 23, INK.gold).setOrigin(0.5, 0));
+    banner.add(text(this, 0, 10, L('체력·마나 모두 회복', 'HP and MP restored'), 12, INK.gate, true).setOrigin(0.5, 0));
     banner.setScale(0.6);
     this.tweens.add({ targets: banner, scale: 1, duration: 160, ease: 'Back.Out' });
     this.tweens.add({ targets: banner, y: cy - 30, alpha: 0, delay: 1200, duration: 500, onComplete: () => banner.destroy() });
@@ -988,7 +989,7 @@ export class TowerScene extends Phaser.Scene {
     const x = r ? r.x + r.w : GW - 10;
     const y = r ? r.y + r.h + 4 : 8;
     const left = run.stalkerIn;
-    const label = `${run.stalkers + 1}차 던전 붕괴까지 ${left}턴`;
+    const label = L(`${run.stalkers + 1}차 던전 붕괴까지 ${left}턴`, `Collapse #${run.stalkers + 1} in ${left} turns`);
     const color = run.stalkers > 0 || left <= 30 ? '#e0574f' : INK.quiet;
     const t = this.ui(text(this, x, y, label, 12, color).setOrigin(1, 0).setDepth(30));
     t.setBackgroundColor('#000000aa').setPadding(4, 2, 4, 2);
@@ -1021,21 +1022,21 @@ export class TowerScene extends Phaser.Scene {
     const x = (GW - w) / 2;
     const y = Math.max(4, (GH - hgt) / 2);
     push(panel(this, x, y, w, hgt));
-    push(title(this, GW / 2, y + 16, '가방', 20, INK.text).setOrigin(0.5, 0));
+    push(title(this, GW / 2, y + 16, L('가방', 'Bag'), 20, INK.text).setOrigin(0.5, 0));
     drawPaperDoll(this, x + 14, y + 52, w - 28, h).forEach((d) => push(d));
     let by = y + 52 + DOLL_H + 10;
-    push(text(this, GW / 2, by, '물약을 마시면 한 턴이 지나갑니다.', 12, INK.faint).setOrigin(0.5, 0));
+    push(text(this, GW / 2, by, L('물약을 마시면 한 턴이 지나갑니다.', 'Drinking a potion takes a turn.'), 12, INK.faint).setOrigin(0.5, 0));
     by += 22;
     const pad = PORTRAIT ? 14 : 40;
     CONSUMABLE_KINDS.forEach((kind) => {
-      const label = `${CONSUMABLES[kind].name} ${h.bag[kind]}개 · ${CONSUMABLES[kind].describe}` + (PORTRAIT ? '' : ` (${keys[kind]})`);
+      const label = L(`${CONSUMABLES[kind].name} ${h.bag[kind]}개 · ${CONSUMABLES[kind].describe}`, `${CONSUMABLES[kind].name} x${h.bag[kind]} · ${CONSUMABLES[kind].describe}`) + (PORTRAIT ? '' : ` (${keys[kind]})`);
       push(button(this, x + pad, by, w - pad * 2, btnH, label, () => {
         this.closeOverlay();
         this.perform({ type: 'use', item: kind });
       }, { enabled: h.bag[kind] > 0 }));
       by += btnH + 8;
     });
-    push(button(this, x + pad, by, w - pad * 2, btnH, '닫기', () => {
+    push(button(this, x + pad, by, w - pad * 2, btnH, L('닫기', 'Close'), () => {
       this.closeOverlay();
       this.redraw();
     }, { primary: true }));
@@ -1089,13 +1090,13 @@ export class TowerScene extends Phaser.Scene {
     this.clearPending = false;
     if (!run.gate) return;
     this.joyClear();
-    this.dialog('게이트 클리어!', [
-      `${gateName(run.gate)}의 주인을 쓰러뜨렸다. 이번 수입 ${run.runGold}G`,
-      `클리어 보상 ${gateClearGold(run.gate)}G${run.gate.rival ? '(가로채기 +30%)' : ''}와 장비 하나를 챙겨서 나간다.`,
-      '남아도 보상은 사라지지 않는다. 나중에 계단에서 나갈 수 있다.',
+    this.dialog(L('게이트 클리어!', 'Gate cleared!'), [
+      L(`${gateName(run.gate)}의 주인을 쓰러뜨렸다. 이번 수입 ${run.runGold}G`, `You beat the master of the ${gateName(run.gate)}. Income ${run.runGold}G`),
+      L(`클리어 보상 ${gateClearGold(run.gate)}G${run.gate.rival ? '(가로채기 +30%)' : ''}와 장비 하나를 챙겨서 나간다.`, `Leave with the ${gateClearGold(run.gate)}G reward${run.gate.rival ? ' (stolen +30%)' : ''} and one piece of gear.`),
+      L('남아도 보상은 사라지지 않는다. 나중에 계단에서 나갈 수 있다.', 'Staying keeps the reward. You can leave by the stairs later.'),
     ], [
-      ['보상 받고 귀환하기', () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
-      ['남아서 더 둘러보기', () => { this.closeOverlay(); run.stay(); this.redraw(); }],
+      [L('보상 받고 귀환하기', 'Take reward and return'), () => { this.closeOverlay(); run.clearGate(); this.finishReturn(true); }, true],
+      [L('남아서 더 둘러보기', 'Stay and explore'), () => { this.closeOverlay(); run.stay(); this.redraw(); }],
     ], INK.gold);
   }
 
@@ -1104,9 +1105,9 @@ export class TowerScene extends Phaser.Scene {
     const d = this.run.duel!;
     this.joyClear();
     const lines = d.won
-      ? [`${d.agency}의 ${d.rank}위 ${d.name}을(를) 꺾었다!`, '이제 순위표에서 그보다 위에 선다.', d.rank === 1 ? '협회 1위. 그래, 너였구나.' : '다음 랭커에게는 내일 도전할 수 있다.']
-      : [`${d.name}에게 졌다.`, '심판이 결투를 멈춰 목숨은 건졌다.', '더 강해져서 내일 다시 도전하자.'];
-    this.dialog(d.won ? '도전 성공!' : '도전 실패', lines, [['본부로 돌아가기', () => { this.closeOverlay(); this.finishReturn(); }, true]], d.won ? INK.gold : INK.red);
+      ? [L(`${d.agency}의 ${d.rank}위 ${d.name}을(를) 꺾었다!`, `You beat #${d.rank} ${d.name} of ${d.agency}!`), L('이제 순위표에서 그보다 위에 선다.', 'You now stand above them in the ranking.'), d.rank === 1 ? L('협회 1위. 그래, 너였구나.', 'Association #1. So it was you.') : L('다음 랭커에게는 내일 도전할 수 있다.', 'You can challenge the next ranker tomorrow.')]
+      : [L(`${d.name}에게 졌다.`, `Lost to ${d.name}.`), L('심판이 결투를 멈춰 목숨은 건졌다.', 'The referee stopped the duel; you survived.'), L('더 강해져서 내일 다시 도전하자.', 'Get stronger and try again tomorrow.')];
+    this.dialog(d.won ? L('도전 성공!', 'Challenge won!') : L('도전 실패', 'Challenge lost'), lines, [[L('본부로 돌아가기', 'Back to HQ'), () => { this.closeOverlay(); this.finishReturn(); }, true]], d.won ? INK.gold : INK.red);
   }
 
   private showStairs() {
@@ -1114,42 +1115,42 @@ export class TowerScene extends Phaser.Scene {
     const h = run.hunter;
     if (run.gateCleared) return this.showGateClear();
     const lines = [
-      `${run.placeName} 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.danger}G)`,
-      `체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`,
-      '죽으면 이번 수입은 모두 잃습니다.',
+      L(`${run.placeName} 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.danger}G)`, `${run.placeName} cleared! Income ${run.runGold}G (+${10 * run.danger}G bonus)`),
+      L(`체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`, `HP ${h.hp}/${h.maxHp} · MP ${h.mp}/${h.maxMp} · Pots ${this.bagLine()}`),
+      L('죽으면 이번 수입은 모두 잃습니다.', 'Die and you lose all of this run’s income.'),
     ];
     const buttons: Array<[string, () => void, boolean?]> = [];
-    if (run.gate) lines.push('지금 나가면 이 게이트는 닫힙니다.');
+    if (run.gate) lines.push(L('지금 나가면 이 게이트는 닫힙니다.', 'Leaving now closes this gate.'));
     if (!run.isTopFloor) {
       const next = run.floor + 1;
-      const label = run.gate ? `더 들어가기 (${next}층)`
-        : next > TOP_FLOOR ? `${next === TOP_FLOOR + 1 ? '심연으로' : '더 올라가기'} (심연 ${next - TOP_FLOOR}층)`
-        : `더 올라가기 (${next}층)`;
+      const label = run.gate ? L(`더 들어가기 (${next}층)`, `Go deeper (${next}F)`)
+        : next > TOP_FLOOR ? L(`${next === TOP_FLOOR + 1 ? '심연으로' : '더 올라가기'} (심연 ${next - TOP_FLOOR}층)`, `${next === TOP_FLOOR + 1 ? 'Into the abyss' : 'Climb on'} (Abyss ${next - TOP_FLOOR}F)`)
+        : L(`더 올라가기 (${next}층)`, `Climb on (${next}F)`);
       buttons.push([label, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
     } else {
-      lines.push('지금 갈 수 있는 탑의 꼭대기입니다.');
+      lines.push(L('지금 갈 수 있는 탑의 꼭대기입니다.', 'This is the top of the tower for now.'));
     }
-    buttons.push(['귀환하기', () => { this.closeOverlay(); run.retreat(); this.finishReturn(); }]);
-    buttons.push(['이 층을 더 둘러보기', () => { this.closeOverlay(); run.stay(); this.redraw(); }]);
-    this.dialog('계단에 도착했다', lines, buttons);
+    buttons.push([L('귀환하기', 'Return'), () => { this.closeOverlay(); run.retreat(); this.finishReturn(); }]);
+    buttons.push([L('이 층을 더 둘러보기', 'Explore this floor'), () => { this.closeOverlay(); run.stay(); this.redraw(); }]);
+    this.dialog(L('계단에 도착했다', 'You reached the stairs'), lines, buttons);
   }
 
   private showChoice() {
     const run = this.run;
     const c = run.pendingChoice!;
-    const tag = c.hunter.origin === 'rival' ? `${run.hunter.name}의 라이벌` : '옛 동료';
+    const tag = c.hunter.origin === 'rival' ? L(`${run.hunter.name}의 라이벌`, `${run.hunter.name}'s rival`) : L('옛 동료', 'Former ally');
     const pick = (i: number) => () => {
       this.closeOverlay();
       run.resolveChoice(i);
       this.redraw();
     };
     this.dialog(
-      `[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`,
-      [`${state.rival.name} 소속 · Lv.${c.hunter.level}`, c.hunter.origin === 'rival' ? '보상을 받고 보내주면 훨씬 강해져서 다시 나타난다 (능력치 +25%).' : '보상을 받고 보내주면 더 강해져서 다시 나타난다 (능력치 +15%).', '완전히 쓰러뜨리면 다시는 만나지 않는다.'],
+      L(`[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`, `[${tag}] You beat ${c.hunter.name}`),
+      [L(`${state.rival.name} 소속 · Lv.${c.hunter.level}`, `${state.rival.name} · Lv.${c.hunter.level}`), c.hunter.origin === 'rival' ? L('보상을 받고 보내주면 훨씬 강해져서 다시 나타난다 (능력치 +25%).', 'Take a reward and let them go: they come back much stronger (stats +25%).') : L('보상을 받고 보내주면 더 강해져서 다시 나타난다 (능력치 +15%).', 'Take a reward and let them go: they come back stronger (stats +15%).'), L('완전히 쓰러뜨리면 다시는 만나지 않는다.', 'Finish them and you will never meet again.')],
       [
         [`${REWARDS[c.rewards[0]].label}: ${REWARDS[c.rewards[0]].describe(c.hunter.level)}`, pick(0), true],
         [`${REWARDS[c.rewards[1]].label}: ${REWARDS[c.rewards[1]].describe(c.hunter.level)}`, pick(1), true],
-        [`완전한 사망: 경험치 +${c.finishExp}`, pick(2)],
+        [L(`완전한 사망: 경험치 +${c.finishExp}`, `Finish them: EXP +${c.finishExp}`), pick(2)],
       ],
       '#d79bff',
     );
@@ -1157,9 +1158,9 @@ export class TowerScene extends Phaser.Scene {
 
   private newsLines(n: AfterRunNews): string[] {
     const msgs: string[] = [];
-    for (const name of n.finished) msgs.push(`${name}은(는) 명예의 전당에 이름만 남겼다.`);
-    for (const name of n.grewStronger) msgs.push(`${name}은(는) ${state.rival.name}에서 훨씬 강해졌다.`);
-    if (n.rivalCreated) msgs.push(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`);
+    for (const name of n.finished) msgs.push(L(`${name}은(는) 명예의 전당에 이름만 남겼다.`, `${name} lives on only in the Hall of Fame.`));
+    for (const name of n.grewStronger) msgs.push(L(`${name}은(는) ${state.rival.name}에서 훨씬 강해졌다.`, `${name} grew much stronger at ${state.rival.name}.`));
+    if (n.rivalCreated) msgs.push(L(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`, `Hearing of the S-Rank promotion, ${state.rival.name} fielded a rival: ${n.rivalCreated.name}!`));
     msgs.push(...n.gateNews);
     return msgs;
   }
@@ -1168,18 +1169,18 @@ export class TowerScene extends Phaser.Scene {
     const run = this.run;
     const duelWon = run.duel ? settleDuel(state, run.duel) : false;
     const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones);
-    const stolen = cleared && run.gate?.rival ? ` ${run.gate.rival.agency}보다 먼저 해냈다!` : '';
+    const stolen = cleared && run.gate?.rival ? L(` ${run.gate.rival.agency}보다 먼저 해냈다!`, ` Beat ${run.gate.rival.agency} to it!`) : '';
     const where = run.duel
-      ? (duelWon ? `${run.duel.rank}위 ${run.duel.name}에게 도전해 이겼다! 지금 ${gradeIn(state, run.hunter)}급.` : `${run.duel.rank}위 ${run.duel.name}에게 도전했지만 졌다.`)
-      : run.gate ? (cleared ? `${gateName(run.gate)} 클리어!${stolen}` : `${run.placeName}에서 귀환.`) : `${run.placeName}에서 귀환.`;
+      ? (duelWon ? L(`${run.duel.rank}위 ${run.duel.name}에게 도전해 이겼다! 지금 ${gradeIn(state, run.hunter)}급.`, `Challenged #${run.duel.rank} ${run.duel.name} and won! Now ${gradeIn(state, run.hunter)}-Rank.`) : L(`${run.duel.rank}위 ${run.duel.name}에게 도전했지만 졌다.`, `Challenged #${run.duel.rank} ${run.duel.name} and lost.`))
+      : run.gate ? (cleared ? L(`${gateName(run.gate)} 클리어!${stolen}`, `${gateName(run.gate)} cleared!${stolen}`) : L(`${run.placeName}에서 귀환.`, `Returned from ${run.placeName}.`)) : L(`${run.placeName}에서 귀환.`, `Returned from ${run.placeName}.`);
     const msgs = [
-      `${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`,
+      L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
     if (r.promotedTo) {
-      msgs.push(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`);
+      msgs.push(L(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`, `Re-graded: ${r.promotedFrom} → ${r.promotedTo}! Re-signing bonus ${r.signingSupport}G.`));
     }
-    if (run.stones > 0) msgs.push(`마력석 ${run.stones}개를 에이전시 창고에 넣었다. (보유 ${state.agent.stones}개)`);
-    msgs.push('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.');
+    if (run.stones > 0) msgs.push(L(`마력석 ${run.stones}개를 에이전시 창고에 넣었다. (보유 ${state.agent.stones}개)`, `Stored ${run.stones} mana stones at the agency. (Total ${state.agent.stones})`));
+    msgs.push(L('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.', 'Left the other potions behind; the bag holds 1 HP potion.'));
     msgs.push(...this.newsLines(r));
     state.run = undefined;
     persist();
@@ -1191,28 +1192,28 @@ export class TowerScene extends Phaser.Scene {
     const h = run.hunter;
     const score = hallOfFameScore(h);
     const grade = gradeIn(state, h);
-    const killer = run.killer ?? '알 수 없는 적';
+    const killer = run.killer ?? L('알 수 없는 적', 'an unknown enemy');
     const d = settleDeath(state, rng, killer, run.encounters);
     state.run = undefined;
     persist();
     const legend = h.everSSS;
     const fateLine = d.scouted
-      ? `지나가던 ${state.rival.name}이(가) ${h.name}을(를) 구해 데려갔다...`
-      : `${h.name}의 이름은 기록으로만 남는다.`;
+      ? L(`지나가던 ${state.rival.name}이(가) ${h.name}을(를) 구해 데려갔다...`, `${state.rival.name}, passing by, saved ${h.name} and took them away...`)
+      : L(`${h.name}의 이름은 기록으로만 남는다.`, `${h.name} lives on only in the records.`);
     const msgs = [
-      d.scouted ? `${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.` : `${h.name}의 기록이 남았다.`,
-      ...(d.newGear?.length ? [`${state.rival.name}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`] : []),
+      d.scouted ? L(`${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.`, `${h.name} was scouted by ${state.rival.name}. You may meet as enemies one day.`) : L(`${h.name}의 기록이 남았다.`, `${h.name}'s record remains.`),
+      ...(d.newGear?.length ? [L(`${state.rival.name}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`, `${state.rival.name} geared up ${h.name}: ${d.newGear.map((g) => g.name).join(', ')}.`)] : []),
       ...this.newsLines(d),
     ];
     this.dialog(
-      legend ? '그래, 너였구나.' : '넌 주인공이 아니었네...',
+      legend ? L('그래, 너였구나.', 'So it was you.') : L('넌 주인공이 아니었네...', "You weren't the protagonist..."),
       [
-        `${h.name} · ${grade}급 · Lv.${h.level}`,
-        `${run.placeName}에서 ${killer}에게 쓰러졌다.`,
-        `처치 ${h.kills}마리 · 최고 ${h.bestFloor}층 · 기록 점수 ${score}`,
+        L(`${h.name} · ${grade}급 · Lv.${h.level}`, `${h.name} · ${grade}-Rank · Lv.${h.level}`),
+        L(`${run.placeName}에서 ${killer}에게 쓰러졌다.`, `Fell to ${killer} at ${run.placeName}.`),
+        L(`처치 ${h.kills}마리 · 최고 ${h.bestFloor}층 · 기록 점수 ${score}`, `Kills ${h.kills} · Best ${h.bestFloor}F · Score ${score}`),
         fateLine,
       ],
-      [['본부로 돌아가기', () => this.scene.start('HQ', { messages: msgs }), true]],
+      [[L('본부로 돌아가기', 'Back to HQ'), () => this.scene.start('HQ', { messages: msgs }), true]],
       legend ? INK.gold : INK.red,
     );
   }
@@ -1249,52 +1250,52 @@ function drawItemIcon(kind: ConsumableKind) {
 
 function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
   const color = tierColor(gear.tier);
-  const slot = `${GEAR_SLOT_NAMES[gear.slot]} · ${gear.tier}단계`;
+  const slot = L(`${GEAR_SLOT_NAMES[gear.slot]} · ${gear.tier}단계`, `${GEAR_SLOT_NAMES[gear.slot]} · Tier ${gear.tier}`);
   if (!equipped) {
     return {
-      heading: '장비 발견',
+      heading: L('장비 발견', 'Gear found'),
       color: INK.quiet,
       icon: drawGearIcon(gear),
       lines: [
         [slot, INK.faint],
         [gearLabel(gear), color, 15],
         [describeGear(gear), INK.text],
-        [old ? `지금 쓰는 ${gearLabel(old)}이(가) 더 좋아서 두고 왔다.` : '쓸 일이 없어 두고 왔다.', INK.faint],
+        [old ? L(`지금 쓰는 ${gearLabel(old)}이(가) 더 좋아서 두고 왔다.`, `Your ${gearLabel(old)} is better, so you left it.`) : L('쓸 일이 없어 두고 왔다.', 'No use for it, so you left it.'), INK.faint],
       ],
       ms: 1800,
     };
   }
   const lines: Notice['lines'] = [[slot, INK.faint], [gearLabel(gear), color, 15], [describeGear(gear), INK.text]];
   const diff = gearDiff(gear, old);
-  if (diff) lines.push([`능력치 변화  ${diff}`, INK.gate]);
-  if (old) lines.push([`이전 장비 ${gearLabel(old)}은(는) 버렸다.`, INK.faint]);
-  return { heading: old ? '장비 업그레이드!' : '새 장비 장착!', color: INK.gold, icon: drawGearIcon(gear), lines };
+  if (diff) lines.push([L(`능력치 변화  ${diff}`, `Stat change  ${diff}`), INK.gate]);
+  if (old) lines.push([L(`이전 장비 ${gearLabel(old)}은(는) 버렸다.`, `Discarded the old ${gearLabel(old)}.`), INK.faint]);
+  return { heading: old ? L('장비 업그레이드!', 'Gear upgrade!') : L('새 장비 장착!', 'New gear equipped!'), color: INK.gold, icon: drawGearIcon(gear), lines };
 }
 
 function lootNotice(item: ConsumableKind, got: boolean, count: number): Notice {
   const c = CONSUMABLES[item];
   return {
-    heading: got ? '아이템 획득!' : '가방이 가득 찼다',
+    heading: got ? L('아이템 획득!', 'Item found!') : L('가방이 가득 찼다', 'Bag is full'),
     color: got ? INK.gold : INK.quiet,
     icon: drawItemIcon(item),
     lines: [
       [c.name, INK.text, 15],
       [c.describe, INK.gate],
-      [got ? `가방 ${count}/${BAG_MAX}` : `가방 ${count}/${BAG_MAX} · 두고 왔다`, got ? INK.quiet : INK.red],
+      [got ? L(`가방 ${count}/${BAG_MAX}`, `Bag ${count}/${BAG_MAX}`) : L(`가방 ${count}/${BAG_MAX} · 두고 왔다`, `Bag ${count}/${BAG_MAX} · left behind`), got ? INK.quiet : INK.red],
     ],
   };
 }
 
 const CURSE_NAMES: Record<CurseKind, string> = {
-  drain: '흡혈의 저주',
-  mana: '마력 소멸의 저주',
-  greed: '탐욕의 저주',
-  ambush: '매복의 저주',
+  drain: L('흡혈의 저주', 'Curse of Draining'),
+  mana: L('마력 소멸의 저주', 'Curse of Mana Loss'),
+  greed: L('탐욕의 저주', 'Curse of Greed'),
+  ambush: L('매복의 저주', 'Curse of Ambush'),
 };
 
 function curseNotice(curse: CurseKind, detail: string): Notice {
   return {
-    heading: `저주! ${CURSE_NAMES[curse]}`,
+    heading: L(`저주! ${CURSE_NAMES[curse]}`, `Cursed! ${CURSE_NAMES[curse]}`),
     color: INK.red,
     lines: [
       [detail, INK.red, 15],
