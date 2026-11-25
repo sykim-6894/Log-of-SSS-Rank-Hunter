@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { abyssRecord, activeHunter, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { abyssRecord, activeHunter, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
@@ -28,6 +28,8 @@ export interface HQData {
   armRetire?: boolean;
   /** Show the legacy screen (perks bought with points from retired hunters). */
   legacy?: boolean;
+  /** Show the survival arena's entrance. */
+  arena?: boolean;
   /** Show the start floor choices instead of the depart button. */
   pickStart?: boolean;
   /** Hiring screen: the slot being filled, and whether it re-signs an untouched hunter in another class. */
@@ -72,6 +74,7 @@ export class HQScene extends Phaser.Scene {
   private releaseArmed = false;
   private retireArmed = false;
   private showingLegacy = false;
+  private showingArena = false;
   private pickingStart = false;
   private hiring?: HQData['hire'];
   private showingGates = false;
@@ -90,6 +93,7 @@ export class HQScene extends Phaser.Scene {
     this.releaseArmed = !!data.armRelease;
     this.retireArmed = !!data.armRetire;
     this.showingLegacy = !!data.legacy;
+    this.showingArena = !!data.arena;
     this.pickingStart = !!data.pickStart;
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
@@ -134,6 +138,7 @@ export class HQScene extends Phaser.Scene {
     if (this.showingGates) return this.drawGates();
     if (this.settings) return this.drawSettings();
     if (this.showingLegacy) return this.drawLegacy();
+    if (this.showingArena) return this.drawArena();
     if (this.gacha) return this.drawGacha(this.gacha.result);
     if (this.enhancing) return this.drawEnhance(this.enhancing.result);
     if (PORTRAIT) return this.createPortrait();
@@ -335,13 +340,21 @@ export class HQScene extends Phaser.Scene {
     };
     const floors = h ? startFloors(state, h) : [1];
     if (!this.pickingStart || floors.length < 2) {
-      const gw = Math.round(w * 0.36);
-      button(this, x, y, w - gw - 8, hgt, L('▶  성장의 탑', '▶  Tower of Growth'), () => {
+      const gw = Math.round(w * 0.25);
+      const tw = w - 2 * gw - 16;
+      button(this, x, y, tw, hgt, L('▶  성장의 탑', '▶  Tower of Growth'), () => {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
       }, { primary: true, size, enabled: !!h });
+      const arenaOk = !!h && canEnterArena(state, h);
+      button(this, x + tw + 8, y, gw, hgt, L('아레나', 'Arena'), () =>
+        this.scene.restart({ messages: this.messages, arena: true }), { size: Math.min(size, 18), enabled: !!h, primary: false });
+      if (arenaOk) {
+        const dot = this.add.graphics();
+        dot.fillStyle(0xe0574f, 1).fillCircle(x + tw + 8 + gw - 10, y + 10, 5);
+      }
       const rift = state.rift && !state.rift.entered;
-      button(this, x + w - gw, y, gw, hgt, rift ? L(`게이트 ${state.gates?.length ?? 0} · 균열!`, `Gates ${state.gates?.length ?? 0} · Rift!`) : L(`게이트 ${state.gates?.length ?? 0}`, `Gates ${state.gates?.length ?? 0}`), () =>
+      button(this, x + w - gw, y, gw, hgt, rift ? L(`게이트 ${state.gates?.length ?? 0}·균열`, `Gates ${state.gates?.length ?? 0}·Rift`) : L(`게이트 ${state.gates?.length ?? 0}`, `Gates ${state.gates?.length ?? 0}`), () =>
         this.scene.restart({ messages: this.messages, gates: true }), { size: Math.min(size, 18), enabled: !!h });
       return;
     }
@@ -427,6 +440,45 @@ export class HQScene extends Phaser.Scene {
     button(this, x, y, w, h, pts > 0 ? L(`전승 ${pts}`, `Legacy ${pts}`) : L('전승', 'Legacy'), () => this.scene.restart({ legacy: true, messages: this.messages }), { primary: pts > 0, size: 12 });
   }
 
+  /** The survival arena's entrance: the rules, the prizes, the records, and the way in. */
+  private drawArena() {
+    const w = Math.min(GW - 28, 600);
+    const x = (GW - w) / 2;
+    const h = activeHunter(state);
+    title(this, GW / 2, 16, L('생존 아레나', 'Survival Arena'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 50, L('끝없이 몰려오는 웨이브를 버텨라. 웨이브마다 적이 더 강해진다.', 'Hold out against endless waves. Each one is stronger.'), 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
+    const rules = [
+      L('· 하루에 한 번, 헌터마다 도전할 수 있다.', '· Once a day per hunter.'),
+      L('· 웨이브를 넘기면 골드를 받고 체력·마나가 20% 회복된다.', '· Each wave cleared pays gold and restores 20% HP and MP.'),
+      L('· 웨이브 사이에 귀환하면 번 것을 모두 가져간다.', '· Go home between waves and keep everything.'),
+      L('· 쓰러져도 죽지 않는다. 진행 중인 웨이브 수입만 잃는다.', '· Falling will not kill you; you lose only the current wave’s income.'),
+      L('· 5웨이브마다 챔피언이 나오고 마력석을 준다.', '· Every 5th wave brings a champion and mana stones.'),
+      L('· 10웨이브마다 기념 장비를 준다 (6단계부터).', '· Every 10th wave gives prize gear (tier 6 and up).'),
+    ];
+    const top = PORTRAIT ? 96 : 84;
+    panel(this, x, top, w, 24 + rules.length * 24, L('규칙', 'Rules'));
+    rules.forEach((r, i) => fit(text(this, x + 16, top + 20 + i * 24, r, 13, INK.text), w - 32));
+    let y = top + 24 + rules.length * 24 + 24;
+    const rec = arenaRecord(state);
+    text(this, x + 6, y, rec ? L(`에이전시 최고 기록: ${rec.wave}웨이브 · ${rec.name}`, `Agency record: ${rec.wave} waves · ${rec.name}`) : L('에이전시 최고 기록: 아직 없음', 'Agency record: none yet'), 13, INK.gate);
+    y += 24;
+    if (h) text(this, x + 6, y, L(`${h.name}의 최고 기록: ${h.arenaBest ?? 0}웨이브`, `${h.name}'s best: ${h.arenaBest ?? 0} waves`), 13, INK.gold);
+    y += 24;
+    const ok = !!h && canEnterArena(state, h);
+    const why = !h ? '' : !arenaUnlocked(h) ? L(`성장의 탑 ${ARENA_UNLOCK_FLOOR}층을 돌파하면 열린다.`, `Opens once you clear Tower ${ARENA_UNLOCK_FLOOR}F.`)
+      : !ok ? L('오늘은 이미 도전했다. 귀환하면 하루가 지난다.', 'Already in today. A day passes with each return.') : '';
+    if (why) text(this, GW / 2, GH - 150, why, 13, INK.red).setOrigin(0.5, 0);
+    if (h) text(this, GW / 2, GH - 124, L(`보낼 헌터: ${h.name} · Lv.${h.level} · 체력 ${h.hp}/${h.maxHp}`, `Sending: ${h.name} · Lv.${h.level} · HP ${h.hp}/${h.maxHp}`), 12, INK.text).setOrigin(0.5, 0);
+    button(this, x, GH - 100, w, 40, L('▶  아레나 입장', '▶  Enter the arena'), () => {
+      const survival = startSurvival(state);
+      if (!survival) return;
+      persist();
+      this.scene.start('Tower', { survival });
+    }, { primary: ok, enabled: ok });
+    button(this, x, GH - 52, w, 40, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+  }
+
   /** Legacy: perks bought with points from retired hunters, the legends, the abyss record. */
   private drawLegacy() {
     const w = Math.min(GW - 28, 600);
@@ -459,13 +511,15 @@ export class HQScene extends Phaser.Scene {
     let y = top + 20 + PERK_IDS.length * rowH + 22;
     const legends = state.hallOfFame.filter((e) => e.retired);
     const rec = abyssRecord(state);
+    const arena = arenaRecord(state);
     const lines = [
+      arena ? L(`아레나 최고 기록: ${arena.wave}웨이브 · ${arena.name}`, `Arena record: ${arena.wave} waves · ${arena.name}`) : L('아레나 최고 기록: 아직 없음', 'Arena record: none yet'),
       rec ? L(`심연 최고 기록: 심연 ${rec.depth}층 · ${rec.name}`, `Abyss record: Abyss ${rec.depth}F · ${rec.name}`) : L('심연 최고 기록: 아직 없음 (21층부터 심연)', 'Abyss record: none yet (the abyss starts at 21F)'),
       legends.length ? L(`은퇴한 헌터 ${legends.length}명`, `${legends.length} retired`) : L('은퇴한 헌터가 아직 없다.', 'No one has retired yet.'),
       ...legends.slice(-4).reverse().map((e) => `${e.legend ? '★ ' : '· '}${e.name} · ${e.grade}${L('급', '-Rank')} · Lv.${e.level}${e.abyssBest ? L(` · 심연 ${e.abyssBest}층`, ` · Abyss ${e.abyssBest}F`) : ''}`),
     ];
     lines.forEach((line, i) => {
-      text(this, x + 6, y, line, 12, i === 0 ? INK.gate : line.startsWith('★') ? INK.gold : INK.quiet);
+      text(this, x + 6, y, line, 12, i < 2 ? INK.gate : line.startsWith('★') ? INK.gold : INK.quiet);
       y += 20;
     });
     if (this.messages[0]?.includes(L('단계!', 'level '))) text(this, GW / 2, Math.min(GH - 92, y + 4), this.messages[0], 12, INK.gold).setOrigin(0.5, 0);

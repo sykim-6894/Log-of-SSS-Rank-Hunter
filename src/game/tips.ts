@@ -70,6 +70,9 @@ export const TIPS = {
   duel: (): GuidePage[] => [
     { text: L('랭커 도전이에요! 이기면 그 순위를 빼앗고, 져도 목숨은 잃지 않아요. 하루에 한 번 도전할 수 있어요.', "A ranker challenge! Win and you take their place; lose and you still live. One challenge a day.") },
   ],
+  arena: (): GuidePage[] => [
+    { text: L('생존 아레나예요! 적이 웨이브로 몰려오고, 넘길 때마다 더 강해져요. 웨이브 사이에 나갈 수 있고, 쓰러져도 목숨은 잃지 않아요. 대신 진행 중인 웨이브의 수입은 잃어요.', 'The Survival Arena! Foes come in waves, stronger each time. You can leave between waves, and falling will not kill you, but you lose what the current wave earned.') },
+  ],
   gates: (): GuidePage[] => [
     { text: L('게이트는 이세계로 통하는 짧은 던전이에요. 한 번 들어가면 닫히고, 경쟁사도 노려요. 클리어하면 큰 보상과 장비를 받아요.', 'Gates are short dungeons into the other world. They close once entered, and the rival wants them too. Clear one for a big reward and gear.') },
   ],
