@@ -1,3 +1,4 @@
+import { L } from './lang';
 export interface MonsterKind {
   id: string;
   name: string;
@@ -29,9 +30,9 @@ export interface MonsterKind {
 /** Elements of magic skills. Monsters may be weak to one and resist another. */
 export type Element = 'fire' | 'ice' | 'lightning';
 export const ELEMENTS: Record<Element, { name: string; color: string }> = {
-  fire: { name: '화염', color: '#ff8a4a' },
-  ice: { name: '냉기', color: '#8fd3ff' },
-  lightning: { name: '번개', color: '#ffe066' },
+  fire: { name: L('화염', 'Fire'), color: '#ff8a4a' },
+  ice: { name: L('냉기', 'Ice'), color: '#8fd3ff' },
+  lightning: { name: L('번개', 'Lightning'), color: '#ffe066' },
 };
 export const WEAK_MULT = 1.5;
 export const RESIST_MULT = 0.5;
@@ -47,22 +48,22 @@ export function elementFactor(kind: MonsterKind, el?: Element): number {
 /** "약점 화염 · 저항 냉기", or empty. */
 export function elementNote(kind: MonsterKind): string {
   const parts: string[] = [];
-  if (kind.weak) parts.push(`약점 ${ELEMENTS[kind.weak].name}`);
-  if (kind.resist) parts.push(`저항 ${ELEMENTS[kind.resist].name}`);
+  if (kind.weak) parts.push(L(`약점 ${ELEMENTS[kind.weak].name}`, `Weak to ${ELEMENTS[kind.weak].name}`));
+  if (kind.resist) parts.push(L(`저항 ${ELEMENTS[kind.resist].name}`, `Resists ${ELEMENTS[kind.resist].name}`));
   return parts.join(' · ');
 }
 
 export type TraitId = 'pack' | 'kite' | 'swift' | 'rage' | 'regen' | 'stealth' | 'healer' | 'thorns';
 
 export const TRAITS: Record<TraitId, { name: string; text: string }> = {
-  pack: { name: '무리', text: '2~3마리가 몰려다니고, 하나가 깨면 주변 동료도 깬다' },
-  kite: { name: '거리두기', text: '붙으면 뒤로 물러나 다시 활을 쏜다' },
-  swift: { name: '질주', text: '한 턴에 두 칸씩 달려든다' },
-  rage: { name: '광폭', text: '체력이 절반 아래면 공격력 1.5배' },
-  regen: { name: '재생', text: '매 턴 체력을 조금씩 회복한다' },
-  stealth: { name: '그림자', text: '2칸 안으로 붙어야 모습이 보인다' },
-  healer: { name: '치유', text: '다친 동료를 회복시킨다' },
-  thorns: { name: '가시', text: '근접 공격하면 피해 일부가 되돌아온다' },
+  pack: { name: L('무리', 'Pack'), text: L('2~3마리가 몰려다니고, 하나가 깨면 주변 동료도 깬다', 'Roams in 2-3; when one wakes, the rest wake too') },
+  kite: { name: L('거리두기', 'Kiting'), text: L('붙으면 뒤로 물러나 다시 활을 쏜다', 'Backs off when you close in, then shoots again') },
+  swift: { name: L('질주', 'Swift'), text: L('한 턴에 두 칸씩 달려든다', 'Rushes 2 tiles a turn') },
+  rage: { name: L('광폭', 'Rage'), text: L('체력이 절반 아래면 공격력 1.5배', 'Attack x1.5 below half health') },
+  regen: { name: L('재생', 'Regen'), text: L('매 턴 체력을 조금씩 회복한다', 'Heals a little every turn') },
+  stealth: { name: L('그림자', 'Shadow'), text: L('2칸 안으로 붙어야 모습이 보인다', 'Only visible within 2 tiles') },
+  healer: { name: L('치유', 'Healer'), text: L('다친 동료를 회복시킨다', 'Heals wounded allies') },
+  thorns: { name: L('가시', 'Thorns'), text: L('근접 공격하면 피해 일부가 되돌아온다', 'Melee hits reflect some damage back') },
 };
 
 /** Settings for the traits, shared by the rules and the tests. */
@@ -80,18 +81,18 @@ export const TRAIT_RULES = {
 };
 
 export const MONSTERS: Record<string, MonsterKind> = {
-  goblin: { id: 'goblin', name: '게이트 고블린', glyph: 'g', hp: 9, atk: 5, def: 0, exp: 5, gold: 4, score: 5, trait: 'pack', weak: 'fire' },
-  archer: { id: 'archer', name: '고블린 궁수', glyph: 'a', hp: 8, atk: 5, def: 0, exp: 8, gold: 5, score: 7, range: 4, trait: 'kite', weak: 'lightning' },
-  wolf: { id: 'wolf', name: '이계 늑대', glyph: 'w', hp: 13, atk: 7, def: 1, exp: 8, gold: 5, score: 8, trait: 'swift', weak: 'fire', resist: 'ice' },
-  orc: { id: 'orc', name: '오크 전사', glyph: 'o', hp: 23, atk: 8, def: 2, exp: 14, gold: 9, score: 14, trait: 'rage', weak: 'ice' },
-  lizard: { id: 'lizard', name: '리자드맨', glyph: 'L', hp: 28, atk: 10, def: 3, exp: 18, gold: 12, score: 20, trait: 'regen', weak: 'ice', resist: 'lightning' },
-  knight: { id: 'knight', name: '그림자 기사', glyph: 'k', hp: 30, atk: 11, def: 4, exp: 24, gold: 16, score: 28, trait: 'stealth', weak: 'lightning', resist: 'ice' },
-  shaman: { id: 'shaman', name: '이계 주술사', glyph: 's', hp: 22, atk: 10, def: 2, exp: 26, gold: 18, score: 30, range: 5, trait: 'healer', weak: 'fire', resist: 'lightning' },
-  beast: { id: 'beast', name: '이계 마수', glyph: 'B', hp: 38, atk: 13, def: 5, exp: 30, gold: 20, score: 36, trait: 'thorns', weak: 'ice', resist: 'fire' },
-  warden: { id: 'warden', name: '게이트 수문장', glyph: 'W', hp: 80, atk: 12, def: 4, exp: 70, gold: 50, score: 100, boss: true, weak: 'lightning' },
-  overlord: { id: 'overlord', name: '이계의 군주', glyph: 'K', hp: 150, atk: 17, def: 6, exp: 180, gold: 120, score: 300, boss: true, weak: 'ice', resist: 'fire' },
-  dragon: { id: 'dragon', name: '균열의 용', glyph: 'D', hp: 170, atk: 19, def: 7, exp: 320, gold: 220, score: 600, boss: true, weak: 'ice', resist: 'fire' },
-  master: { id: 'master', name: '탑의 주인', glyph: 'M', hp: 200, atk: 21, def: 8, exp: 500, gold: 400, score: 1000, boss: true, resist: 'lightning' },
+  goblin: { id: 'goblin', name: L('게이트 고블린', 'Gate Goblin'), glyph: 'g', hp: 9, atk: 5, def: 0, exp: 5, gold: 4, score: 5, trait: 'pack', weak: 'fire' },
+  archer: { id: 'archer', name: L('고블린 궁수', 'Goblin Archer'), glyph: 'a', hp: 8, atk: 5, def: 0, exp: 8, gold: 5, score: 7, range: 4, trait: 'kite', weak: 'lightning' },
+  wolf: { id: 'wolf', name: L('이계 늑대', 'Otherworld Wolf'), glyph: 'w', hp: 13, atk: 7, def: 1, exp: 8, gold: 5, score: 8, trait: 'swift', weak: 'fire', resist: 'ice' },
+  orc: { id: 'orc', name: L('오크 전사', 'Orc Warrior'), glyph: 'o', hp: 23, atk: 8, def: 2, exp: 14, gold: 9, score: 14, trait: 'rage', weak: 'ice' },
+  lizard: { id: 'lizard', name: L('리자드맨', 'Lizardman'), glyph: 'L', hp: 28, atk: 10, def: 3, exp: 18, gold: 12, score: 20, trait: 'regen', weak: 'ice', resist: 'lightning' },
+  knight: { id: 'knight', name: L('그림자 기사', 'Shadow Knight'), glyph: 'k', hp: 30, atk: 11, def: 4, exp: 24, gold: 16, score: 28, trait: 'stealth', weak: 'lightning', resist: 'ice' },
+  shaman: { id: 'shaman', name: L('이계 주술사', 'Otherworld Shaman'), glyph: 's', hp: 22, atk: 10, def: 2, exp: 26, gold: 18, score: 30, range: 5, trait: 'healer', weak: 'fire', resist: 'lightning' },
+  beast: { id: 'beast', name: L('이계 마수', 'Otherworld Beast'), glyph: 'B', hp: 38, atk: 13, def: 5, exp: 30, gold: 20, score: 36, trait: 'thorns', weak: 'ice', resist: 'fire' },
+  warden: { id: 'warden', name: L('게이트 수문장', 'Gate Warden'), glyph: 'W', hp: 80, atk: 12, def: 4, exp: 70, gold: 50, score: 100, boss: true, weak: 'lightning' },
+  overlord: { id: 'overlord', name: L('이계의 군주', 'Otherworld Overlord'), glyph: 'K', hp: 150, atk: 17, def: 6, exp: 180, gold: 120, score: 300, boss: true, weak: 'ice', resist: 'fire' },
+  dragon: { id: 'dragon', name: L('균열의 용', 'Rift Dragon'), glyph: 'D', hp: 170, atk: 19, def: 7, exp: 320, gold: 220, score: 600, boss: true, weak: 'ice', resist: 'fire' },
+  master: { id: 'master', name: L('탑의 주인', 'Master of the Tower'), glyph: 'M', hp: 200, atk: 21, def: 8, exp: 500, gold: 400, score: 1000, boss: true, resist: 'lightning' },
 };
 
 /** Highest floor for now. A boss guards every fifth floor. */
@@ -128,7 +129,7 @@ export function eliteOf(kind: MonsterKind): MonsterKind {
   return {
     ...kind,
     id: `elite-${kind.id}`,
-    name: `[중간보스] 정예 ${kind.name}`,
+    name: L(`[중간보스] 정예 ${kind.name}`, `[Mid-boss] Elite ${kind.name}`),
     glyph: kind.glyph.toUpperCase(),
     hp: Math.round(kind.hp * 2.6),
     atk: Math.round(kind.atk * 1.35),
@@ -178,7 +179,7 @@ export const RESPAWN_EVERY = 30;
 export function stalkerKind(nth: number): MonsterKind {
   return {
     id: 'stalker',
-    name: nth > 1 ? `심연의 추적자 ${nth}` : '심연의 추적자',
+    name: nth > 1 ? L(`심연의 추적자 ${nth}`, `Abyss Stalker ${nth}`) : L('심연의 추적자', 'Abyss Stalker'),
     glyph: '?',
     hp: 999,
     atk: Math.round(22 * (1 + 0.25 * (nth - 1))),

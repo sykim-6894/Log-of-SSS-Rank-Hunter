@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import type { Hunter } from '../core/hunter';
 import { describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, GearSlot, gearStats, TOP_TIER } from '../core/items';
 import { INK, PALETTE, text } from './ui';
+import { L } from '../core/lang';
 
 /** Height of the paper doll drawn by drawPaperDoll. */
 export const DOLL_H = 236;
@@ -77,11 +78,11 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
     objs.push(text(scene, bx + 8, by + 5, GEAR_SLOT_NAMES[l.slot], 12, INK.faint));
     if (gear) {
       const color = tierColor(gear.tier);
-      objs.push(text(scene, bx + boxW - 8, by + 5, `${gear.tier}단계`, 12, color).setOrigin(1, 0));
+      objs.push(text(scene, bx + boxW - 8, by + 5, L(`${gear.tier}단계`, `Tier ${gear.tier}`), 12, color).setOrigin(1, 0));
       objs.push(fit(text(scene, bx + 8, by + 19, gearLabel(gear), 12, color, true), boxW - 16));
       objs.push(fit(text(scene, bx + 8, by + 34, describeGear(gear), 12, INK.gate), boxW - 16));
     } else {
-      objs.push(text(scene, bx + 8, by + 24, '비어 있음', 12, INK.faint));
+      objs.push(text(scene, bx + 8, by + 24, L('비어 있음', 'Empty'), 12, INK.faint));
     }
   }
 
@@ -96,9 +97,9 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
     sum.hp += gear.hp;
     sum.mp += gear.mp;
   }
-  objs.push(text(scene, tx + 8, ty + 5, '장비 합계', 12, INK.gold, true));
-  objs.push(fit(text(scene, tx + 8, ty + 21, `공격 +${sum.atk} 방어 +${sum.def}`, 12, INK.text), boxW - 12));
-  objs.push(fit(text(scene, tx + 8, ty + 36, `체력 +${sum.hp} 마나 +${sum.mp}`, 12, INK.text), boxW - 12));
+  objs.push(text(scene, tx + 8, ty + 5, L('장비 합계', 'Gear total'), 12, INK.gold, true));
+  objs.push(fit(text(scene, tx + 8, ty + 21, L(`공격 +${sum.atk} 방어 +${sum.def}`, `ATK +${sum.atk} DEF +${sum.def}`), 12, INK.text), boxW - 12));
+  objs.push(fit(text(scene, tx + 8, ty + 36, L(`체력 +${sum.hp} 마나 +${sum.mp}`, `HP +${sum.hp} MP +${sum.mp}`), 12, INK.text), boxW - 12));
   return objs;
 }
 
@@ -123,7 +124,7 @@ export function drawGearIcon(gear: Gear) {
 
 /** Stat changes from swapping old for new, like "공격 +2 · 방어 -1". */
 export function gearDiff(gear: Gear, old?: Gear): string {
-  const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', '공격'], ['def', '방어'], ['hp', '체력'], ['mp', '마나']];
+  const names: Array<[keyof Pick<Gear, 'atk' | 'def' | 'hp' | 'mp'>, string]> = [['atk', L('공격', 'ATK')], ['def', L('방어', 'DEF')], ['hp', L('체력', 'HP')], ['mp', L('마나', 'MP')]];
   return names
     .map(([k, label]) => [label, gearStats(gear)[k] - (old ? gearStats(old)[k] : 0)] as const)
     .filter(([, d]) => d !== 0)

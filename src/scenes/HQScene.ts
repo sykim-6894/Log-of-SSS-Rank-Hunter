@@ -15,6 +15,7 @@ import { slotLabel } from '../game/slots';
 import { Rng } from '../core/rng';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
+import { L, Lang, lang, LANG_KEY } from '../core/lang';
 
 export interface HQData {
   messages?: string[];
@@ -38,11 +39,11 @@ export interface HQData {
 /** Portrait only: the office is split into tabs along the bottom. */
 type Tab = 'hunter' | 'shop' | 'ranking' | 'rival' | 'log';
 const TABS: Array<[Tab, string]> = [
-  ['hunter', '헌터'],
-  ['shop', '가방'],
-  ['ranking', '순위'],
-  ['rival', '라이벌'],
-  ['log', '일지'],
+  ['hunter', L('헌터', 'Hunter')],
+  ['shop', L('가방', 'Bag')],
+  ['ranking', L('순위', 'Ranks')],
+  ['rival', L('라이벌', 'Rival')],
+  ['log', L('일지', 'Log')],
 ];
 let tab: Tab = 'hunter';
 /** Landscape only: show the gear doll where the ranking usually is. */
@@ -88,9 +89,9 @@ export class HQScene extends Phaser.Scene {
     if (state.agent.named === false) return;
     if (takeWelcome() && this.messages.length === 0) {
       this.messages = [
-        `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
-        '훈련으로 키우고, 성장의 탑에 보내 돈을 벌어오게 하자.',
-        '첫 탑에 가기 전에는 자격증의 [직업 바꾸기]로 직업을 다시 고를 수 있다.',
+        L(`${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`, `${state.agent.name} founded. Signed the first hunter, ${activeHunter(state)!.name}.`),
+        L('훈련으로 키우고, 성장의 탑에 보내 돈을 벌어오게 하자.', 'Train them, then send them up the Tower of Growth to earn money.'),
+        L('첫 탑에 가기 전에는 자격증의 [직업 바꾸기]로 직업을 다시 고를 수 있다.', 'Before the first climb, [Change class] on the license lets you pick again.'),
       ];
     }
   }
@@ -134,7 +135,7 @@ export class HQScene extends Phaser.Scene {
 
     this.departButton(488, 618, 448, 58, 24);
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   Z 제자리 공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, L('방향키·WASD 이동/공격   Z 제자리 공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기', 'Arrows/WASD move   Z attack   1·2·3 skills   E·R·F·X potions/return   B bag   Space wait'), 12, INK.faint).setOrigin(0.5, 0);
   }
 
   /**
@@ -145,9 +146,9 @@ export class HQScene extends Phaser.Scene {
     const x = 14;
     const w = GW - 28;
     const back = () => this.scene.restart({ messages: this.messages });
-    title(this, GW / 2, 18, hr.change ? '직업 바꾸기' : '새 헌터 고용', 23, INK.text).setOrigin(0.5, 0);
+    title(this, GW / 2, 18, hr.change ? L('직업 바꾸기', 'Change class') : L('새 헌터 고용', 'Hire a hunter'), 23, INK.text).setOrigin(0.5, 0);
     if (!hr.cls) {
-      text(this, GW / 2, 52, '직업을 고르세요. 외형과 성장이 직업을 따릅니다.', 12, INK.quiet).setOrigin(0.5, 0);
+      text(this, GW / 2, 52, L('직업을 고르세요. 외형과 성장이 직업을 따릅니다.', 'Pick a class. Looks and growth follow the class.'), 12, INK.quiet).setOrigin(0.5, 0);
       const cardH = PORTRAIT ? 128 : 112;
       const cols = PORTRAIT ? 1 : 2;
       const cw = (w - (cols - 1) * 12) / cols;
@@ -159,31 +160,33 @@ export class HQScene extends Phaser.Scene {
         const g = this.add.graphics();
         drawLook(g, c.look, cx + 14, cy + 14, 6);
         title(this, cx + 96, cy + 12, `${c.name}  ·  ${c.role}`, 15, INK.gold);
-        text(this, cx + 96, cy + 38, `체력 ${c.base.hp} 마나 ${c.base.mp} 공격 ${c.base.atk} 방어 ${c.base.def}`, 12, INK.text);
-        text(this, cx + 96, cy + 56, `${c.passive}: ${c.passiveText}`, 12, INK.quiet).setWordWrapWidth(cw - 110, true).setLineSpacing(-2);
-        button(this, cx + 96, cy + cardH - 44, cw - 110, 34, `${c.name} 고르기`, () =>
+        text(this, cx + 96, cy + 38, L(`체력 ${c.base.hp} 마나 ${c.base.mp} 공격 ${c.base.atk} 방어 ${c.base.def}`, `HP ${c.base.hp} MP ${c.base.mp} ATK ${c.base.atk} DEF ${c.base.def}`), 12, INK.text);
+        const passive = text(this, cx + 96, cy + 56, `${c.passive}: ${c.passiveText}`, 12, INK.quiet);
+        if (lang() === 'en') fit(passive, cw - 110);
+        else passive.setWordWrapWidth(cw - 110, true).setLineSpacing(-2);
+        button(this, cx + 96, cy + cardH - 44, cw - 110, 34, L(`${c.name} 고르기`, `Pick ${c.name}`), () =>
           this.scene.restart({ messages: this.messages, hire: { ...hr, cls: id, skills: firstSkillChoices(id, rng) } }), { primary: true, size: 12 });
       });
-      button(this, x, GH - 70, w, 50, '취소', back);
+      button(this, x, GH - 70, w, 50, L('취소', 'Cancel'), back);
       return;
     }
     const c = CLASSES[hr.cls];
-    text(this, GW / 2, 52, `${c.name}의 첫 스킬을 하나 고르세요. 나머지는 레벨업 카드로 배웁니다.`, 12, INK.quiet).setOrigin(0.5, 0).setWordWrapWidth(w, true);
+    text(this, GW / 2, 52, L(`${c.name}의 첫 스킬을 하나 고르세요. 나머지는 레벨업 카드로 배웁니다.`, `Pick the ${c.name}'s first skill. The rest come from level-up cards.`), 12, INK.quiet).setOrigin(0.5, 0).setWordWrapWidth(w, true);
     (hr.skills ?? []).forEach((id, i) => {
       const sk = SKILLS[id];
       const cy = 96 + i * 120;
       panel(this, x, cy, w, 108);
-      title(this, x + 16, cy + 12, `${sk.name}  ·  마나 ${sk.mp}`, 15, INK.gold);
+      title(this, x + 16, cy + 12, L(`${sk.name}  ·  마나 ${sk.mp}`, `${sk.name}  ·  Mana ${sk.mp}`), 15, INK.gold);
       fit(text(this, x + 16, cy + 38, sk.text, 12, INK.text), w - 32);
-      fit(text(this, x + 16, cy + 56, `5단계: ${sk.max}`, 12, INK.quiet), w - 32);
-      button(this, x + 16, cy + 74, w - 32, 28, `${sk.name}(으)로 시작`, () => {
+      fit(text(this, x + 16, cy + 56, L(`5단계: ${sk.max}`, `Lv 5: ${sk.max}`), 12, INK.quiet), w - 32);
+      button(this, x + 16, cy + 74, w - 32, 28, L(`${sk.name}(으)로 시작`, `Start with ${sk.name}`), () => {
         const h = hr.change ? changeClass(state, rng, hr.slot, hr.cls!, id) : hire(state, rng, hr.slot, hr.cls, id);
-        const msg = h ? (hr.change ? `${h.name}의 직업을 ${c.name}(으)로 바꿨다.` : `새 ${c.name} ${h.name}와(과) 계약했다.`) : '계약하지 못했다.';
+        const msg = h ? (hr.change ? L(`${h.name}의 직업을 ${c.name}(으)로 바꿨다.`, `${h.name} is now a ${c.name}.`) : L(`새 ${c.name} ${h.name}와(과) 계약했다.`, `Signed a new ${c.name}, ${h.name}.`)) : L('계약하지 못했다.', 'Could not sign a contract.');
         this.refresh([msg]);
       }, { primary: true, size: 12 });
     });
-    button(this, x, GH - 130, w, 50, '직업 다시 고르기', () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change } }));
-    button(this, x, GH - 70, w, 50, '취소', back);
+    button(this, x, GH - 130, w, 50, L('직업 다시 고르기', 'Pick class again'), () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change } }));
+    button(this, x, GH - 70, w, 50, L('취소', 'Cancel'), back);
   }
 
   /**
@@ -194,23 +197,23 @@ export class HQScene extends Phaser.Scene {
     const w = Math.min(GW - 28, 520);
     const left = (GW - w) / 2;
     const top = PORTRAIT ? 150 : 120;
-    title(this, GW / 2, top - 90, '주인공을 찾습니다', PORTRAIT ? 23 : 28, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, top - 54, '— SSS급 헌터 에이전시', 12, INK.rust).setOrigin(0.5, 0);
-    panel(this, left, top, w, 262, '에이전시 설립');
-    text(this, GW / 2, top + 34, '헌터를 키워 SSS급으로 만들 에이전시입니다.\n이름을 지어 주세요.', 12, INK.quiet)
+    title(this, GW / 2, top - 90, L('주인공을 찾습니다', 'Wanted: The Protagonist'), PORTRAIT ? 23 : 28, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, top - 54, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust).setOrigin(0.5, 0);
+    panel(this, left, top, w, 262, L('에이전시 설립', 'Found your agency'));
+    text(this, GW / 2, top + 34, L('헌터를 키워 SSS급으로 만들 에이전시입니다.\n이름을 지어 주세요.', 'Your agency will raise a hunter to SSS rank.\nGive it a name.'), 12, INK.quiet)
       .setOrigin(0.5, 0).setAlign('center').setLineSpacing(4);
     const boxY = top + 96;
     const boxH = 52;
     const g = this.add.graphics();
     g.fillStyle(PALETTE.paper, 1).fillRect(left + 20, boxY, w - 40, boxH);
     g.lineStyle(2, PALETTE.rust, 1).strokeRect(left + 20, boxY, w - 40, boxH);
-    const hint = text(this, GW / 2, boxY + boxH + 8, `${AGENCY_NAME_MAX}자까지`, 12, INK.faint).setOrigin(0.5, 0);
+    const hint = text(this, GW / 2, boxY + boxH + 8, L(`${AGENCY_NAME_MAX}자까지`, `Up to ${AGENCY_NAME_MAX} characters`), 12, INK.faint).setOrigin(0.5, 0);
 
     const input = document.createElement('input');
     input.type = 'text';
     input.maxLength = AGENCY_NAME_MAX;
     input.value = randomAgencyName(rng);
-    input.setAttribute('aria-label', '에이전시 이름');
+    input.setAttribute('aria-label', L('에이전시 이름', 'Agency name'));
     input.autocomplete = 'off';
     Object.assign(input.style, {
       position: 'fixed', border: 'none', outline: 'none', background: 'transparent', color: '#2a211a',
@@ -235,7 +238,7 @@ export class HQScene extends Phaser.Scene {
 
     const found = () => {
       if (!foundAgency(state, rng, input.value)) {
-        hint.setText('이름을 입력해 주세요.').setColor(INK.red);
+        hint.setText(L('이름을 입력해 주세요.', 'Please enter a name.')).setColor(INK.red);
         input.focus();
         return;
       }
@@ -246,10 +249,10 @@ export class HQScene extends Phaser.Scene {
       if (e.key === 'Enter') found();
     });
     const bw = (w - 52) / 2;
-    button(this, left + 20, boxY + boxH + 40, bw, 50, '랜덤 이름', () => {
+    button(this, left + 20, boxY + boxH + 40, bw, 50, L('랜덤 이름', 'Random name'), () => {
       input.value = randomAgencyName(rng, [input.value]);
     }, { size: 15 });
-    button(this, left + 32 + bw, boxY + boxH + 40, bw, 50, '설립하기', found, { primary: true, size: 15 });
+    button(this, left + 32 + bw, boxY + boxH + 40, bw, 50, L('설립하기', 'Found'), found, { primary: true, size: 15 });
   }
 
   /** The board of open gates. Going into one closes it, cleared or not. */
@@ -258,8 +261,8 @@ export class HQScene extends Phaser.Scene {
     const w = GW - 28;
     const h = activeHunter(state);
     const day = state.day ?? 0;
-    title(this, GW / 2, 18, '열린 게이트', 23, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, 52, '들어가면 클리어하든 못 하든 닫힌다. 귀환할 때마다 하루가 지나고 새 게이트가 열린다.', 12, INK.quiet)
+    title(this, GW / 2, 18, L('열린 게이트', 'Open Gates'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 52, L('들어가면 클리어하든 못 하든 닫힌다. 귀환할 때마다 하루가 지나고 새 게이트가 열린다.', 'A gate closes once entered, cleared or not. Each return ends the day and new gates open.'), 12, INK.quiet)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
     const rec = state.gateRecord ?? { ours: 0, rival: 0 };
     const rift = state.rift && !state.rift.entered ? [state.rift] : [];
@@ -267,8 +270,8 @@ export class HQScene extends Phaser.Scene {
     const cols = PORTRAIT ? 1 : 3;
     const rows = Math.ceil(gates.length / cols);
     const recY = (PORTRAIT ? 100 : 96) + rows * 146 + (PORTRAIT ? 4 : 8);
-    text(this, GW / 2, recY, `게이트 공략  ${state.agent.name} ${rec.ours} : ${rec.rival} ${state.rival.name}`, 12, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, recY + 20, `${state.rival.name}도 게이트를 노린다. 먼저 들어간 게이트는 다음 날 클리어될 수 있다.`, 12, INK.faint)
+    text(this, GW / 2, recY, L(`게이트 공략  ${state.agent.name} ${rec.ours} : ${rec.rival} ${state.rival.name}`, `Gates cleared  ${state.agent.name} ${rec.ours} : ${rec.rival} ${state.rival.name}`), 12, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, recY + 20, L(`${state.rival.name}도 게이트를 노린다. 먼저 들어간 게이트는 다음 날 클리어될 수 있다.`, `${state.rival.name} is after the gates too. A gate they enter may be cleared the next day.`), 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
     const cardH = 136;
     const cw = (w - (cols - 1) * 12) / cols;
@@ -282,28 +285,28 @@ export class HQScene extends Phaser.Scene {
         const fx = this.add.graphics();
         fx.lineStyle(2, 0xb05cff, 0.9).strokeRect(cx + 3, cy + 3, cw - 6, cardH - 6);
       }
-      title(this, cx + 14, cy + 12, gateName(g), 15, g.rift ? '#d79bff' : g.rule ? INK.red : INK.gold);
       const left = g.closesOn - day;
-      text(this, cx + cw - 14, cy + 14, g.rival ? '경쟁 중' : left <= 0 ? '오늘까지' : `${left + 1}일 남음`, 12, g.rival || g.rift ? INK.red : INK.quiet).setOrigin(1, 0);
-      fit(text(this, cx + 14, cy + 38, `${g.rift ? `${g.grade}급 상당 · ` : ''}${gateFloors(g)}층 · 적정 Lv.${lvl}${hard ? ' (위험)' : ''}`, 12, hard ? INK.red : INK.text), cw - 28);
+      const due = text(this, cx + cw - 14, cy + 14, g.rival ? L('경쟁 중', 'Contested') : left <= 0 ? L('오늘까지', 'Last day') : L(`${left + 1}일 남음`, `${left + 1} days left`), 12, g.rival || g.rift ? INK.red : INK.quiet).setOrigin(1, 0);
+      fit(title(this, cx + 14, cy + 12, gateName(g), 15, g.rift ? '#d79bff' : g.rule ? INK.red : INK.gold), cw - 36 - due.width);
+      fit(text(this, cx + 14, cy + 38, L(`${g.rift ? `${g.grade}급 상당 · ` : ''}${gateFloors(g)}층 · 적정 Lv.${lvl}${hard ? ' (위험)' : ''}`, `${g.rift ? `~${g.grade}-Rank · ` : ''}${gateFloors(g)} floors · Lv.${lvl}${hard ? ' (danger)' : ''}`), 12, hard ? INK.red : INK.text), cw - 28);
       if (g.rift) {
-        fit(text(this, cx + 14, cy + 56, cols > 1 ? '단 한 번. 못 막으면 경쟁사가 가져간다' : `한 번뿐인 기회. 못 막으면 ${state.rival.name}이(가) 공을 가져간다`, 12, '#d79bff'), cw - 28);
+        fit(text(this, cx + 14, cy + 56, cols > 1 ? L('단 한 번. 못 막으면 경쟁사가 가져간다', 'One try. Fail and the rival takes it') : L(`한 번뿐인 기회. 못 막으면 ${state.rival.name}이(가) 공을 가져간다`, `One chance only. Fail and ${state.rival.name} takes the glory`), 12, '#d79bff'), cw - 28);
       } else if (g.rival) {
-        const who = g.rival.hunter ? `${g.rival.agency} ${g.rival.hunter}(Lv.${g.rival.level})` : `${g.rival.agency} 팀(Lv.${g.rival.level})`;
-        fit(text(this, cx + 14, cy + 56, `${who} 공략 중${cols > 1 ? '' : ' · 다음 날 클리어 시도'}`, 12, '#d79bff'), cw - 28);
+        const who = g.rival.hunter ? L(`${g.rival.agency} ${g.rival.hunter}(Lv.${g.rival.level})`, `${g.rival.hunter} of ${g.rival.agency} (Lv.${g.rival.level})`) : L(`${g.rival.agency} 팀(Lv.${g.rival.level})`, `${g.rival.agency} team (Lv.${g.rival.level})`);
+        fit(text(this, cx + 14, cy + 56, L(`${who} 공략 중${cols > 1 ? '' : ' · 다음 날 클리어 시도'}`, `${who} inside${cols > 1 ? '' : ' · may clear it tomorrow'}`), 12, '#d79bff'), cw - 28);
       } else {
-        fit(text(this, cx + 14, cy + 56, `출몰: ${GATE_THEMES[g.theme].pool.map((id) => MONSTERS[id].name).join(', ')}`, 12, INK.quiet), cw - 28);
+        fit(text(this, cx + 14, cy + 56, L(`출몰: ${GATE_THEMES[g.theme].pool.map((id) => MONSTERS[id].name).join(', ')}`, `Monsters: ${GATE_THEMES[g.theme].pool.map((id) => MONSTERS[id].name).join(', ')}`), 12, INK.quiet), cw - 28);
       }
-      fit(text(this, cx + 14, cy + 74, g.rule ? `특수 규칙 [${GATE_RULES[g.rule].name}] ${GATE_RULES[g.rule].text}` : '특수 규칙 없음', 12, g.rule ? INK.rust : INK.faint), cw - 28);
-      const verb = g.rift ? '막으러 가기' : g.rival ? '가로채기' : '입장';
-      const reward = g.rift ? `${gateClearGold(g)}G+마력석 ${gateClearStones(g)}` : `클리어 보상 ${gateClearGold(g)}G+장비`;
+      fit(text(this, cx + 14, cy + 74, g.rule ? L(`특수 규칙 [${GATE_RULES[g.rule].name}] ${GATE_RULES[g.rule].text}`, `Rule [${GATE_RULES[g.rule].name}] ${GATE_RULES[g.rule].text}`) : L('특수 규칙 없음', 'No special rule'), 12, g.rule ? INK.rust : INK.faint), cw - 28);
+      const verb = g.rift ? L('막으러 가기', 'Seal it') : g.rival ? L('가로채기', 'Steal it') : L('입장', 'Enter');
+      const reward = g.rift ? L(`${gateClearGold(g)}G+마력석 ${gateClearStones(g)}`, `${gateClearGold(g)}G + ${gateClearStones(g)} stones`) : L(`클리어 보상 ${gateClearGold(g)}G+장비`, `Reward ${gateClearGold(g)}G + gear`);
       button(this, cx + 14, cy + cardH - 40, cw - 28, 30, `${verb} · ${reward}`, () => {
         persist();
         this.scene.start('Tower', { gateId: g.id });
       }, { primary: true, size: 12, enabled: !!h });
     });
-    if (h) text(this, GW / 2, GH - 96, `보낼 헌터: ${h.name} · Lv.${h.level}`, 12, INK.text).setOrigin(0.5, 0);
-    button(this, x, GH - 70, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+    if (h) text(this, GW / 2, GH - 96, L(`보낼 헌터: ${h.name} · Lv.${h.level}`, `Sending: ${h.name} · Lv.${h.level}`), 12, INK.text).setOrigin(0.5, 0);
+    button(this, x, GH - 70, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
   }
 
   /**
@@ -319,12 +322,12 @@ export class HQScene extends Phaser.Scene {
     const floors = h ? startFloors(state, h) : [1];
     if (!this.pickingStart || floors.length < 2) {
       const gw = Math.round(w * 0.36);
-      button(this, x, y, w - gw - 8, hgt, '▶  성장의 탑', () => {
+      button(this, x, y, w - gw - 8, hgt, L('▶  성장의 탑', '▶  Tower of Growth'), () => {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
       }, { primary: true, size, enabled: !!h });
       const rift = state.rift && !state.rift.entered;
-      button(this, x + w - gw, y, gw, hgt, rift ? `게이트 ${state.gates?.length ?? 0} · 균열!` : `게이트 ${state.gates?.length ?? 0}`, () =>
+      button(this, x + w - gw, y, gw, hgt, rift ? L(`게이트 ${state.gates?.length ?? 0} · 균열!`, `Gates ${state.gates?.length ?? 0} · Rift!`) : L(`게이트 ${state.gates?.length ?? 0}`, `Gates ${state.gates?.length ?? 0}`), () =>
         this.scene.restart({ messages: this.messages, gates: true }), { size: Math.min(size, 18), enabled: !!h });
       return;
     }
@@ -332,18 +335,18 @@ export class HQScene extends Phaser.Scene {
     const gap = 6;
     const bw = (w - cancelW - gap * floors.length) / floors.length;
     floors.forEach((f, i) => {
-      const name = f > TOP_FLOOR ? `심연 ${f - TOP_FLOOR}` : `${f}층`;
-      button(this, x + i * (bw + gap), y, bw, hgt, floors.length > 4 ? name : `▶ ${name}부터`, () => go(f), { primary: true, size: Math.min(size, floors.length > 4 ? 14 : 16) });
+      const name = f > TOP_FLOOR ? L(`심연 ${f - TOP_FLOOR}`, `Abyss ${f - TOP_FLOOR}`) : L(`${f}층`, `${f}F`);
+      button(this, x + i * (bw + gap), y, bw, hgt, floors.length > 4 ? name : L(`▶ ${name}부터`, `▶ From ${name}`), () => go(f), { primary: true, size: Math.min(size, floors.length > 4 ? 14 : 16) });
     });
-    button(this, x + w - cancelW, y, cancelW, hgt, '취소', () => this.scene.restart({ messages: this.messages }), { size: 12 });
+    button(this, x + w - cancelW, y, cancelW, hgt, L('취소', 'Cancel'), () => this.scene.restart({ messages: this.messages }), { size: 12 });
   }
 
   private createPortrait() {
     const { agent } = state;
     const x = 14;
     const w = GW - 28;
-    title(this, x, 12, '주인공을 찾습니다', 20, INK.text);
-    text(this, x + 2, 38, '— SSS급 헌터 에이전시', 12, INK.rust);
+    title(this, x, 12, L('주인공을 찾습니다', 'Wanted: The Protagonist'), lang() === 'en' ? 15 : 20, INK.text);
+    text(this, x + 2, 38, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
     text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
@@ -391,51 +394,63 @@ export class HQScene extends Phaser.Scene {
 
   private drawHeader() {
     const { agent } = state;
-    title(this, 24, 18, '주인공을 찾습니다', 30, INK.text);
-    text(this, 26, 58, '— SSS급 헌터 에이전시', 12, INK.rust);
+    title(this, 24, 18, L('주인공을 찾습니다', 'Wanted: The Protagonist'), 30, INK.text);
+    text(this, 26, 58, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
     text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
-    title(this, 936, 42, `운영 자금 ${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
+    title(this, 936, 42, L(`운영 자금 ${agent.gold}G`, `Funds ${agent.gold}G`), 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
     this.soundButton(676, 20, 96);
   }
 
   private soundButton(x: number, y: number, w: number) {
-    button(this, x, y, w, 28, '설정', () => this.scene.restart({ settings: true, messages: this.messages }));
+    button(this, x, y, w, 28, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }));
   }
 
   /** Sound and how to move on a touch screen. */
   private drawSettings() {
     const w = Math.min(GW - 28, 520);
     const x = (GW - w) / 2;
-    title(this, GW / 2, 18, '설정', 23, INK.text).setOrigin(0.5, 0);
+    title(this, GW / 2, 18, L('설정', 'Settings'), 23, INK.text).setOrigin(0.5, 0);
     const reopen = () => this.scene.restart({ settings: true, messages: this.messages });
     const oy = PORTRAIT ? 80 : 84;
-    panel(this, x, oy, w, 96, '소리');
-    text(this, x + 18, oy + 26, '효과음', 13, INK.text);
+    panel(this, x, oy, w, 96, L('소리 · 언어', 'Sound · Language'));
     const half = (w - 36 - 10) / 2;
+    const lw = 120;
+    const sw = (w - 36 - lw - 10) / 2;
+    text(this, x + 18, oy + 28, L('효과음', 'Sound'), 13, INK.text);
     const on = soundOn();
-    button(this, x + 18, oy + 48, half, 34, '켬', () => { if (!soundOn()) toggleSound(); reopen(); }, { primary: on });
-    button(this, x + 28 + half, oy + 48, half, 34, '끔', () => { if (soundOn()) toggleSound(); reopen(); }, { primary: !on });
+    button(this, x + 18 + lw, oy + 20, sw, 30, L('켬', 'On'), () => { if (!soundOn()) toggleSound(); reopen(); }, { primary: on });
+    button(this, x + 28 + lw + sw, oy + 20, sw, 30, L('끔', 'Off'), () => { if (soundOn()) toggleSound(); reopen(); }, { primary: !on });
+    text(this, x + 18, oy + 64, L('언어', 'Language'), 13, INK.text);
+    const pickLang = (l: Lang) => {
+      if (l === lang()) return;
+      persist();
+      localStorage.setItem(LANG_KEY, l);
+      skipTitleOnce();
+      location.reload();
+    };
+    button(this, x + 18 + lw, oy + 56, sw, 30, '한국어', () => pickLang('ko'), { primary: lang() === 'ko' });
+    button(this, x + 28 + lw + sw, oy + 56, sw, 30, 'English', () => pickLang('en'), { primary: lang() === 'en' });
 
     const my = oy + 112;
-    panel(this, x, my, w, 144, '이동 방식 (터치 화면)');
+    panel(this, x, my, w, 144, L('이동 방식 (터치 화면)', 'Movement (touch screen)'));
     const mode = moveControl();
-    button(this, x + 18, my + 26, half, 34, '조이스틱', () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });
-    button(this, x + 28 + half, my + 26, half, 34, '십자 버튼', () => { setMoveControl('dpad'); reopen(); }, { primary: mode === 'dpad' });
+    button(this, x + 18, my + 26, half, 34, L('조이스틱', 'Joystick'), () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });
+    button(this, x + 28 + half, my + 26, half, 34, L('십자 버튼', 'D-pad'), () => { setMoveControl('dpad'); reopen(); }, { primary: mode === 'dpad' });
     const note = mode === 'joystick'
-      ? '화면을 누른 곳에 조이스틱이 생기고, 끄는 방향으로 걷는다.'
-      : '왼쪽 아래 고정된 십자 버튼을 눌러 걷는다. 누르고 있으면 계속 걷는다.';
+      ? L('화면을 누른 곳에 조이스틱이 생기고, 끄는 방향으로 걷는다.', 'A joystick appears where you touch; drag to walk.')
+      : L('왼쪽 아래 고정된 십자 버튼을 눌러 걷는다. 누르고 있으면 계속 걷는다.', 'Press the fixed D-pad at the bottom left. Hold to keep walking.');
     text(this, x + 18, my + 74, note, 12, INK.quiet).setWordWrapWidth(w - 36, true);
-    text(this, x + 18, my + 116, '키보드는 어느 쪽이든 방향키·WASD로 움직인다.', 12, INK.faint);
+    text(this, x + 18, my + 116, L('키보드는 어느 쪽이든 방향키·WASD로 움직인다.', 'On a keyboard, arrows or WASD always work.'), 12, INK.faint);
 
     // Hand-made saves, loaded from the title screen.
     const sy = my + 160;
     const rowH = PORTRAIT ? 52 : 44;
-    panel(this, x, sy, w, 34 + SAVE_SLOTS * (rowH + 6), '저장하기 (불러오기는 시작 화면에서)');
+    panel(this, x, sy, w, 34 + SAVE_SLOTS * (rowH + 6), L('저장하기 (불러오기는 시작 화면에서)', 'Save (load from the title screen)'));
     for (let i = 0; i < SAVE_SLOTS; i++) {
       const info = slotInfo(i);
       const armed = this.armSave === i;
-      const label = armed ? `${i + 1}번 슬롯에 덮어쓸까요? 한 번 더 누르기` : slotLabel(i, info);
+      const label = armed ? L(`${i + 1}번 슬롯에 덮어쓸까요? 한 번 더 누르기`, `Overwrite slot ${i + 1}? Tap again`) : slotLabel(i, info);
       button(this, x + 14, sy + 24 + i * (rowH + 6), w - 28, rowH, label, () => {
         if (info && !armed) {
           this.armSave = i;
@@ -445,21 +460,21 @@ export class HQScene extends Phaser.Scene {
         saveSlot(i);
         this.armSave = undefined;
         sfx.gear();
-        this.scene.restart({ settings: true, messages: [`${i + 1}번 슬롯에 저장했다.`, ...this.messages] });
+        this.scene.restart({ settings: true, messages: [L(`${i + 1}번 슬롯에 저장했다.`, `Saved to slot ${i + 1}.`), ...this.messages] });
       }, { size: 12, primary: armed });
     }
     const by = sy + 34 + SAVE_SLOTS * (rowH + 6) + 12;
-    if (this.messages[0]?.includes('슬롯에 저장')) text(this, GW / 2, by - 4, this.messages[0], 12, INK.gate).setOrigin(0.5, 0);
+    if (this.messages[0]?.includes(L('슬롯에 저장', 'Saved to slot'))) text(this, GW / 2, by - 4, this.messages[0], 12, INK.gate).setOrigin(0.5, 0);
     const bw = (w - 10) / 2;
     const bty = Math.min(GH - 54, by + 18);
-    button(this, x, bty, bw, 44, '시작 화면으로', () => {
+    button(this, x, bty, bw, 44, L('시작 화면으로', 'Title screen'), () => {
       this.armSave = undefined;
       persist();
       this.scene.start('Title', {});
     });
-    button(this, x + bw + 10, bty, bw, 44, '돌아가기', () => {
+    button(this, x + bw + 10, bty, bw, 44, L('돌아가기', 'Back'), () => {
       this.armSave = undefined;
-      this.scene.restart({ messages: this.messages.filter((m) => !m.includes('슬롯에 저장')) });
+      this.scene.restart({ messages: this.messages.filter((m) => !m.includes(L('슬롯에 저장', 'Saved to slot'))) });
     });
   }
 
@@ -470,12 +485,12 @@ export class HQScene extends Phaser.Scene {
       const h = state.slots[i];
       const bx = x + i * (w + 10);
       if (h) {
-        button(this, bx, y, w, 44, `${h.name}\n${gradeIn(state, h)}급 · Lv.${h.level}`, () => {
+        button(this, bx, y, w, 44, L(`${h.name}\n${gradeIn(state, h)}급 · Lv.${h.level}`, `${h.name}\n${gradeIn(state, h)}-Rank · Lv.${h.level}`), () => {
           state.activeSlot = i;
           this.refresh();
         }, { primary: i === state.activeSlot });
       } else {
-        button(this, bx, y, w, 44, '+ 새 헌터 고용', () => this.scene.restart({ messages: this.messages, hire: { slot: i } }));
+        button(this, bx, y, w, 44, L('+ 새 헌터 고용', '+ Hire hunter'), () => this.scene.restart({ messages: this.messages, hire: { slot: i } }));
       }
     }
   }
@@ -492,16 +507,16 @@ export class HQScene extends Phaser.Scene {
     const place = board.findIndex((r) => r.id === h.id);
     const tenth = board[board.length - 1];
     const goal =
-      place >= 0 ? `협회 랭킹 ${place + 1}위`
-      : next ? `다음 ${next[0]}급까지 ${next[1] - power}`
-      : `S급(랭킹 10위)까지 ${Math.max(1, (tenth?.score ?? power) - power + 1)}`;
+      place >= 0 ? L(`협회 랭킹 ${place + 1}위`, `Association rank #${place + 1}`)
+      : next ? L(`다음 ${next[0]}급까지 ${next[1] - power}`, `${next[1] - power} to ${next[0]}-Rank`)
+      : L(`S급(랭킹 10위)까지 ${Math.max(1, (tenth?.score ?? power) - power + 1)}`, `${Math.max(1, (tenth?.score ?? power) - power + 1)} to S-Rank (top 10)`);
 
     const g = this.add.graphics();
     g.fillStyle(PALETTE.shadow, 1).fillRect(x + 4, y + 4, w, ht);
     g.fillStyle(PALETTE.paper, 1).fillRect(x, y, w, ht);
     g.lineStyle(2, PALETTE.paperLine, 1).strokeRect(x + 6, y + 6, w - 12, ht - 12);
     g.fillStyle(PALETTE.ink, 1).fillRect(x, y, w, 26);
-    text(this, x + 12, y + 7, '헌터 자격증', 12, '#e6dac0', true);
+    text(this, x + 12, y + 7, L('헌터 자격증', 'Hunter License'), 12, '#e6dac0', true);
     text(this, x + w - 12, y + 7, `No.${String(state.hunterNumber).padStart(4, '0')}`, 12, '#b9a98a').setOrigin(1, 0);
 
     // Portrait slot
@@ -515,9 +530,9 @@ export class HQScene extends Phaser.Scene {
     text(this, px + 36, py + 74, CLASSES[h.cls].name, 12, '#e6dac0').setOrigin(0.5, 0);
 
     title(this, x + 106, y + 40, h.name, 23, INK.ink);
-    text(this, x + 106, y + 72, `Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, 12, INK.inkQuiet);
+    text(this, x + 106, y + 72, L(`Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, `Lv.${h.level}   EXP ${h.exp}/${expToNext(h.level)}`), 12, INK.inkQuiet);
     fit(text(this, x + 106, y + 92, `${CLASSES[h.cls].passive}: ${CLASSES[h.cls].passiveText}`, 12, INK.inkQuiet), w - 260);
-    text(this, x + 106, y + 112, `계약 ${h.contractGrade}급 · 상납 ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`, 12, INK.inkQuiet);
+    text(this, x + 106, y + 112, L(`계약 ${h.contractGrade}급 · 상납 ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`, `Contract ${h.contractGrade} · Cut ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`), 12, INK.inkQuiet);
 
     // Grade stamp
     const stamp = this.add.container(x + w - 70, y + 82).setAngle(-9);
@@ -526,42 +541,42 @@ export class HQScene extends Phaser.Scene {
     sg.lineStyle(1, 0xb8362b, 0.9).strokeRect(-35, -33, 70, 66);
     stamp.add(sg);
     stamp.add(title(this, 0, -6, grade, grade.length > 1 ? 30 : 45, INK.stamp).setOrigin(0.5));
-    stamp.add(text(this, 0, 22, '등급', 12, INK.stamp, true).setOrigin(0.5));
+    stamp.add(text(this, 0, 22, L('등급', 'Rank'), 12, INK.stamp, true).setOrigin(0.5));
 
     dots(this, x + 18, y + 136, w - 36, PALETTE.paperLine);
-    text(this, x + 18, y + 146, `체력 ${h.hp}/${h.maxHp}`, 12, INK.ink);
+    text(this, x + 18, y + 146, L(`체력 ${h.hp}/${h.maxHp}`, `HP ${h.hp}/${h.maxHp}`), 12, INK.ink);
     bar(this, x + 120, y + 148, w - 336, 8, h.hp / h.maxHp, PALETTE.hp);
     // Regeneration per turn in the tower, next to each bar.
-    const per = (v: number) => `+${Number((v ?? 0).toFixed(2))}/턴`;
+    const per = (v: number) => L(`+${Number((v ?? 0).toFixed(2))}/턴`, `+${Number((v ?? 0).toFixed(2))}/t`);
     text(this, x + w - 210, y + 146, per(h.hpRegen), 12, INK.inkQuiet);
     text(this, x + w - 210, y + 166, per(h.mpRegen), 12, INK.inkQuiet);
-    text(this, x + 18, y + 166, `마나 ${h.mp}/${h.maxMp}`, 12, INK.ink);
+    text(this, x + 18, y + 166, L(`마나 ${h.mp}/${h.maxMp}`, `MP ${h.mp}/${h.maxMp}`), 12, INK.ink);
     bar(this, x + 120, y + 168, w - 336, 8, h.mp / h.maxMp, PALETTE.mp);
     const sx = x + w - 144;
-    text(this, sx, y + 146, `공격 ${h.atk}`, 12, INK.ink);
-    text(this, sx, y + 166, `방어 ${h.def}`, 12, INK.ink);
-    text(this, sx + 64, y + 146, `물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, 12, INK.ink);
+    text(this, sx, y + 146, L(`공격 ${h.atk}`, `ATK ${h.atk}`), 12, INK.ink);
+    text(this, sx, y + 166, L(`방어 ${h.def}`, `DEF ${h.def}`), 12, INK.ink);
+    text(this, sx + 64, y + 146, L(`물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, `Potions ${h.bag.hp + h.bag.mp + h.bag.guard}`), 12, INK.ink);
     text(this, sx + 64, y + 166, `${h.gold}G`, 12, INK.ink);
 
     dots(this, x + 18, y + 188, w - 36, PALETTE.paperLine);
-    title(this, x + 18, y + 198, `전투력 ${power}`, 15, INK.ink);
+    title(this, x + 18, y + 198, L(`전투력 ${power}`, `Power ${power}`), 15, INK.ink);
     text(this, x + w - 18, y + 201, goal, 12, INK.inkQuiet).setOrigin(1, 0);
     const skills = h.skills.map((sk) => `${SKILLS[sk.id].name} ${sk.lv}`).join(' · ');
     if (untouched(h)) {
-      button(this, x + 18, y + 222, 104, 26, '직업 바꾸기', () => this.scene.restart({ messages: this.messages, hire: { slot: state.activeSlot, change: true } }), { size: 12 });
-      fit(text(this, x + 130, y + 228, `스킬 ${skills}`, 12, INK.inkQuiet), w - 236);
+      button(this, x + 18, y + 222, 104, 26, L('직업 바꾸기', 'Change class'), () => this.scene.restart({ messages: this.messages, hire: { slot: state.activeSlot, change: true } }), { size: 12 });
+      fit(text(this, x + 130, y + 228, L(`스킬 ${skills}`, `Skills ${skills}`), 12, INK.inkQuiet), w - 236);
     } else {
-      const extras = [h.rescues ? `위기 지원 ${h.rescues}` : ''].filter(Boolean).join(' · ');
-      fit(text(this, x + 18, y + 228, `스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}` + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
+      const extras = [h.rescues ? L(`위기 지원 ${h.rescues}`, `Rescues ${h.rescues}`) : ''].filter(Boolean).join(' · ');
+      fit(text(this, x + 18, y + 228, L(`스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}`, `Skills ${skills} · Kills ${h.kills} · Best ${h.bestFloor}F${h.abyssBest ? `·Abyss ${h.abyssBest}F` : ''}`) + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
     }
     const others = state.slots.filter(Boolean).length > 1;
-    button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? '정말?' : '방출', () => {
+    button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? L('정말?', 'Sure?') : L('방출', 'Release'), () => {
       if (!this.releaseArmed) {
-        this.refresh(['방출하면 경쟁사로 가서 언젠가 적으로 만날 수 있다. 한 번 더 누르면 방출.'], true);
+        this.refresh([L('방출하면 경쟁사로 가서 언젠가 적으로 만날 수 있다. 한 번 더 누르면 방출.', 'A released hunter joins the rival and may face you one day. Tap again to release.')], true);
         return;
       }
       const gone = release(state, state.activeSlot);
-      if (gone) this.refresh([`${gone.name}을(를) 방출했다. ${state.rival.name}이(가) 데려갔다.`]);
+      if (gone) this.refresh([L(`${gone.name}을(를) 방출했다. ${state.rival.name}이(가) 데려갔다.`, `Released ${gone.name}. ${state.rival.name} took them in.`)]);
     }, { enabled: others });
   }
 
@@ -570,8 +585,8 @@ export class HQScene extends Phaser.Scene {
     const hunter = activeHunter(state);
     if (!hunter) return;
     const bw = (w - 40) / 2;
-    panel(this, x, y, w, 158, '에이전시 투자');
-    text(this, x + w - 14, y + 16, '운영 자금에서 지출', 12, INK.faint).setOrigin(1, 0);
+    panel(this, x, y, w, 158, L('에이전시 투자', 'Agency investment'));
+    text(this, x + w - 14, y + 16, L('운영 자금에서 지출', 'Paid from funds'), 12, INK.faint).setOrigin(1, 0);
     const kinds: TrainingKind[] = ['atk', 'def', 'hp', 'mp'];
     kinds.forEach((kind, i) => {
       const cost = trainingCost(hunter, kind);
@@ -579,7 +594,7 @@ export class HQScene extends Phaser.Scene {
       const bx = x + 16 + (i % 2) * (bw + 8);
       const by = y + 36 + Math.floor(i / 2) * 56;
       button(this, bx, by, bw, 48, `${t.label}  ${cost}G\n${t.describe}`, () => {
-        if (train(state, kind)) this.refresh([`${t.label} 완료. ${t.describe}`]);
+        if (train(state, kind)) this.refresh([L(`${t.label} 완료. ${t.describe}`, `${t.label} done. ${t.describe}`)]);
       }, { enabled: agent.gold >= cost });
     });
   }
@@ -588,7 +603,7 @@ export class HQScene extends Phaser.Scene {
     const r = buyItem(state, rng, kind);
     if (!r.ok) return;
     const name = CONSUMABLES[kind].name;
-    const msg = r.agentPaid > 0 ? `${name}: 에이전트가 ${r.agentPaid}G를 지원했다. (헌터 부담 ${r.hunterPaid}G)` : `${name} 구매. -${r.hunterPaid}G`;
+    const msg = r.agentPaid > 0 ? L(`${name}: 에이전트가 ${r.agentPaid}G를 지원했다. (헌터 부담 ${r.hunterPaid}G)`, `${name}: the agency covered ${r.agentPaid}G. (Hunter paid ${r.hunterPaid}G)`) : L(`${name} 구매. -${r.hunterPaid}G`, `Bought ${name}. -${r.hunterPaid}G`);
     this.refresh([msg]);
   }
 
@@ -602,17 +617,17 @@ export class HQScene extends Phaser.Scene {
   private drawShop(x: number, y: number, w = 440) {
     const h = activeHunter(state);
     if (!h) return;
-    panel(this, x, y, w, 76, '가방 · 상점');
-    button(this, x + 14, y + 14, 96, 26, showGear ? '순위 보기' : '장비 보기', () => {
+    panel(this, x, y, w, 76, L('가방 · 상점', 'Bag · Shop'));
+    button(this, x + 14, y + 14, 96, 26, showGear ? L('순위 보기', 'Rankings') : L('장비 보기', 'Gear'), () => {
       showGear = !showGear;
       this.scene.restart({ messages: this.messages });
     });
-    button(this, x + 116, y + 14, 60, 26, '뽑기', () => this.openGacha(), { primary: true, size: 12 });
-    button(this, x + 182, y + 14, 56, 26, '강화', () => this.openEnhance(), { primary: true, size: 12 });
-    text(this, x + 16, y + 48, `물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, 12, INK.quiet);
+    button(this, x + 116, y + 14, 60, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
+    button(this, x + 182, y + 14, 56, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
+    text(this, x + 16, y + 48, L(`물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, `HP pot ${h.bag.hp} · MP pot ${h.bag.mp} · Guard ${h.bag.guard} · Return ${h.bag.escape}`), 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
-      button(this, x + w - 196 + i * 92, y + 16, 86, 44, `${c.name.slice(0, 2)} 물약\n${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
+      button(this, x + w - 196 + i * 92, y + 16, 86, 44, L(`${c.name.slice(0, 2)} 물약\n${c.price}G`, `${c.name}\n${c.price}G`), () => this.buy(kind), { enabled: this.canBuy(kind) });
     });
   }
 
@@ -626,21 +641,21 @@ export class HQScene extends Phaser.Scene {
     const w = PORTRAIT ? GW - 28 : 720;
     const x = (GW - w) / 2;
     const stones = state.agent.stones ?? 0;
-    title(this, GW / 2, 18, '장비 강화', 23, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, 50, `마력석 ${stones}개 · 운영 자금 ${state.agent.gold}G`, 12, INK.gold).setOrigin(0.5, 0);
-    text(this, GW / 2, 70, '+5부터 실패하면 한 단계 떨어질 수 있고, +7부터는 부서질 수도 있다.', 12, INK.faint)
+    title(this, GW / 2, 18, L('장비 강화', 'Enhance Gear'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 50, L(`마력석 ${stones}개 · 운영 자금 ${state.agent.gold}G`, `Mana stones ${stones} · Funds ${state.agent.gold}G`), 12, INK.gold).setOrigin(0.5, 0);
+    text(this, GW / 2, 70, L('+5부터 실패하면 한 단계 떨어질 수 있고, +7부터는 부서질 수도 있다.', 'From +5 a failure can drop a level; from +7 the gear can break.'), 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
 
     let y = PORTRAIT ? 112 : 96;
     if (result) {
       const g = result.gear;
       const [line, color] = result.success
-        ? [`성공! ${g.name} +${result.from} → +${result.to}`, INK.gold]
+        ? [L(`성공! ${g.name} +${result.from} → +${result.to}`, `Success! ${g.name} +${result.from} → +${result.to}`), INK.gold]
         : result.broken
-          ? [`실패... +${result.from} ${g.name}이(가) 부서졌다!`, INK.red]
+          ? [L(`실패... +${result.from} ${g.name}이(가) 부서졌다!`, `Failed... +${result.from} ${g.name} broke!`), INK.red]
           : result.to < result.from
-            ? [`실패... ${g.name} +${result.from} → +${result.to}`, INK.red]
-            : [`실패... ${g.name}은(는) +${result.from} 그대로.`, INK.quiet];
+            ? [L(`실패... ${g.name} +${result.from} → +${result.to}`, `Failed... ${g.name} +${result.from} → +${result.to}`), INK.red]
+            : [L(`실패... ${g.name}은(는) +${result.from} 그대로.`, `Failed... ${g.name} stays at +${result.from}.`), INK.quiet];
       const t = title(this, GW / 2, y, line, 15, color).setOrigin(0.5, 0);
       if (t.width > w) t.setFontSize(12);
       this.tweens.add({ targets: t, scale: { from: 1.25, to: 1 }, duration: 250 });
@@ -656,7 +671,7 @@ export class HQScene extends Phaser.Scene {
       panel(this, x, ry, w, rowH - 6);
       if (!g) {
         text(this, x + 14, ry + 10, GEAR_SLOT_NAMES[slot], 12, INK.faint);
-        text(this, x + 14, ry + 30, '비어 있음', 12, INK.faint);
+        text(this, x + 14, ry + 30, L('비어 있음', 'Empty'), 12, INK.faint);
         return;
       }
       const icon = this.add.graphics();
@@ -668,7 +683,7 @@ export class HQScene extends Phaser.Scene {
       fit(text(this, tx, ry + 24, describeGear(g), 12, INK.text), tw);
       const plus = g.plus ?? 0;
       if (plus >= MAX_PLUS) {
-        text(this, tx, ry + 42, '최대 강화', 12, INK.gold);
+        text(this, tx, ry + 42, L('최대 강화', 'Maxed'), 12, INK.gold);
         return;
       }
       const cost = enhanceCost(g);
@@ -676,9 +691,9 @@ export class HQScene extends Phaser.Scene {
       const ok = stones >= cost.stones && state.agent.gold >= cost.gold;
       const pct = (v: number) => Math.round(v * 100);
       const f = failOdds(g);
-      const failText = risk === 'none' ? '' : `실패하면 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`;
+      const failText = risk === 'none' ? '' : L(`실패하면 ${f.break > 0 ? `파괴 ${pct(f.break)} · ` : ''}하락 ${pct(f.drop)} · 유지 ${pct(f.keep)}%`, `On fail: ${f.break > 0 ? `break ${pct(f.break)} · ` : ''}drop ${pct(f.drop)} · keep ${pct(f.keep)}%`);
       const chance = enhanceChance(g);
-      const costText = `마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(chance)}% · 실패 ${pct(1 - chance)}%`;
+      const costText = L(`마력석 ${cost.stones} · ${cost.gold}G · 성공 ${pct(chance)}% · 실패 ${pct(1 - chance)}%`, `Stones ${cost.stones} · ${cost.gold}G · Success ${pct(chance)}% · Fail ${pct(1 - chance)}%`);
       const riskColor = risk === 'break' ? INK.red : risk === 'drop' ? INK.rust : INK.quiet;
       if (PORTRAIT) {
         fit(text(this, tx, ry + 42, costText, 12, ok ? INK.quiet : INK.faint), tw);
@@ -695,17 +710,17 @@ export class HQScene extends Phaser.Scene {
         else if (r.broken) sfx.death();
         else sfx.curse();
         const msg = r.success
-          ? `강화 성공: ${r.gear.name} +${r.to}`
-          : r.broken ? `강화 실패: +${r.from} ${r.gear.name}이(가) 부서졌다.` : `강화 실패: ${r.gear.name} +${r.to}`;
+          ? L(`강화 성공: ${r.gear.name} +${r.to}`, `Enhanced: ${r.gear.name} +${r.to}`)
+          : r.broken ? L(`강화 실패: +${r.from} ${r.gear.name}이(가) 부서졌다.`, `Enhance failed: +${r.from} ${r.gear.name} broke.`) : L(`강화 실패: ${r.gear.name} +${r.to}`, `Enhance failed: ${r.gear.name} +${r.to}`);
         this.messages = [msg, ...this.messages];
         this.scene.restart({ messages: this.messages, enhance: { result: r } });
       }, { primary: risk !== 'break', size: 15, enabled: ok });
     });
 
     const by = y + GEAR_SLOTS.length * rowH + 6;
-    text(this, GW / 2, by, '마력석은 몬스터, 중간보스, 층 보스, 게이트 클리어에서 얻는다.', 12, INK.faint)
+    text(this, GW / 2, by, L('마력석은 몬스터, 중간보스, 층 보스, 게이트 클리어에서 얻는다.', 'Mana stones come from monsters, mid-bosses, floor bosses and gate clears.'), 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
-    button(this, x, GH - 70, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+    button(this, x, GH - 70, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
   }
 
   private openGacha() {
@@ -720,23 +735,23 @@ export class HQScene extends Phaser.Scene {
     const h = activeHunter(state);
     const w = Math.min(GW - 28, 520);
     const x = (GW - w) / 2;
-    title(this, GW / 2, 18, '장비 뽑기', 23, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, 52, '균열에서 흘러나온 봉인 상자. 무엇이 들었는지는 열어 봐야 안다.', 12, INK.quiet)
+    title(this, GW / 2, 18, L('장비 뽑기', 'Gear Draw'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 52, L('균열에서 흘러나온 봉인 상자. 무엇이 들었는지는 열어 봐야 안다.', 'A sealed box from the rift. Open it to find out what is inside.'), 12, INK.quiet)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
 
     const oy = PORTRAIT ? 96 : 84;
     const oddsH = 36 + GACHA_ODDS.length * 22;
-    panel(this, x, oy, w, oddsH, '확률');
+    panel(this, x, oy, w, oddsH, L('확률', 'Odds'));
     GACHA_ODDS.forEach((o, i) => {
       const ly = oy + 24 + i * 22;
       const sample = makeGear(new Rng(1), o.tier, 'weapon');
-      text(this, x + 18, ly, `${o.label} · ${o.tier}단계`, 12, tierColor(o.tier), true);
-      text(this, x + 150, ly, `예) ${sample.name}`, 12, INK.quiet);
+      text(this, x + 18, ly, L(`${o.label} · ${o.tier}단계`, `${o.label} · Tier ${o.tier}`), 12, tierColor(o.tier), true);
+      text(this, x + 150, ly, L(`예) ${sample.name}`, `e.g. ${sample.name}`), 12, INK.quiet);
       text(this, x + w - 18, ly, `${Math.round(o.chance * 100)}%`, 12, tierColor(o.tier)).setOrigin(1, 0);
     });
 
     const ry = oy + oddsH + 12;
-    text(this, GW / 2, ry, `지금 낀 것보다 좋으면 바로 착용, 아니면 ${GACHA_REFUND}G에 되판다.`, 12, INK.faint)
+    text(this, GW / 2, ry, L(`지금 낀 것보다 좋으면 바로 착용, 아니면 ${GACHA_REFUND}G에 되판다.`, `Better than yours: equipped. Otherwise sold for ${GACHA_REFUND}G.`), 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
 
     const cy = ry + 30;
@@ -744,7 +759,7 @@ export class HQScene extends Phaser.Scene {
     if (result) {
       const g = result.gear;
       const color = tierColor(g.tier);
-      panel(this, x, cy, w, cardH, '결과');
+      panel(this, x, cy, w, cardH, L('결과', 'Result'));
       const big = g.tier >= 8;
       if (big) {
         const glow = this.add.graphics();
@@ -753,50 +768,50 @@ export class HQScene extends Phaser.Scene {
       }
       const icon = this.add.graphics();
       drawGearIcon(g)(icon, x + 18, cy + 26);
-      text(this, x + 72, cy + 22, `${gachaLabel(g.tier)} · ${GEAR_SLOT_NAMES[g.slot]} · ${g.tier}단계`, 12, INK.faint);
+      text(this, x + 72, cy + 22, L(`${gachaLabel(g.tier)} · ${GEAR_SLOT_NAMES[g.slot]} · ${g.tier}단계`, `${gachaLabel(g.tier)} · ${GEAR_SLOT_NAMES[g.slot]} · Tier ${g.tier}`), 12, INK.faint);
       title(this, x + 72, cy + 40, g.name, 15, color);
       text(this, x + 72, cy + 64, describeGear(g), 12, INK.text);
       const outcome = result.equipped
-        ? (result.old ? `착용! ${result.old.name} 대신 · ${gearDiff(g, result.old)}` : `착용! ${gearDiff(g)}`)
-        : `${result.old?.name ?? '지금 장비'}이(가) 더 좋아서 ${result.refund}G에 되팔았다.`;
+        ? (result.old ? L(`착용! ${result.old.name} 대신 · ${gearDiff(g, result.old)}`, `Equipped! Replaces ${result.old.name} · ${gearDiff(g, result.old)}`) : L(`착용! ${gearDiff(g)}`, `Equipped! ${gearDiff(g)}`))
+        : L(`${result.old?.name ?? '지금 장비'}이(가) 더 좋아서 ${result.refund}G에 되팔았다.`, `${result.old?.name ?? 'Current gear'} is better, so it was sold for ${result.refund}G.`);
       text(this, x + 18, cy + 92, outcome, 12, result.equipped ? INK.gold : INK.quiet).setWordWrapWidth(w - 36, true);
       icon.setAlpha(0);
       this.tweens.add({ targets: icon, alpha: 1, duration: 250 });
       if (big) this.cameras.main.flash(300, 255, 200, 150);
     } else {
-      panel(this, x, cy, w, cardH, '결과');
-      text(this, GW / 2, cy + cardH / 2 - 8, '아직 뽑지 않았다.', 12, INK.faint).setOrigin(0.5, 0);
+      panel(this, x, cy, w, cardH, L('결과', 'Result'));
+      text(this, GW / 2, cy + cardH / 2 - 8, L('아직 뽑지 않았다.', 'Nothing drawn yet.'), 12, INK.faint).setOrigin(0.5, 0);
     }
 
     const by = Math.max(cy + cardH + 20, GH - 190);
     if (h) {
-      text(this, GW / 2, by, `${h.name}의 소지금 ${h.gold}G`, 12, h.gold >= GACHA_PRICE ? INK.gold : INK.red).setOrigin(0.5, 0);
+      text(this, GW / 2, by, L(`${h.name}의 소지금 ${h.gold}G`, `${h.name}'s purse ${h.gold}G`), 12, h.gold >= GACHA_PRICE ? INK.gold : INK.red).setOrigin(0.5, 0);
     }
     const can = !!h && h.gold >= GACHA_PRICE;
-    button(this, x, by + 26, w, 56, can ? `뽑기  ${GACHA_PRICE}G` : `뽑기  ${GACHA_PRICE}G (소지금 부족)`, () => {
+    button(this, x, by + 26, w, 56, can ? L(`뽑기  ${GACHA_PRICE}G`, `Draw  ${GACHA_PRICE}G`) : L(`뽑기  ${GACHA_PRICE}G (소지금 부족)`, `Draw  ${GACHA_PRICE}G (not enough)`), () => {
       const r = drawGear(state, rng);
       if (!r) return;
       persist();
       if (r.gear.tier >= 8) sfx.levelup();
       else if (r.equipped) sfx.gear();
       else sfx.buy();
-      const msg = r.equipped ? `장비 뽑기: ${r.gear.name}(${r.gear.tier}단계) 착용!` : `장비 뽑기: ${r.gear.name}. ${r.refund}G에 되팔았다.`;
+      const msg = r.equipped ? L(`장비 뽑기: ${r.gear.name}(${r.gear.tier}단계) 착용!`, `Gear draw: equipped ${r.gear.name} (tier ${r.gear.tier})!`) : L(`장비 뽑기: ${r.gear.name}. ${r.refund}G에 되팔았다.`, `Gear draw: ${r.gear.name}. Sold for ${r.refund}G.`);
       this.messages = [msg, ...this.messages];
       this.scene.restart({ messages: this.messages, gacha: { result: r } });
     }, { primary: true, size: 18, enabled: can });
-    button(this, x, by + 92, w, 50, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+    button(this, x, by + 92, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
   }
 
   /** The gear doll in a panel. */
   private drawGearPanel(x: number, y: number, w: number) {
     const h = activeHunter(state);
     if (!h) return;
-    panel(this, x, y, w, DOLL_H + 40, '장비');
+    panel(this, x, y, w, DOLL_H + 40, L('장비', 'Gear'));
     if (PORTRAIT) {
-      button(this, x + w - 160, y + 8, 70, 26, '뽑기', () => this.openGacha(), { primary: true, size: 12 });
-      button(this, x + w - 84, y + 8, 72, 26, '강화', () => this.openEnhance(), { primary: true, size: 12 });
+      button(this, x + w - 160, y + 8, 70, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
+      button(this, x + w - 84, y + 8, 72, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
     }
-    else text(this, x + w - 16, y + 12, '더 좋은 장비를 얻으면 바꿔 낌', 12, INK.faint).setOrigin(1, 0);
+    else text(this, x + w - 16, y + 12, L('더 좋은 장비를 얻으면 바꿔 낌', 'Better gear is swapped in'), 12, INK.faint).setOrigin(1, 0);
     drawPaperDoll(this, x + 12, y + 32, w - 24, h);
   }
 
@@ -807,33 +822,33 @@ export class HQScene extends Phaser.Scene {
     this.drawGearPanel(x, y, w);
 
     const py = y + DOLL_H + 60;
-    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52 + 22, '물약 · 상점');
-    text(this, x + 16, py + 32 + CONSUMABLE_KINDS.length * 52, '귀환하면 가방은 체력 물약 1개로 돌아갑니다.', 12, INK.faint);
-    text(this, x + w - 16, py + 14, `헌터 소지금 ${h.gold}G`, 12, INK.gold).setOrigin(1, 0);
+    panel(this, x, py, w, 36 + CONSUMABLE_KINDS.length * 52 + 22, L('물약 · 상점', 'Potions · Shop'));
+    text(this, x + 16, py + 32 + CONSUMABLE_KINDS.length * 52, L('귀환하면 가방은 체력 물약 1개로 돌아갑니다.', 'On return the bag resets to 1 HP potion.'), 12, INK.faint);
+    text(this, x + w - 16, py + 14, L(`헌터 소지금 ${h.gold}G`, `Hunter purse ${h.gold}G`), 12, INK.gold).setOrigin(1, 0);
     CONSUMABLE_KINDS.forEach((kind, i) => {
       const c = CONSUMABLES[kind];
       const ry = py + 32 + i * 52;
       text(this, x + 16, ry + 4, `${c.name}  ${h.bag[kind]}/${BAG_MAX}`, 12, INK.text, true);
       text(this, x + 16, ry + 24, c.describe, 12, INK.quiet);
       if (c.price !== undefined) {
-        button(this, x + w - 126, ry, 110, 44, `구매 ${c.price}G`, () => this.buy(kind), { enabled: this.canBuy(kind) });
+        button(this, x + w - 126, ry, 110, 44, L(`구매 ${c.price}G`, `Buy ${c.price}G`), () => this.buy(kind), { enabled: this.canBuy(kind) });
       } else {
-        text(this, x + w - 16, ry + 14, `${c.where}에서만`, 12, INK.faint).setOrigin(1, 0);
+        text(this, x + w - 16, ry + 14, L(`${c.where}에서만`, `${c.where} only`), 12, INK.faint).setOrigin(1, 0);
       }
     });
   }
 
   /** Live association ranking: ours, the rival agency's, the fallen, and established rankers. */
   private drawRanking(x: number, y: number, w = 448) {
-    panel(this, x, y, w, 326, '헌터 순위 · 명예의 전당');
+    panel(this, x, y, w, 326, L('헌터 순위 · 명예의 전당', 'Hunter Ranking · Hall of Fame'));
     const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 170, score: x + 212, note: x + w - 18 };
     const hy = y + 20;
     text(this, cols.rank, hy, '#', 12, INK.faint);
-    text(this, cols.grade, hy, '등급', 12, INK.faint);
-    text(this, cols.name, hy, '이름', 12, INK.faint);
+    text(this, cols.grade, hy, L('등급', 'Rank'), 12, INK.faint);
+    text(this, cols.name, hy, L('이름', 'Name'), 12, INK.faint);
     text(this, cols.lv, hy, 'Lv', 12, INK.faint);
-    text(this, cols.score, hy, '전투력', 12, INK.faint);
-    text(this, cols.note, hy, '소속 · 최후', 12, INK.faint).setOrigin(1, 0);
+    text(this, cols.score, hy, L('전투력', 'Power'), 12, INK.faint);
+    text(this, cols.note, hy, L('소속 · 최후', 'Agency · Fate'), 12, INK.faint).setOrigin(1, 0);
     dots(this, x + 16, hy + 18, w - 32);
     const color = { ours: INK.gate, rival: '#d79bff', gone: INK.faint, world: INK.quiet } as const;
     ranking(state).forEach((r, i) => {
@@ -842,14 +857,14 @@ export class HQScene extends Phaser.Scene {
       const g = rankGradeOf(i)!;
       text(this, cols.rank, ry, `${i + 1}`, 12, i === 0 ? INK.gold : INK.quiet, true);
       text(this, cols.grade, ry, g, 12, i === 0 ? INK.gold : INK.rust, true);
-      text(this, cols.name, ry, r.name, 12, c, r.status === 'ours');
+      fit(text(this, cols.name, ry, r.name, 12, c, r.status === 'ours'), cols.lv - cols.name - 6);
       text(this, cols.lv, ry, `${r.level}`, 12, INK.quiet);
       text(this, cols.score, ry, `${r.score}`, 12, INK.quiet);
       const note = r.cls ? `${CLASSES[r.cls].name} · ${r.note}` : r.note;
       fit(text(this, cols.note, ry, note, 12, r.status === 'gone' ? INK.faint : c), cols.note - cols.score - 50).setOrigin(1, 0);
     });
     const gone = state.hallOfFame.length;
-    if (gone > 0) text(this, x + w - 18, y + 304, `기록으로 남은 헌터 ${gone}명`, 12, INK.faint).setOrigin(1, 0);
+    if (gone > 0) text(this, x + w - 18, y + 304, L(`기록으로 남은 헌터 ${gone}명`, `${gone} hunters on record`), 12, INK.faint).setOrigin(1, 0);
     this.challengeButton(x + 14, y + 300, Math.min(260, w - 150));
   }
 
@@ -859,11 +874,11 @@ export class HQScene extends Phaser.Scene {
     if (!h) return;
     const next = nextChallenge(state, h);
     if (!next) {
-      text(this, x + 4, y + 6, '협회 랭커를 모두 꺾었다.', 12, INK.gold);
+      text(this, x + 4, y + 6, L('협회 랭커를 모두 꺾었다.', 'You beat every Association ranker.'), 12, INK.gold);
       return;
     }
     const ok = canChallenge(state, h);
-    const label = ok ? `${next.rank}위 ${next.ranker.name}에게 도전 (${next.ranker.score})` : `오늘은 도전 완료 · 다음 ${next.ranker.name}`;
+    const label = ok ? L(`${next.rank}위 ${next.ranker.name}에게 도전 (${next.ranker.score})`, `Challenge #${next.rank} ${next.ranker.name} (${next.ranker.score})`) : L(`오늘은 도전 완료 · 다음 ${next.ranker.name}`, `Challenged today · next ${next.ranker.name}`);
     button(this, x, y, w, 22, label, () => {
       const duel = startDuel(state);
       if (!duel) return;
@@ -874,35 +889,35 @@ export class HQScene extends Phaser.Scene {
 
   private drawRival(x: number, y: number, w = 448) {
     const { rival } = state;
-    panel(this, x, y, w, 72, '경쟁 에이전시');
+    panel(this, x, y, w, 72, L('경쟁 에이전시', 'Rival Agency'));
     const former = rival.roster.filter((h) => h.origin !== 'rival').length;
     title(this, x + 18, y + 18, rival.name, 15, '#d79bff');
     const rec = state.gateRecord ?? { ours: 0, rival: 0 };
-    text(this, x + w - 18, y + 20, `옛 동료 ${former} · 라이벌 ${rival.roster.length - former} · 게이트 ${rec.rival}`, 12, INK.quiet).setOrigin(1, 0);
+    text(this, x + w - 18, y + 20, L(`옛 동료 ${former} · 라이벌 ${rival.roster.length - former} · 게이트 ${rec.rival}`, `Former ${former} · Rivals ${rival.roster.length - former} · Gates ${rec.rival}`), 12, INK.quiet).setOrigin(1, 0);
     // Each of our hunters has their own rival: the active hunter's first.
     const me = activeHunter(state);
     const ours = [me, ...state.slots.filter((s) => s && s !== me)].filter((s): s is Hunter => !!s);
     const pairs = ours.flatMap((o) => {
       const r = rival.roster.find((h) => h.origin === 'rival' && h.rivalOf === o.id);
-      return r ? [`${o.name}의 라이벌 ${r.name} ${combatPower(r)}`] : [];
+      return r ? [L(`${o.name}의 라이벌 ${r.name} ${combatPower(r)}`, `${o.name}'s rival ${r.name} ${combatPower(r)}`)] : [];
     });
-    const line = pairs.length ? pairs.join(' · ') : '우리 헌터가 S급이 되면 라이벌을 내세운다.';
+    const line = pairs.length ? pairs.join(' · ') : L('우리 헌터가 S급이 되면 라이벌을 내세운다.', 'They will field a rival once our hunter hits S-Rank.');
     fit(text(this, x + 18, y + 44, line, 12, pairs.length ? INK.text : INK.faint), w - 36);
   }
 
   private drawLog(x: number, y: number, w = 448, count = 3, wrap = false) {
     const lines = this.messages.slice(0, count);
     if (!wrap) {
-      panel(this, x, y, w, 76, '업무 일지');
-      if (lines.length === 0) text(this, x + 18, y + 22, '특이사항 없음.', 12, INK.faint);
+      panel(this, x, y, w, 76, L('업무 일지', 'Office Log'));
+      if (lines.length === 0) text(this, x + 18, y + 22, L('특이사항 없음.', 'Nothing to report.'), 12, INK.faint);
       lines.forEach((m, i) => fit(text(this, x + 18, y + 16 + i * 18, `· ${m}`, 12, i === 0 ? INK.text : INK.quiet), w - 36));
       return;
     }
     // Portrait log tab: wrapped lines in a panel that grows to fit them.
-    const box = panel(this, x, y, w, 10, '업무 일지');
+    const box = panel(this, x, y, w, 10, L('업무 일지', 'Office Log'));
     let ly = y + 20;
     if (lines.length === 0) {
-      text(this, x + 18, ly, '특이사항 없음.', 12, INK.faint);
+      text(this, x + 18, ly, L('특이사항 없음.', 'Nothing to report.'), 12, INK.faint);
       ly += 20;
     }
     lines.forEach((m, i) => {
@@ -910,6 +925,6 @@ export class HQScene extends Phaser.Scene {
       ly += t.height + 6;
     });
     box.destroy();
-    this.children.sendToBack(panel(this, x, y, w, ly - y + 12, '업무 일지'));
+    this.children.sendToBack(panel(this, x, y, w, ly - y + 12, L('업무 일지', 'Office Log')));
   }
 }

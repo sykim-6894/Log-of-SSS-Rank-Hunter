@@ -1,5 +1,6 @@
 import { eliteOf, MONSTERS, MonsterKind, monsterPool, recommendedLevel } from './monsters';
 import { Rng } from './rng';
+import { L } from './lang';
 
 /**
  * Gates: short dungeons that open at the agency for a few days and then close.
@@ -39,21 +40,21 @@ export interface GateTheme {
 }
 
 export const GATE_THEMES: Record<GateThemeId, GateTheme> = {
-  goblin: { name: '고블린 소굴', pool: ['goblin', 'archer'], boss: 'orc' },
-  wolf: { name: '잿빛 늑대 숲', pool: ['wolf', 'beast'], boss: 'beast' },
-  orc: { name: '오크 전초기지', pool: ['orc', 'archer', 'goblin'], boss: 'orc' },
-  swamp: { name: '독안개 늪', pool: ['lizard', 'shaman'], boss: 'lizard' },
-  shadow: { name: '그림자 성채', pool: ['knight', 'shaman'], boss: 'knight' },
+  goblin: { name: L('고블린 소굴', 'Goblin Den'), pool: ['goblin', 'archer'], boss: 'orc' },
+  wolf: { name: L('잿빛 늑대 숲', 'Ashen Wolf Woods'), pool: ['wolf', 'beast'], boss: 'beast' },
+  orc: { name: L('오크 전초기지', 'Orc Outpost'), pool: ['orc', 'archer', 'goblin'], boss: 'orc' },
+  swamp: { name: L('독안개 늪', 'Poison Mist Swamp'), pool: ['lizard', 'shaman'], boss: 'lizard' },
+  shadow: { name: L('그림자 성채', 'Shadow Keep'), pool: ['knight', 'shaman'], boss: 'knight' },
 };
 const THEME_IDS = Object.keys(GATE_THEMES) as GateThemeId[];
 
 /** A special rule on a gate. Harder, but the clear reward is half again as big. */
 export type GateRule = 'dark' | 'swarm' | 'elite' | 'sealed';
 export const GATE_RULES: Record<GateRule, { name: string; text: string }> = {
-  dark: { name: '어둠', text: '시야가 4칸으로 줄어든다' },
-  swarm: { name: '무리', text: '적이 1.5배로 많다' },
-  elite: { name: '정예', text: '층마다 중간보스가 나온다' },
-  sealed: { name: '봉인', text: '체력 물약을 쓸 수 없다' },
+  dark: { name: L('어둠', 'Dark'), text: L('시야가 4칸으로 줄어든다', 'Sight drops to 4 tiles') },
+  swarm: { name: L('무리', 'Swarm'), text: L('적이 1.5배로 많다', '1.5x as many enemies') },
+  elite: { name: L('정예', 'Elite'), text: L('층마다 중간보스가 나온다', 'A mid-boss on every floor') },
+  sealed: { name: L('봉인', 'Sealed'), text: L('체력 물약을 쓸 수 없다', 'Health potions cannot be used') },
 };
 const RULE_IDS = Object.keys(GATE_RULES) as GateRule[];
 
@@ -116,8 +117,8 @@ export interface RivalRaid {
 export const INTERCEPT_BONUS = 1.3;
 
 export function gateName(g: Gate): string {
-  if (g.rift) return `대균열 · ${GATE_THEMES[g.theme].name}`;
-  return `${g.grade}급 ${GATE_THEMES[g.theme].name}`;
+  if (g.rift) return L(`대균열 · ${GATE_THEMES[g.theme].name}`, `Great Rift · ${GATE_THEMES[g.theme].name}`);
+  return L(`${g.grade}급 ${GATE_THEMES[g.theme].name}`, `${g.grade}-Rank ${GATE_THEMES[g.theme].name}`);
 }
 
 export function gateFloors(g: Gate): number {
@@ -223,7 +224,7 @@ export function gateBoss(g: Gate, danger: number): MonsterKind {
   const e = eliteOf(base);
   return {
     ...e,
-    name: g.rift ? `[대균열의 군주] ${base.name}` : `[게이트 주인] ${base.name}`,
+    name: g.rift ? L(`[대균열의 군주] ${base.name}`, `[Rift Lord] ${base.name}`) : L(`[게이트 주인] ${base.name}`, `[Gate Master] ${base.name}`),
     hp: Math.round(e.hp * (g.rift ? 1.5 : 1.25)),
     exp: Math.round(e.exp * 1.5),
     score: e.score * 2,

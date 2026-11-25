@@ -6,6 +6,19 @@ import { skipTitleOnce } from './game/store';
 import { TowerScene } from './scenes/TowerScene';
 import { GH, GW, layoutStale } from './game/layout';
 import { unlockAudio } from './game/sfx';
+import { englishOf, lang } from './core/lang';
+
+// Playing in English: Korean left in saved data (names, old news) is translated or spelled out.
+if (lang() === 'en') {
+  const proto = Phaser.GameObjects.Text.prototype as unknown as { setText(v: string | string[]): unknown };
+  const setText = proto.setText;
+  proto.setText = function (this: unknown, v: string | string[]) {
+    const fix = (x: unknown) => (typeof x === 'string' ? englishOf(x) : x);
+    return setText.call(this, (Array.isArray(v) ? v.map(fix) : fix(v)) as string);
+  };
+  document.title = 'Wanted: The Protagonist';
+  document.documentElement.lang = 'en';
+}
 
 async function start() {
   // Pixel fonts must be ready before Phaser draws any text.

@@ -31,6 +31,7 @@ import {
   ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAGE_SKILL_POWER, MAX_SKILL_LV,
   ClassId, OwnedSkill, SkillId, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
+import { L } from './lang';
 
 export interface Monster {
   id: number;
@@ -87,10 +88,10 @@ export type RunStatus = 'playing' | 'onStairs' | 'choosing' | 'trading' | 'dead'
 export type RewardKind = 'item' | 'gold' | 'skill' | 'rescue';
 
 export const REWARDS: Record<RewardKind, { label: string; describe: (level: number) => string }> = {
-  item: { label: '아이템', describe: () => '높은 층 수준의 장비 1개' },
-  gold: { label: '골드', describe: (lv) => `${lv * 15}G (헌터 소지금)` },
-  skill: { label: '스킬 강화', describe: () => '가진 스킬 하나를 바로 한 단계 강화' },
-  rescue: { label: '위기 시 1회 지원', describe: () => '쓰러질 때 한 번 체력 30%로 버팀' },
+  item: { label: L('아이템', 'Item'), describe: () => L('높은 층 수준의 장비 1개', '1 piece of gear from a higher floor') },
+  gold: { label: L('골드', 'Gold'), describe: (lv) => L(`${lv * 15}G (헌터 소지금)`, `${lv * 15}G (hunter's purse)`) },
+  skill: { label: L('스킬 강화', 'Skill upgrade'), describe: () => L('가진 스킬 하나를 바로 한 단계 강화', 'Upgrade one of your skills right away') },
+  rescue: { label: L('위기 시 1회 지원', 'One-time rescue'), describe: () => L('쓰러질 때 한 번 체력 30%로 버팀', 'Once, survive a fatal blow with 30% HP') },
 };
 
 /** Choice offered after beating a rival hunter: two random rewards, or finishing them for experience. */
@@ -385,16 +386,16 @@ export class TowerRun {
 
   /** Where the hunter is, for the screen: "7층" or "C급 독안개 늪 2/4층". */
   get placeName(): string {
-    if (this.duel) return '결투장';
-    if (this.inAbyss) return `심연 ${abyssDepth(this.floor)}층`;
-    return this.gate ? `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
+    if (this.duel) return L('결투장', 'Arena');
+    if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
+    return this.gate ? L(`${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층`, `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
 
   /** Short form for the top bar: "7층" or "게이트 2/4층". */
   get placeShort(): string {
-    if (this.duel) return '결투장';
-    if (this.inAbyss) return `심연 ${abyssDepth(this.floor)}층`;
-    return this.gate ? `게이트 ${this.floor}/${gateFloors(this.gate)}층` : `${this.floor}층`;
+    if (this.duel) return L('결투장', 'Arena');
+    if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
+    return this.gate ? L(`게이트 ${this.floor}/${gateFloors(this.gate)}층`, `Gate ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
 
   private get pool(): MonsterKind[] {
@@ -441,7 +442,7 @@ export class TowerRun {
     this.maybePlaceMerchant(danger);
 
     let boss = this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
-    if (boss && n > TOP_FLOOR) boss = { ...boss, name: `심연의 군주 (${abyssDepth(n)}층)` };
+    if (boss && n > TOP_FLOOR) boss = { ...boss, name: L(`심연의 군주 (${abyssDepth(n)}층)`, `Abyss Lord (${abyssDepth(n)}F)`) };
     if (boss) {
       const c = center(this.map.rooms[this.map.rooms.length - 1]);
       const spot = [
@@ -452,17 +453,17 @@ export class TowerRun {
       ].find((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y));
       if (spot) {
         this.spawn(boss, spot.x, spot.y, danger);
-        this.say(`${this.gate ? '마지막 층' : this.placeName}에 ${boss.name}의 기척이 느껴진다.`);
+        this.say(L(`${this.gate ? '마지막 층' : this.placeName}에 ${boss.name}의 기척이 느껴진다.`, `You sense ${boss.name} on ${this.gate ? 'the last floor' : this.placeName}.`));
       }
     }
     if (this.gate) {
-      this.say(`${this.placeName}에 들어섰다.`);
-      if (n === 1 && this.gate.rule === 'sealed') this.say('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.');
-      if (n === 1 && this.gate.rule === 'dark') this.say('짙은 어둠 때문에 앞이 잘 보이지 않는다.');
-      if (n === 1 && this.gate.rival) this.say(`${this.gate.rival.agency} 팀이 먼저 와 있다. 먼저 끝내면 보상 +30%!`);
+      this.say(L(`${this.placeName}에 들어섰다.`, `Entered ${this.placeName}.`));
+      if (n === 1 && this.gate.rule === 'sealed') this.say(L('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.', 'A sealing aura fills the air. Health potions will not work.'));
+      if (n === 1 && this.gate.rule === 'dark') this.say(L('짙은 어둠 때문에 앞이 잘 보이지 않는다.', 'Thick darkness makes it hard to see.'));
+      if (n === 1 && this.gate.rival) this.say(L(`${this.gate.rival.agency} 팀이 먼저 와 있다. 먼저 끝내면 보상 +30%!`, `A ${this.gate.rival.agency} team is already here. Finish first for +30% reward!`));
     } else if (n > TOP_FLOOR) {
-      this.say(`${this.placeName}에 들어섰다.${n === TOP_FLOOR + 1 ? ' 탑 위로 끝없는 심연이 펼쳐져 있다.' : ''}`);
-    } else this.say(`성장의 탑 ${n}층에 들어섰다.`);
+      this.say(L(`${this.placeName}에 들어섰다.${n === TOP_FLOOR + 1 ? ' 탑 위로 끝없는 심연이 펼쳐져 있다.' : ''}`, `Entered ${this.placeName}.${n === TOP_FLOOR + 1 ? ' Above the tower, an endless abyss stretches out.' : ''}`));
+    } else this.say(L(`성장의 탑 ${n}층에 들어섰다.`, `Entered Tower of Growth ${n}F.`));
     this.events.push({ type: 'floor' });
     this.updateSight();
   }
@@ -495,7 +496,7 @@ export class TowerRun {
     const hp = Math.round(d.hp * DUEL_HP);
     const kind: MonsterKind = {
       id: `ranker-${d.rankerId}`,
-      name: `${d.rank}위 ${d.name}`,
+      name: L(`${d.rank}위 ${d.name}`, `#${d.rank} ${d.name}`),
       glyph: 'R',
       hp, atk: d.atk, def: d.def,
       exp: d.level * 30,
@@ -505,8 +506,8 @@ export class TowerRun {
       ranker: true,
     };
     this.monsters.push({ id: this.nextId++, kind, x: foe.x, y: foe.y, hp, maxHp: hp, atk: d.atk, def: d.def, awake: true });
-    this.say(`결투장에 들어섰다. ${d.agency}의 ${d.rank}위 ${d.name}(Lv.${d.level})이(가) 기다리고 있다.`);
-    this.say('쓰러뜨리면 순위를 빼앗는다. 져도 목숨은 잃지 않는다.');
+    this.say(L(`결투장에 들어섰다. ${d.agency}의 ${d.rank}위 ${d.name}(Lv.${d.level})이(가) 기다리고 있다.`, `You enter the arena. #${d.rank} ${d.name} (Lv.${d.level}) of ${d.agency} is waiting.`));
+    this.say(L('쓰러뜨리면 순위를 빼앗는다. 져도 목숨은 잃지 않는다.', 'Win to take their rank. Losing will not cost your life.'));
     this.events.push({ type: 'floor' });
     this.updateSight();
   }
@@ -527,7 +528,7 @@ export class TowerRun {
     const y = this.rng.int(room.y, room.y + room.h - 1);
     if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) return;
     this.met.add(h.id);
-    const agency = this.options.rivalAgency ?? '경쟁사';
+    const agency = this.options.rivalAgency ?? L('경쟁사', 'Rival agency');
     const kind: MonsterKind = {
       id: `hunter-${h.id}`,
       name: `${agency} ${h.name}`,
@@ -541,9 +542,9 @@ export class TowerRun {
       range: h.cls === 'mage' || h.cls === 'archer' ? 4 : undefined,
     };
     this.monsters.push({ id: this.nextId++, kind, hunter: h, x, y, hp: h.maxHp, maxHp: h.maxHp, atk: h.atk, def: h.def, awake: false });
-    const tag = h.origin === 'rival' ? `${this.hunter.name}의 라이벌` : '옛 동료';
-    const again = h.spared ? ` 풀어준 뒤로 훨씬 강해졌다 (${h.spared}번째 재회).` : '';
-    this.say(`[${tag}] ${h.name}의 기척이 느껴진다...${again}`);
+    const tag = h.origin === 'rival' ? L(`${this.hunter.name}의 라이벌`, `${this.hunter.name}'s rival`) : L('옛 동료', 'Former ally');
+    const again = h.spared ? L(` 풀어준 뒤로 훨씬 강해졌다 (${h.spared}번째 재회).`, ` Much stronger since you spared them (reunion #${h.spared}).`) : '';
+    this.say(L(`[${tag}] ${h.name}의 기척이 느껴진다...${again}`, `[${tag}] You sense ${h.name}...${again}`));
   }
 
   private randomFreeSpot(): Point | undefined {
@@ -567,7 +568,7 @@ export class TowerRun {
     if (!spot) return;
     const kind = eliteOf(this.rng.pick(this.pool));
     this.spawn(kind, spot.x, spot.y, floor);
-    this.say(`강한 기척이 느껴진다... ${kind.name}!`);
+    this.say(L(`강한 기척이 느껴진다... ${kind.name}!`, `A strong presence... ${kind.name}!`));
   }
 
   private maybePlaceMerchant(floor: number) {
@@ -577,7 +578,7 @@ export class TowerRun {
     if (!spot) return;
     const offers = rollOffers(this.rng, floor);
     this.merchant = { ...spot, offers, sold: offers.map(() => false) };
-    this.say('어딘가에서 떠돌이 상인의 방울 소리가 들린다.');
+    this.say(L('어딘가에서 떠돌이 상인의 방울 소리가 들린다.', "Somewhere, a wandering merchant's bell rings."));
   }
 
   merchantAt(x: number, y: number): boolean {
@@ -590,18 +591,18 @@ export class TowerRun {
     const o = m?.offers[index];
     if (!m || !o || this.status !== 'trading' || m.sold[index]) return '';
     if (this.runGold < o.price) {
-      this.say('이번 수입이 모자라다.');
+      this.say(L('이번 수입이 모자라다.', "This run's income is not enough."));
       return '';
     }
     const h = this.hunter;
     if (o.type === 'item' && h.bag[o.item] >= 5) {
-      this.say('가방에 더 넣을 자리가 없다.');
+      this.say(L('가방에 더 넣을 자리가 없다.', 'No room left in the bag.'));
       return '';
     }
     this.runGold -= o.price;
     m.sold[index] = true;
     this.events.push({ type: 'buy' });
-    const msg = `${offerLabel(o)} 구매. -${o.price}G`;
+    const msg = L(`${offerLabel(o)} 구매. -${o.price}G`, `Bought ${offerLabel(o)}. -${o.price}G`);
     this.say(msg);
     if (o.type === 'gear') this.takeGear(o.gear);
     if (o.type === 'item') addToBag(h, o.item);
@@ -617,7 +618,7 @@ export class TowerRun {
     if (this.status !== 'trading') return;
     this.merchant = undefined;
     this.status = 'playing';
-    this.say('상인은 다음 손님을 찾아 떠났다.');
+    this.say(L('상인은 다음 손님을 찾아 떠났다.', 'The merchant left to find the next customer.'));
   }
 
   /** One or two chests per floor (one more from floor 6), in rooms other than the start. */
@@ -652,39 +653,39 @@ export class TowerRun {
       case 'gold':
         this.runGold += c.amount;
         this.events.push({ type: 'gold', amount: c.amount });
-        this.say(`보물상자: ${c.amount}G!`);
+        this.say(L(`보물상자: ${c.amount}G!`, `Chest: ${c.amount}G!`));
         return;
       case 'consumable': {
         const got = addToBag(h, c.kind);
         this.events.push({ type: 'loot', item: c.kind, got: got > 0, count: h.bag[c.kind] });
-        this.say(got ? `보물상자: ${CONSUMABLES[c.kind].name}!` : `보물상자: ${CONSUMABLES[c.kind].name}... 가방이 가득 차서 두고 왔다.`);
+        this.say(got ? L(`보물상자: ${CONSUMABLES[c.kind].name}!`, `Chest: ${CONSUMABLES[c.kind].name}!`) : L(`보물상자: ${CONSUMABLES[c.kind].name}... 가방이 가득 차서 두고 왔다.`, `Chest: ${CONSUMABLES[c.kind].name}... the bag is full, so you left it.`));
         return;
       }
       case 'gear':
-        this.say(`보물상자: ${gearLabel(c.gear)}!`);
+        this.say(L(`보물상자: ${gearLabel(c.gear)}!`, `Chest: ${gearLabel(c.gear)}!`));
         this.takeGear(c.gear);
         return;
       case 'curse':
-        this.say(`저주받은 상자였다! ${CURSES[c.curse]}`);
+        this.say(L(`저주받은 상자였다! ${CURSES[c.curse]}`, `A cursed chest! ${CURSES[c.curse]}`));
         let detail = '';
         if (c.curse === 'drain') {
           const before = h.hp;
           h.hp = Math.max(1, h.hp - Math.ceil(h.maxHp * 0.25));
-          detail = `체력 -${before - h.hp}  (${before} → ${h.hp})`;
+          detail = L(`체력 -${before - h.hp}  (${before} → ${h.hp})`, `HP -${before - h.hp}  (${before} → ${h.hp})`);
         }
         if (c.curse === 'mana') {
-          detail = `마나 -${h.mp}  (${h.mp} → 0)`;
+          detail = L(`마나 -${h.mp}  (${h.mp} → 0)`, `MP -${h.mp}  (${h.mp} → 0)`);
           h.mp = 0;
         }
         if (c.curse === 'greed') {
           const before = this.runGold;
           this.runGold = Math.floor(this.runGold * 0.7);
-          detail = `이번 수입 -${before - this.runGold}G  (${before}G → ${this.runGold}G)`;
+          detail = L(`이번 수입 -${before - this.runGold}G  (${before}G → ${this.runGold}G)`, `Run income -${before - this.runGold}G  (${before}G → ${this.runGold}G)`);
         }
         if (c.curse === 'ambush') {
           const before = this.monsters.length;
           this.ambush();
-          detail = `몬스터 ${this.monsters.length - before}마리가 바로 옆에 나타났다`;
+          detail = L(`몬스터 ${this.monsters.length - before}마리가 바로 옆에 나타났다`, `${this.monsters.length - before} monsters appeared right beside you`);
         }
         this.events.push({ type: 'curse', curse: c.curse, detail });
         return;
@@ -697,9 +698,9 @@ export class TowerRun {
     this.events.push({ type: 'gear', gear: g, equipped: r.equipped, old });
     const slot = GEAR_SLOT_NAMES[g.slot];
     if (r.equipped) {
-      this.say(`${slot} 장착: ${gearLabel(g)} (${describeGear(g)})` + (r.discarded ? `. ${gearLabel(r.discarded)}은(는) 버렸다.` : ''));
+      this.say(L(`${slot} 장착: ${gearLabel(g)} (${describeGear(g)})`, `${slot} equipped: ${gearLabel(g)} (${describeGear(g)})`) + (r.discarded ? L(`. ${gearLabel(r.discarded)}은(는) 버렸다.`, `. Discarded ${gearLabel(r.discarded)}.`) : ''));
     } else {
-      this.say(`지금 ${slot}이(가) 더 좋다. ${gearLabel(g)}은(는) 버렸다.`);
+      this.say(L(`지금 ${slot}이(가) 더 좋다. ${gearLabel(g)}은(는) 버렸다.`, `Your current ${slot} is better. Discarded ${gearLabel(g)}.`));
     }
   }
 
@@ -784,7 +785,7 @@ export class TowerRun {
       if (spot) {
         const kind = this.rng.pick(this.pool);
         this.spawn(kind, spot.x, spot.y, this.danger);
-        this.say('어디선가 새로운 기척이 느껴진다.');
+        this.say(L('어디선가 새로운 기척이 느껴진다.', 'You sense something new nearby.'));
       }
     }
     if (this.stalkerIn === 0) {
@@ -795,7 +796,7 @@ export class TowerRun {
         this.spawn(stalkerKind(this.stalkers), spot.x, spot.y, this.danger + 4 + 2 * this.stalkers);
         const st = this.monsters[this.monsters.length - 1];
         st.awake = true;
-        this.say(`${this.stalkers}차 던전 붕괴! ${st.kind.name}가 나타났다. 쓰러뜨릴 수 없다. 서둘러 이 층을 떠나라!`);
+        this.say(L(`${this.stalkers}차 던전 붕괴! ${st.kind.name}가 나타났다. 쓰러뜨릴 수 없다. 서둘러 이 층을 떠나라!`, `Dungeon collapse #${this.stalkers}! ${st.kind.name} appeared. It cannot be killed. Leave this floor, fast!`));
         this.events.push({ type: 'stalker', nth: this.stalkers });
       }
     }
@@ -877,7 +878,7 @@ export class TowerRun {
     const amount = Math.min(hurt.maxHp - hurt.hp, Math.ceil(hurt.maxHp * TRAIT_RULES.healAmount));
     hurt.hp += amount;
     this.events.push({ type: 'monsterHeal', x: hurt.x, y: hurt.y, amount });
-    if (this.canSee(m)) this.say(`${m.kind.name}이(가) ${hurt.kind.name}을(를) 치유했다. (+${amount})`);
+    if (this.canSee(m)) this.say(L(`${m.kind.name}이(가) ${hurt.kind.name}을(를) 치유했다. (+${amount})`, `${m.kind.name} healed ${hurt.kind.name}. (+${amount})`));
     return true;
   }
 
@@ -965,7 +966,7 @@ export class TowerRun {
         if (this.merchantAt(nx, ny)) {
           // Talking to the merchant takes no time; the world waits.
           this.status = 'trading';
-          this.say('떠돌이 상인: "골라 보시오. 거래가 끝나면 난 떠나네."');
+          this.say(L('떠돌이 상인: "골라 보시오. 거래가 끝나면 난 떠나네."', 'Wandering merchant: "Take your pick. I leave once we trade."'));
           return false;
         }
         const target = this.monsterAt(nx, ny);
@@ -1007,7 +1008,7 @@ export class TowerRun {
       this.aim(ARCHER_RANGE);
       if (this.archerShot(this.facing.x, this.facing.y)) return true;
     }
-    this.say(this.hunter.cls === 'archer' ? `${ARCHER_RANGE}칸 안 일직선에 적이 없다.` : '바로 옆에 공격할 적이 없다.');
+    this.say(this.hunter.cls === 'archer' ? L(`${ARCHER_RANGE}칸 안 일직선에 적이 없다.`, `No enemy in a straight line within ${ARCHER_RANGE} tiles.`) : L('바로 옆에 공격할 적이 없다.', 'No enemy next to you to attack.'));
     return false;
   }
 
@@ -1019,7 +1020,7 @@ export class TowerRun {
     if (chest >= 0) this.openChest(chest);
     if (this.map.tiles[ny][nx] === Tile.Stairs) {
       if (this.bossAlive) {
-        this.say('수호자가 살아있는 한 계단은 열리지 않는다.');
+        this.say(L('수호자가 살아있는 한 계단은 열리지 않는다.', 'The stairs stay sealed while the guardian lives.'));
       } else {
         this.status = 'onStairs';
       }
@@ -1033,7 +1034,7 @@ export class TowerRun {
     if (back <= 0 || this.guardTurns > 0) return;
     h.hp -= back;
     this.events.push({ type: 'hurt', amount: back });
-    this.say(`${m.kind.name}의 가시에 찔렸다. ${back} 피해.`);
+    this.say(L(`${m.kind.name}의 가시에 찔렸다. ${back} 피해.`, `Pricked by ${m.kind.name}'s thorns. ${back} damage.`));
   }
 
   private atkNow(): number {
@@ -1122,7 +1123,7 @@ export class TowerRun {
       if (!this.rng.chance(archerHitChance(d))) {
         m.awake = true;
         this.events.push({ type: 'miss', x, y });
-        this.say(`화살이 ${m.kind.name}을(를) 빗나갔다.`);
+        this.say(L(`화살이 ${m.kind.name}을(를) 빗나갔다.`, `The arrow missed ${m.kind.name}.`));
         return true;
       }
       this.strike(m, ARCHER_FAR_DAMAGE);
@@ -1135,13 +1136,13 @@ export class TowerRun {
     const h = this.hunter;
     const s = h.skills[slot];
     if (!s) {
-      this.say('그 칸에는 아직 스킬이 없다.');
+      this.say(L('그 칸에는 아직 스킬이 없다.', 'No skill in that slot yet.'));
       return false;
     }
     const info = SKILLS[s.id];
     const cost = skillCost(s);
     if (h.mp < cost) {
-      this.say(`마나가 부족하다. (${info.name} ${cost} 필요)`);
+      this.say(L(`마나가 부족하다. (${info.name} ${cost} 필요)`, `Not enough mana. (${info.name} needs ${cost})`));
       return false;
     }
     this.refund = 0;
@@ -1170,7 +1171,7 @@ export class TowerRun {
     // Straight-line attacks turn toward an enemy in line if none is in front.
     const reach = AIM_REACH[s.id];
     if (reach) this.aim(reach);
-    const none = (why = '주변에 적이 없다.') => {
+    const none = (why = L('주변에 적이 없다.', 'No enemies nearby.')) => {
       this.say(`${name}: ${why}`);
       return false;
     };
@@ -1199,7 +1200,7 @@ export class TowerRun {
           }
           if (!this.monsterAt(x, y)) landing = { x, y };
         }
-        if (!hit) return none('돌진할 방향에 적이 없다.');
+        if (!hit) return none(L('돌진할 방향에 적이 없다.', 'No enemy in the charge direction.'));
         if (landing) this.moveTo(landing.x, landing.y);
         return true;
       }
@@ -1218,14 +1219,14 @@ export class TowerRun {
         return true;
       case 'storm': {
         const targets = this.near(2);
-        if (!targets.length) return none('2칸 안에 적이 없다.');
+        if (!targets.length) return none(L('2칸 안에 적이 없다.', 'No enemy within 2 tiles.'));
         targets.forEach((m) => this.strike(m, 2.5 * p));
         return true;
       }
       // ---- 마법사 ----
       case 'fireball': {
         const t = this.near(4)[0];
-        if (!t) return none('4칸 안에 적이 없다.');
+        if (!t) return none(L('4칸 안에 적이 없다.', 'No enemy within 4 tiles.'));
         const around = this.monsters.filter((m) => m !== t && TowerRun.cheb(m, t) === 1);
         this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
         this.strike(t, 2 * p);
@@ -1235,7 +1236,7 @@ export class TowerRun {
       }
       case 'icebolt': {
         const line = this.inLine(f.x, f.y, 5);
-        if (!line.length) return none('바라보는 방향에 적이 없다.');
+        if (!line.length) return none(L('바라보는 방향에 적이 없다.', 'No enemy in the direction you face.'));
         const last = max ? line[line.length - 1] : line[0];
         this.events.push({ type: 'shot', x: last.x, y: last.y, fromHunter: true });
         for (const m of max ? line : [line[0]]) {
@@ -1245,7 +1246,7 @@ export class TowerRun {
       }
       case 'chain': {
         let cur = this.near(5)[0];
-        if (!cur) return none('5칸 안에 적이 없다.');
+        if (!cur) return none(L('5칸 안에 적이 없다.', 'No enemy within 5 tiles.'));
         const done = new Set<Monster>();
         for (let i = 0; i < (max ? 5 : 3) && cur; i++) {
           done.add(cur);
@@ -1267,7 +1268,7 @@ export class TowerRun {
           if (!this.free(x, y)) break;
           landing = { x, y };
         }
-        if (!landing) return none('그쪽으로는 갈 수 없다.');
+        if (!landing) return none(L('그쪽으로는 갈 수 없다.', "You can't go that way."));
         const origin = { ...this.pos };
         this.moveTo(landing.x, landing.y);
         if (max) this.monsters.filter((m) => TowerRun.cheb(m, origin) <= 1).forEach((m) => this.strike(m, 1.5 * p));
@@ -1275,14 +1276,14 @@ export class TowerRun {
       }
       case 'meteor': {
         const targets = this.near(99);
-        if (!targets.length) return none('보이는 적이 없다.');
+        if (!targets.length) return none(L('보이는 적이 없다.', 'No enemy in sight.'));
         targets.forEach((m) => this.strike(m, 1.8 * p));
         return true;
       }
       // ---- 궁수 ----
       case 'pierce': {
         const line = this.inLine(f.x, f.y, 6);
-        if (!line.length) return none('바라보는 방향에 적이 없다.');
+        if (!line.length) return none(L('바라보는 방향에 적이 없다.', 'No enemy in the direction you face.'));
         const last = line[line.length - 1];
         this.events.push({ type: 'shot', x: last.x, y: last.y, fromHunter: true });
         line.forEach((m) => this.strike(m, 1.4 * p, max));
@@ -1290,7 +1291,7 @@ export class TowerRun {
       }
       case 'backshot': {
         const t = this.frontTarget(true);
-        if (!t) return none('붙어 있는 적이 없다.');
+        if (!t) return none(L('붙어 있는 적이 없다.', 'No adjacent enemy.'));
         const dx = Math.sign(this.pos.x - t.x);
         const dy = Math.sign(this.pos.y - t.y);
         if (!this.strike(t, 1.2 * p) && max) t.stun = Math.max(t.stun ?? 0, 1);
@@ -1299,7 +1300,7 @@ export class TowerRun {
       }
       case 'poison': {
         const t = this.near(5)[0];
-        if (!t) return none('5칸 안에 적이 없다.');
+        if (!t) return none(L('5칸 안에 적이 없다.', 'No enemy within 5 tiles.'));
         const dot = () => ({ turns: 4, dmg: Math.ceil(h.atk * 0.3 * p) });
         const around = max ? this.monsters.filter((m) => m !== t && TowerRun.cheb(m, t) === 1) : [];
         this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
@@ -1309,20 +1310,20 @@ export class TowerRun {
       }
       case 'volley': {
         const t = this.near(5)[0];
-        if (!t) return none('5칸 안에 적이 없다.');
+        if (!t) return none(L('5칸 안에 적이 없다.', 'No enemy within 5 tiles.'));
         this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
         for (let i = 0; i < (max ? 4 : 3) && this.alive(t); i++) this.strike(t, 0.7 * p);
         return true;
       }
       case 'trap': {
-        if (this.traps.some((t) => t.x === this.pos.x && t.y === this.pos.y)) return none('이미 덫이 있다.');
+        if (this.traps.some((t) => t.x === this.pos.x && t.y === this.pos.y)) return none(L('이미 덫이 있다.', 'There is already a trap here.'));
         this.traps.push({ x: this.pos.x, y: this.pos.y, mult: 2 * p });
         while (this.traps.length > (max ? 2 : 1)) this.traps.shift();
         return true;
       }
       case 'rain': {
         const c = this.near(99)[0];
-        if (!c) return none('보이는 적이 없다.');
+        if (!c) return none(L('보이는 적이 없다.', 'No enemy in sight.'));
         const center: Point = { x: c.x, y: c.y };
         this.monsters.filter((m) => TowerRun.cheb(m, center) <= (max ? 2 : 1)).forEach((m) => this.strike(m, 2 * p));
         return true;
@@ -1333,7 +1334,7 @@ export class TowerRun {
         return true;
       case 'taunt': {
         const pulled = this.near(3);
-        if (!pulled.length) return none('3칸 안에 적이 없다.');
+        if (!pulled.length) return none(L('3칸 안에 적이 없다.', 'No enemy within 3 tiles.'));
         for (const m of pulled) {
           m.awake = true;
           for (let i = 0; i < 3 && TowerRun.cheb(m, this.pos) > 1; i++) this.stepToward(m);
@@ -1344,7 +1345,7 @@ export class TowerRun {
       }
       case 'bash': {
         const t = this.frontTarget(true);
-        if (!t) return none('붙어 있는 적이 없다.');
+        if (!t) return none(L('붙어 있는 적이 없다.', 'No adjacent enemy.'));
         if (this.strike(t, 1.3 * p)) return true;
         const dx = Math.sign(t.x - this.pos.x);
         const dy = Math.sign(t.y - this.pos.y);
@@ -1358,7 +1359,7 @@ export class TowerRun {
         return true;
       }
       case 'heal': {
-        if (h.hp >= h.maxHp) return none('체력이 가득 차 있다.');
+        if (h.hp >= h.maxHp) return none(L('체력이 가득 차 있다.', 'HP is already full.'));
         const heal = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * (0.3 + 0.05 * (s.lv - 1))));
         h.hp += heal;
         this.events.push({ type: 'heal', amount: heal });
@@ -1378,38 +1379,38 @@ export class TowerRun {
     const h = this.hunter;
     const name = CONSUMABLES[kind].name;
     if (h.bag[kind] <= 0) {
-      this.say(`${name}이 없다.`);
+      this.say(L(`${name}이 없다.`, `No ${name}.`));
       return false;
     }
     if (kind === 'hp') {
       if (this.gate?.rule === 'sealed') {
-        this.say('봉인 때문에 체력 물약이 듣지 않는다.');
+        this.say(L('봉인 때문에 체력 물약이 듣지 않는다.', 'The seal stops health potions from working.'));
         return false;
       }
       if (h.hp >= h.maxHp) {
-        this.say('체력이 가득 차 있다.');
+        this.say(L('체력이 가득 차 있다.', 'HP is already full.'));
         return false;
       }
       const heal = Math.ceil(h.maxHp * HP_POTION_HEAL);
       h.hp = Math.min(h.maxHp, h.hp + heal);
       this.events.push({ type: 'heal', amount: heal });
-      this.say(`${name}을 마셨다. 체력 +${heal}`);
+      this.say(L(`${name}을 마셨다. 체력 +${heal}`, `Drank ${name}. HP +${heal}`));
     } else if (kind === 'mp') {
       if (h.mp >= h.maxMp) {
-        this.say('마나가 가득 차 있다.');
+        this.say(L('마나가 가득 차 있다.', 'MP is already full.'));
         return false;
       }
       const gain = Math.ceil(h.maxMp * MP_POTION_RESTORE);
       h.mp = Math.min(h.maxMp, h.mp + gain);
       this.events.push({ type: 'mana', amount: gain });
-      this.say(`${name}을 마셨다. 마나 +${gain}`);
+      this.say(L(`${name}을 마셨다. 마나 +${gain}`, `Drank ${name}. MP +${gain}`));
     } else if (kind === 'escape') {
       this.status = 'returned';
-      this.say(`${name}을 펼쳤다. 빛에 휩싸여 탑을 빠져나간다.`);
+      this.say(L(`${name}을 펼쳤다. 빛에 휩싸여 탑을 빠져나간다.`, `You read ${name}. Light wraps you and carries you out.`));
     } else {
       // +1 because the turn spent drinking it also counts down.
       this.guardTurns = GUARD_TURNS + 1;
-      this.say(`${name}을 마셨다. ${GUARD_TURNS}턴 동안 무적!`);
+      this.say(L(`${name}을 마셨다. ${GUARD_TURNS}턴 동안 무적!`, `Drank ${name}. Invincible for ${GUARD_TURNS} turns!`));
     }
     h.bag[kind] -= 1;
     return true;
@@ -1418,14 +1419,14 @@ export class TowerRun {
   private hitMonster(m: Monster, dmg: number) {
     if (m.kind.stalker) {
       this.events.push({ type: 'immune', x: m.x, y: m.y });
-      this.say(`${m.kind.name}에게는 어떤 공격도 통하지 않는다!`);
+      this.say(L(`${m.kind.name}에게는 어떤 공격도 통하지 않는다!`, `Nothing can hurt ${m.kind.name}!`));
       return;
     }
     m.hp -= dmg;
     this.wake(m);
     this.events.push({ type: 'hit', x: m.x, y: m.y, amount: dmg });
     if (m.hp > 0) {
-      this.say(`${m.kind.name}에게 ${dmg} 피해.`);
+      this.say(L(`${m.kind.name}에게 ${dmg} 피해.`, `${dmg} damage to ${m.kind.name}.`));
       return;
     }
     this.monsters = this.monsters.filter((o) => o !== m);
@@ -1436,7 +1437,7 @@ export class TowerRun {
       this.runGold += gold;
       this.hunter.kills += 1;
       this.hunter.killScore += m.kind.score;
-      this.say(`${m.kind.name}을(를) 쓰러뜨렸다! 순위를 빼앗았다. +${gold}G`);
+      this.say(L(`${m.kind.name}을(를) 쓰러뜨렸다! 순위를 빼앗았다. +${gold}G`, `You beat ${m.kind.name} and took their rank! +${gold}G`));
       const levels = gainExp(this.hunter, m.kind.exp);
       if (levels > 0) this.events.push({ type: 'levelup' });
       this.gainStones(5, m.x, m.y);
@@ -1454,22 +1455,22 @@ export class TowerRun {
     this.runGold += gold;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
-    this.say(`${m.kind.name} 처치! +${gold}G`);
+    this.say(L(`${m.kind.name} 처치! +${gold}G`, `${m.kind.name} defeated! +${gold}G`));
     if (m.kind.boss && this.gateCleared) {
       this.events.push({ type: 'gateClear' });
-      this.say(`${gateName(this.gate!)} 클리어!`);
+      this.say(L(`${gateName(this.gate!)} 클리어!`, `${gateName(this.gate!)} cleared!`));
     }
     const expScale = m.hunter ? 1 : floorExpScale(this.danger) * overLevelFactor(this.hunter.level, this.danger);
     const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
-    if (levels > 0) this.say(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`);
+    if (levels > 0) this.say(L(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`, `Level up! Lv.${this.hunter.level} · HP and MP restored`));
     const stones = m.hunter || m.kind.stalker ? 0
       : m.kind.boss ? 3 + Math.floor(this.danger / 5)
       : m.kind.elite ? 2
       : this.rng.chance(STONE_DROP) ? 1 : 0;
     this.gainStones(stones, m.x, m.y);
     if (m.kind.elite) {
-      this.say('중간보스가 장비를 떨어뜨렸다!');
+      this.say(L('중간보스가 장비를 떨어뜨렸다!', 'The mid-boss dropped gear!'));
       this.takeGear(rollGear(this.rng, this.danger + 2));
     }
     if (m.hunter) this.offerChoice(m.hunter);
@@ -1492,7 +1493,7 @@ export class TowerRun {
     if (index >= 2) {
       gainExp(h, c.finishExp);
       this.encounters.push({ hunterId: c.hunter.id, finished: true });
-      msg = `${c.hunter.name}을(를) 완전히 쓰러뜨렸다. 경험치 +${c.finishExp}`;
+      msg = L(`${c.hunter.name}을(를) 완전히 쓰러뜨렸다. 경험치 +${c.finishExp}`, `You finished off ${c.hunter.name}. EXP +${c.finishExp}`);
     } else {
       const kind = c.rewards[index];
       if (kind === 'item') this.takeGear(rollGear(this.rng, this.danger + 3));
@@ -1504,7 +1505,7 @@ export class TowerRun {
       }
       if (kind === 'rescue') h.rescues += 1;
       this.encounters.push({ hunterId: c.hunter.id, finished: false });
-      msg = `${REWARDS[kind].label}: ${REWARDS[kind].describe(c.hunter.level)}. ${c.hunter.name}은(는) 물러났다... 더 강해져서 돌아올 것이다.`;
+      msg = L(`${REWARDS[kind].label}: ${REWARDS[kind].describe(c.hunter.level)}. ${c.hunter.name}은(는) 물러났다... 더 강해져서 돌아올 것이다.`, `${REWARDS[kind].label}: ${REWARDS[kind].describe(c.hunter.level)}. ${c.hunter.name} retreated... and will return stronger.`);
     }
     this.say(msg);
     this.pendingChoice = undefined;
@@ -1564,7 +1565,7 @@ export class TowerRun {
     const i = this.traps.findIndex((t) => t.x === m.x && t.y === m.y);
     if (i < 0) return;
     const trap = this.traps.splice(i, 1)[0];
-    this.say(`${m.kind.name}이(가) 덫에 걸렸다!`);
+    this.say(L(`${m.kind.name}이(가) 덫에 걸렸다!`, `${m.kind.name} stepped in a trap!`));
     if (!this.strike(m, trap.mult)) m.root = 2;
   }
 
@@ -1573,7 +1574,7 @@ export class TowerRun {
     const h = this.hunter;
     const b = this.buffs;
     let mult = 1;
-    let label = ranged ? '원거리 공격' : '공격';
+    let label = ranged ? L('원거리 공격', 'ranged attack') : L('공격', 'attack');
     // Enemy hunters use a skill now and then.
     if (m.hunter && m.hunter.skills?.length && this.turn % 3 === 0) {
       mult = 1.6;
@@ -1581,15 +1582,15 @@ export class TowerRun {
     }
     if (m.kind.trait === 'rage' && m.hp <= m.maxHp * TRAIT_RULES.rageAt) {
       mult *= TRAIT_RULES.rageMult;
-      label = '광폭 공격';
+      label = L('광폭 공격', 'raging attack');
     }
     if (this.guardTurns > 0) {
-      this.say(`${m.kind.name}의 ${label}! 무적이라 피해가 없다.`);
+      this.say(L(`${m.kind.name}의 ${label}! 무적이라 피해가 없다.`, `${m.kind.name}'s ${label}! You are invincible.`));
       this.events.push({ type: 'block' });
       return;
     }
     if (h.cls === 'archer' && this.rng.chance(ARCHER_DODGE)) {
-      this.say(`${m.kind.name}의 ${label}을(를) 피했다.`);
+      this.say(L(`${m.kind.name}의 ${label}을(를) 피했다.`, `Dodged ${m.kind.name}'s ${label}.`));
       this.events.push({ type: 'dodge' });
       return;
     }
@@ -1597,7 +1598,7 @@ export class TowerRun {
       b.block.charges -= 1;
       const mul = b.block.mult;
       if (b.block.charges <= 0) delete b.block;
-      this.say(`방패로 ${m.kind.name}의 ${label}을(를) 막았다!`);
+      this.say(L(`방패로 ${m.kind.name}의 ${label}을(를) 막았다!`, `Blocked ${m.kind.name}'s ${label} with your shield!`));
       this.events.push({ type: 'block' });
       this.strike(m, mul);
       return;
@@ -1610,7 +1611,7 @@ export class TowerRun {
       const absorbed = Math.min(dmg, h.mp * b.shield.ratio);
       h.mp -= Math.ceil(absorbed / b.shield.ratio);
       dmg -= absorbed;
-      if (absorbed > 0) this.say(`마나 보호막이 ${absorbed} 피해를 막았다.`);
+      if (absorbed > 0) this.say(L(`마나 보호막이 ${absorbed} 피해를 막았다.`, `Mana Shield absorbed ${absorbed} damage.`));
     }
     if (dmg <= 0) {
       this.events.push({ type: 'block' });
@@ -1618,11 +1619,11 @@ export class TowerRun {
     }
     h.hp -= dmg;
     this.events.push({ type: 'hurt', amount: dmg });
-    this.say(`${m.kind.name}의 ${label}! ${dmg} 피해.`);
+    this.say(L(`${m.kind.name}의 ${label}! ${dmg} 피해.`, `${m.kind.name}'s ${label}! ${dmg} damage.`));
     if (h.hp <= 0 && h.rescues > 0 && !this.duel) {
       h.rescues -= 1;
       h.hp = Math.ceil(h.maxHp * 0.3);
-      this.say('에이전시의 긴급 지원! 위기를 넘겼다.');
+      this.say(L('에이전시의 긴급 지원! 위기를 넘겼다.', 'Emergency support from the agency! You pulled through.'));
       this.events.push({ type: 'rescue' });
       return;
     }
@@ -1630,7 +1631,7 @@ export class TowerRun {
       h.hp = 1;
       this.duel.won = false;
       this.status = 'returned';
-      this.say(`${m.kind.name}에게 졌다... 심판이 결투를 멈췄다.`);
+      this.say(L(`${m.kind.name}에게 졌다... 심판이 결투를 멈췄다.`, `Lost to ${m.kind.name}... the referee stopped the duel.`));
       this.events.push({ type: 'duelEnd', won: false });
       return;
     }
@@ -1639,7 +1640,7 @@ export class TowerRun {
       this.status = 'dead';
       this.killer = m.kind.name;
       this.runGold = 0;
-      this.say(`${h.name}은(는) ${m.kind.name}에게 쓰러졌다...`);
+      this.say(L(`${h.name}은(는) ${m.kind.name}에게 쓰러졌다...`, `${h.name} fell to ${m.kind.name}...`));
       this.events.push({ type: 'death' });
       return;
     }
@@ -1690,7 +1691,7 @@ export class TowerRun {
     if (this.status !== 'onStairs' || this.isTopFloor) return false;
     const bonus = 10 * this.danger;
     this.runGold += bonus;
-    this.say(`${this.floor}층 돌파 보상 +${bonus}G`);
+    this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
     this.enterFloor(this.floor + 1);
     return true;
   }
@@ -1700,7 +1701,7 @@ export class TowerRun {
     if (this.status !== 'onStairs') return false;
     const bonus = 10 * this.danger;
     this.runGold += bonus;
-    this.say(`${this.floor}층 돌파 보상 +${bonus}G`);
+    this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
     this.status = 'returned';
     return true;
   }
@@ -1716,7 +1717,7 @@ export class TowerRun {
     if (!gate || !this.gateCleared || (this.status !== 'onStairs' && this.status !== 'playing')) return false;
     const gold = gateClearGold(gate);
     this.runGold += gold;
-    this.say(`${gateName(gate)} 클리어! 보상 +${gold}G`);
+    this.say(L(`${gateName(gate)} 클리어! 보상 +${gold}G`, `${gateName(gate)} cleared! Reward +${gold}G`));
     this.gainStones(gateClearStones(gate), this.pos.x, this.pos.y);
     this.takeGear(rollGear(this.rng, this.danger + 4));
     this.status = 'returned';
@@ -1727,7 +1728,7 @@ export class TowerRun {
     if (n <= 0) return;
     this.stones += n;
     this.events.push({ type: 'stone', x, y, amount: n });
-    this.say(`마력석 +${n} (이번 탐험 ${this.stones}개)`);
+    this.say(L(`마력석 +${n} (이번 탐험 ${this.stones}개)`, `Mana stones +${n} (${this.stones} this run)`));
   }
 
   /** Step off the stairs prompt and keep exploring the floor. */

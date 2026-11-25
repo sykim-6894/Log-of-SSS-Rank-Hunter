@@ -1,6 +1,7 @@
 import type { Hunter } from './hunter';
 import type { Element } from './monsters';
 import { Rng } from './rng';
+import { L } from './lang';
 
 // ---------- Classes ----------
 
@@ -23,24 +24,24 @@ export interface ClassInfo {
 
 export const CLASSES: Record<ClassId, ClassInfo> = {
   sword: {
-    name: '검사', role: '근접 광역', look: 0,
+    name: L('검사', 'Swordsman'), role: L('근접 광역', 'Melee AoE'), look: 0,
     base: { hp: 29, mp: 10, atk: 6, def: 2 }, growth: { hp: 5, mp: 2, atk: 1, def: 1 }, regen: { hp: 0.2, mp: 0.25 },
-    passive: '혈기', passiveText: '적을 처치하면 체력 3 회복',
+    passive: L('혈기', 'Bloodlust'), passiveText: L('적을 처치하면 체력 3 회복', 'Heal 3 HP per kill'),
   },
   mage: {
-    name: '마법사', role: '원거리 폭딜', look: 1,
+    name: L('마법사', 'Mage'), role: L('원거리 폭딜', 'Ranged burst'), look: 1,
     base: { hp: 27, mp: 20, atk: 5, def: 1 }, growth: { hp: 4, mp: 4, atk: 1, def: 0 }, regen: { hp: 0.1, mp: 0.5 },
-    passive: '마력 순환', passiveText: '마나가 2배 빨리 차고 스킬 위력 +25%',
+    passive: L('마력 순환', 'Mana Flow'), passiveText: L('마나가 2배 빨리 차고 스킬 위력 +25%', 'Mana refills 2x faster, skill power +25%'),
   },
   archer: {
-    name: '궁수', role: '원거리 견제', look: 2,
+    name: L('궁수', 'Archer'), role: L('원거리 견제', 'Ranged harass'), look: 2,
     base: { hp: 26, mp: 12, atk: 6, def: 1 }, growth: { hp: 4, mp: 2, atk: 1, def: 1 }, regen: { hp: 0.15, mp: 0.3 },
-    passive: '날렵함', passiveText: '15% 확률로 공격을 피한다 · 기본 공격이 3칸까지 닿는다',
+    passive: L('날렵함', 'Nimble'), passiveText: L('15% 확률로 공격을 피한다 · 기본 공격이 3칸까지 닿는다', '15% dodge · basic attack reaches 3 tiles'),
   },
   knight: {
-    name: '기사', role: '탱커', look: 3,
+    name: L('기사', 'Knight'), role: L('탱커', 'Tank'), look: 3,
     base: { hp: 36, mp: 8, atk: 4, def: 3 }, growth: { hp: 7, mp: 1, atk: 1, def: 1 }, regen: { hp: 0.3, mp: 0.2 },
-    passive: '불굴', passiveText: '체력 30% 이하일 때 방어 +3',
+    passive: L('불굴', 'Unyielding'), passiveText: L('체력 30% 이하일 때 방어 +3', 'DEF +3 at 30% HP or less'),
   },
 };
 
@@ -85,30 +86,30 @@ export interface SkillInfo {
 }
 
 export const SKILLS: Record<SkillId, SkillInfo> = {
-  spin: { cls: 'sword', name: '회전베기', mp: 5, text: '주변 8칸 모든 적 ×1.5', max: '범위 2칸' },
-  charge: { cls: 'sword', name: '돌진', mp: 6, aimed: true, text: '바라보는 방향 3칸 돌진, 첫 적 ×2.0 + 1턴 기절', max: '길 위의 적 모두 벰' },
-  smash: { cls: 'sword', name: '내려찍기', mp: 5, text: '붙어 있는 적 하나 ×2.5, 방어 무시', max: '처치하면 마나 돌려받음' },
-  stance: { cls: 'sword', name: '반격 자세', mp: 4, text: '3턴 동안 맞을 때마다 ×1.2 반격', max: '받는 피해 절반' },
-  warcry: { cls: 'sword', name: '전투 함성', mp: 6, text: '4턴 동안 공격 +30%', max: '주변 적 1턴 기절' },
-  storm: { cls: 'sword', name: '검기 폭풍', mp: 15, mpMax: 10, ultimate: true, text: '2칸 안 모든 적 ×2.5', max: '마나 10' },
-  fireball: { cls: 'mage', name: '화염구', mp: 5, element: 'fire', text: '[화염] 4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', max: '3턴 화상' },
-  icebolt: { cls: 'mage', name: '얼음 화살', mp: 5, aimed: true, element: 'ice', text: '[냉기] 직선 5칸 첫 적 ×1.3 + 2턴 빙결', max: '빙결 3턴, 관통' },
-  chain: { cls: 'mage', name: '번개 사슬', mp: 7, element: 'lightning', text: '[번개] 가까운 적부터 3명 연쇄 ×1.2', max: '5명까지' },
-  manashield: { cls: 'mage', name: '마나 보호막', mp: 6, text: '5턴 동안 피해를 마나로 대신 받음', max: '마나 1로 피해 2 막음' },
-  blink: { cls: 'mage', name: '점멸', mp: 4, aimed: true, text: '바라보는 방향 최대 4칸 순간이동', max: '떠난 자리 ×1.5 폭발' },
-  meteor: { cls: 'mage', name: '유성 낙하', mp: 20, mpMax: 15, ultimate: true, element: 'fire', text: '[화염] 보이는 모든 적 ×1.8', max: '마나 15' },
-  pierce: { cls: 'archer', name: '관통 화살', mp: 5, aimed: true, text: '직선 6칸 모든 적 ×1.4', max: '방어 무시' },
-  backshot: { cls: 'archer', name: '물러서며 쏘기', mp: 5, text: '붙은 적 ×1.2 후 2칸 물러남', max: '맞은 적 1턴 기절' },
-  poison: { cls: 'archer', name: '독화살', mp: 4, text: '가까운 적 ×1.0 + 4턴 독', max: '독이 주변 적에게 퍼짐' },
-  volley: { cls: 'archer', name: '연사', mp: 6, text: '가까운 적에게 3발 ×0.7', max: '4발' },
-  trap: { cls: 'archer', name: '덫 설치', mp: 4, text: '발밑에 덫: 밟은 적 ×2.0 + 2턴 속박', max: '덫 2개까지' },
-  rain: { cls: 'archer', name: '화살비', mp: 14, ultimate: true, text: '가까운 적 중심 3×3 칸 ×2.0', max: '5×5 칸' },
-  block: { cls: 'knight', name: '방패 막기', mp: 4, text: '다음 2번의 피격을 막고 ×1.0 반격', max: '3번 막음' },
-  taunt: { cls: 'knight', name: '도발', mp: 5, text: '3칸 안 적을 끌어오고 3턴 방어 +3', max: '끌려온 적 1턴 기절' },
-  bash: { cls: 'knight', name: '방패 강타', mp: 5, text: '붙은 적 ×1.3 + 2칸 밀침, 벽에 부딪히면 기절', max: '항상 기절' },
-  heal: { cls: 'knight', name: '치유의 빛', mp: 8, text: '체력 30% 회복', max: '3턴 방어 +3' },
-  bulwark: { cls: 'knight', name: '철벽', mp: 6, text: '4턴 방어 +5, 움직이면 풀림', max: '움직여도 유지' },
-  sanctuary: { cls: 'knight', name: '성역', mp: 15, ultimate: true, text: '5턴 피해 절반, 매 턴 체력 5% 회복', max: '7턴' },
+  spin: { cls: 'sword', name: L('회전베기', 'Whirlwind'), mp: 5, text: L('주변 8칸 모든 적 ×1.5', 'All 8 tiles around ×1.5'), max: L('범위 2칸', 'Range 2') },
+  charge: { cls: 'sword', name: L('돌진', 'Charge'), mp: 6, aimed: true, text: L('바라보는 방향 3칸 돌진, 첫 적 ×2.0 + 1턴 기절', 'Dash 3 tiles ahead, first enemy ×2.0 + stun 1 turn'), max: L('길 위의 적 모두 벰', 'Cuts every enemy on the path') },
+  smash: { cls: 'sword', name: L('내려찍기', 'Smash'), mp: 5, text: L('붙어 있는 적 하나 ×2.5, 방어 무시', 'One adjacent enemy ×2.5, ignores DEF'), max: L('처치하면 마나 돌려받음', 'Refunds mana on kill') },
+  stance: { cls: 'sword', name: L('반격 자세', 'Riposte'), mp: 4, text: L('3턴 동안 맞을 때마다 ×1.2 반격', 'For 3 turns, counter ×1.2 when hit'), max: L('받는 피해 절반', 'Damage taken halved') },
+  warcry: { cls: 'sword', name: L('전투 함성', 'War Cry'), mp: 6, text: L('4턴 동안 공격 +30%', 'ATK +30% for 4 turns'), max: L('주변 적 1턴 기절', 'Stuns nearby enemies 1 turn') },
+  storm: { cls: 'sword', name: L('검기 폭풍', 'Tempest'), mp: 15, mpMax: 10, ultimate: true, text: L('2칸 안 모든 적 ×2.5', 'All enemies within 2 tiles ×2.5'), max: L('마나 10', 'Mana 10') },
+  fireball: { cls: 'mage', name: L('화염구', 'Fireball'), mp: 5, element: 'fire', text: L('[화염] 4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', '[Fire] Nearest enemy within 4 ×2.0, around it ×1.0'), max: L('3턴 화상', 'Burn 3 turns') },
+  icebolt: { cls: 'mage', name: L('얼음 화살', 'Ice Bolt'), mp: 5, aimed: true, element: 'ice', text: L('[냉기] 직선 5칸 첫 적 ×1.3 + 2턴 빙결', '[Ice] First enemy in a 5-tile line ×1.3 + freeze 2 turns'), max: L('빙결 3턴, 관통', 'Freeze 3 turns, pierces') },
+  chain: { cls: 'mage', name: L('번개 사슬', 'Lightning'), mp: 7, element: 'lightning', text: L('[번개] 가까운 적부터 3명 연쇄 ×1.2', '[Lightning] Chains 3 nearest enemies ×1.2'), max: L('5명까지', 'Up to 5') },
+  manashield: { cls: 'mage', name: L('마나 보호막', 'Mana Wall'), mp: 6, text: L('5턴 동안 피해를 마나로 대신 받음', 'For 5 turns, mana absorbs damage'), max: L('마나 1로 피해 2 막음', '1 mana blocks 2 damage') },
+  blink: { cls: 'mage', name: L('점멸', 'Blink'), mp: 4, aimed: true, text: L('바라보는 방향 최대 4칸 순간이동', 'Teleport up to 4 tiles ahead'), max: L('떠난 자리 ×1.5 폭발', 'Explodes ×1.5 where you left') },
+  meteor: { cls: 'mage', name: L('유성 낙하', 'Meteor'), mp: 20, mpMax: 15, ultimate: true, element: 'fire', text: L('[화염] 보이는 모든 적 ×1.8', '[Fire] Every visible enemy ×1.8'), max: L('마나 15', 'Mana 15') },
+  pierce: { cls: 'archer', name: L('관통 화살', 'Pierce'), mp: 5, aimed: true, text: L('직선 6칸 모든 적 ×1.4', 'Every enemy in a 6-tile line ×1.4'), max: L('방어 무시', 'Ignores DEF') },
+  backshot: { cls: 'archer', name: L('물러서며 쏘기', 'Backshot'), mp: 5, text: L('붙은 적 ×1.2 후 2칸 물러남', 'Adjacent enemy ×1.2, then step back 2'), max: L('맞은 적 1턴 기절', 'Stuns the target 1 turn') },
+  poison: { cls: 'archer', name: L('독화살', 'Poison'), mp: 4, text: L('가까운 적 ×1.0 + 4턴 독', 'Nearest enemy ×1.0 + poison 4 turns'), max: L('독이 주변 적에게 퍼짐', 'Poison spreads to nearby enemies') },
+  volley: { cls: 'archer', name: L('연사', 'Volley'), mp: 6, text: L('가까운 적에게 3발 ×0.7', '3 shots ×0.7 at the nearest enemy'), max: L('4발', '4 shots') },
+  trap: { cls: 'archer', name: L('덫 설치', 'Trap'), mp: 4, text: L('발밑에 덫: 밟은 적 ×2.0 + 2턴 속박', 'Trap underfoot: ×2.0 + root 2 turns'), max: L('덫 2개까지', 'Up to 2 traps') },
+  rain: { cls: 'archer', name: L('화살비', 'Barrage'), mp: 14, ultimate: true, text: L('가까운 적 중심 3×3 칸 ×2.0', '3×3 around the nearest enemy ×2.0'), max: L('5×5 칸', '5×5 area') },
+  block: { cls: 'knight', name: L('방패 막기', 'Block'), mp: 4, text: L('다음 2번의 피격을 막고 ×1.0 반격', 'Block the next 2 hits and counter ×1.0'), max: L('3번 막음', 'Blocks 3') },
+  taunt: { cls: 'knight', name: L('도발', 'Taunt'), mp: 5, text: L('3칸 안 적을 끌어오고 3턴 방어 +3', 'Pull enemies within 3, DEF +3 for 3 turns'), max: L('끌려온 적 1턴 기절', 'Pulled enemies stunned 1 turn') },
+  bash: { cls: 'knight', name: L('방패 강타', 'Bash'), mp: 5, text: L('붙은 적 ×1.3 + 2칸 밀침, 벽에 부딪히면 기절', 'Adjacent ×1.3 + push 2, stun on wall hit'), max: L('항상 기절', 'Always stuns') },
+  heal: { cls: 'knight', name: L('치유의 빛', 'Heal'), mp: 8, text: L('체력 30% 회복', 'Heal 30% HP'), max: L('3턴 방어 +3', 'DEF +3 for 3 turns') },
+  bulwark: { cls: 'knight', name: L('철벽', 'Bulwark'), mp: 6, text: L('4턴 방어 +5, 움직이면 풀림', 'DEF +5 for 4 turns, ends if you move'), max: L('움직여도 유지', 'Stays when moving') },
+  sanctuary: { cls: 'knight', name: L('성역', 'Sanctuary'), mp: 15, ultimate: true, text: L('5턴 피해 절반, 매 턴 체력 5% 회복', 'Half damage 5 turns, heal 5% HP each turn'), max: L('7턴', '7 turns') },
 };
 
 /** Skills of a class in table order. The first is the class's signature skill. */
@@ -144,9 +145,9 @@ export function skillLabel(s: OwnedSkill): string {
 
 export type StatCard = 'atk' | 'def' | 'hp';
 export const STAT_CARDS: Record<StatCard, { name: string; apply: (h: Hunter) => void }> = {
-  atk: { name: '공격 +2', apply: (h) => (h.atk += 2) },
-  def: { name: '방어 +2', apply: (h) => (h.def += 2) },
-  hp: { name: '최대 체력 +15', apply: (h) => { h.maxHp += 15; h.hp += 15; } },
+  atk: { name: L('공격 +2', 'ATK +2'), apply: (h) => (h.atk += 2) },
+  def: { name: L('방어 +2', 'DEF +2'), apply: (h) => (h.def += 2) },
+  hp: { name: L('최대 체력 +15', 'Max HP +15'), apply: (h) => { h.maxHp += 15; h.hp += 15; } },
 };
 
 export type LevelCard =
@@ -155,19 +156,19 @@ export type LevelCard =
   | { type: 'stat'; stat: StatCard };
 
 export function cardTitle(c: LevelCard, h: Hunter): string {
-  if (c.type === 'stat') return `능력치: ${STAT_CARDS[c.stat].name}`;
+  if (c.type === 'stat') return L(`능력치: ${STAT_CARDS[c.stat].name}`, `Stat: ${STAT_CARDS[c.stat].name}`);
   const info = SKILLS[c.skill];
-  if (c.type === 'learn') return `새 스킬: ${info.name} (마나 ${info.mp})`;
+  if (c.type === 'learn') return L(`새 스킬: ${info.name} (마나 ${info.mp})`, `New skill: ${info.name} (mana ${info.mp})`);
   const lv = h.skills.find((s) => s.id === c.skill)?.lv ?? 1;
-  return `강화: ${info.name} ${lv}→${lv + 1}`;
+  return L(`강화: ${info.name} ${lv}→${lv + 1}`, `Upgrade: ${info.name} ${lv}→${lv + 1}`);
 }
 
 export function cardText(c: LevelCard, h: Hunter): string {
-  if (c.type === 'stat') return '스킬 칸이 다 찼고 모든 스킬이 5단계일 때 나오는 카드';
+  if (c.type === 'stat') return L('스킬 칸이 다 찼고 모든 스킬이 5단계일 때 나오는 카드', 'Shown when all skill slots are full and every skill is level 5');
   const info = SKILLS[c.skill];
-  if (c.type === 'learn') return info.text + (h.skills.length >= slotCount(h.level) ? ' · 칸이 차서 하나와 바꿈' : '');
+  if (c.type === 'learn') return info.text + (h.skills.length >= slotCount(h.level) ? L(' · 칸이 차서 하나와 바꿈', ' · slots full, replaces one') : '');
   const lv = h.skills.find((s) => s.id === c.skill)?.lv ?? 1;
-  return lv + 1 >= MAX_SKILL_LV ? `위력 +20%, 5단계: ${info.max}` : '위력 +20%';
+  return lv + 1 >= MAX_SKILL_LV ? L(`위력 +20%, 5단계: ${info.max}`, `Power +20%, level 5: ${info.max}`) : L('위력 +20%', 'Power +20%');
 }
 
 /**
@@ -213,15 +214,15 @@ export function chooseCard(h: Hunter, index: number, replace?: number): string |
     const s = h.skills.find((x) => x.id === card.skill);
     if (!s) return undefined;
     s.lv = Math.min(MAX_SKILL_LV, s.lv + 1);
-    msg = `${SKILLS[s.id].name} ${s.lv}단계로 강화`;
+    msg = L(`${SKILLS[s.id].name} ${s.lv}단계로 강화`, `${SKILLS[s.id].name} upgraded to level ${s.lv}`);
   } else if (h.skills.length < slotCount(h.level)) {
     h.skills.push({ id: card.skill, lv: 1 });
-    msg = `새 스킬 ${SKILLS[card.skill].name}을(를) 배웠다`;
+    msg = L(`새 스킬 ${SKILLS[card.skill].name}을(를) 배웠다`, `Learned ${SKILLS[card.skill].name}`);
   } else {
     if (replace === undefined || !h.skills[replace]) return undefined;
     const old = h.skills[replace];
     h.skills[replace] = { id: card.skill, lv: 1 };
-    msg = `${SKILLS[old.id].name} 대신 ${SKILLS[card.skill].name}을(를) 배웠다`;
+    msg = L(`${SKILLS[old.id].name} 대신 ${SKILLS[card.skill].name}을(를) 배웠다`, `Learned ${SKILLS[card.skill].name} in place of ${SKILLS[old.id].name}`);
   }
   h.picks -= 1;
   h.cards = undefined;

@@ -3,6 +3,7 @@ import { baseRegen, Grade, Hunter, powerGrade } from './hunter';
 import { CLASS_IDS, CLASSES, classSkills } from './classes';
 import { emptyBag } from './items';
 import { TOP_FLOOR } from './monsters';
+import { L } from './lang';
 
 export const SAVE_KEY = 'sss-hunter-save-v1';
 
@@ -49,7 +50,7 @@ export function migrateV1(v1: SaveV1): GameState {
     slots,
     activeSlot: 0,
     hallOfFame,
-    rival: { name: '적월 길드', roster: [] },
+    rival: { name: L('적월 길드', 'Red Moon Guild'), roster: [] },
     world: worldRankers(),
     nextHunterId: id,
     hunterNumber: v1.hunterNumber,

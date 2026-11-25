@@ -8,6 +8,7 @@ import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, 
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { Duel, RunSnapshot } from './run';
+import { L, lang } from './lang';
 
 export interface Agent {
   name: string;
@@ -59,16 +60,16 @@ export const SLOT_COUNT = 3;
  */
 export function worldRankers(): WorldRanker[] {
   const list: Array<[string, string, number, number, number]> = [
-    ['천도결', '하늘문 길드', 72, 20, 9000],
-    ['서리안', '청운 에이전시', 64, 20, 7200],
-    ['마태한', '철갑 헌터스', 58, 20, 5800],
-    ['연소휘', '하늘문 길드', 52, 20, 4700],
-    ['구자겸', '바람결 컴퍼니', 47, 20, 3900],
-    ['하은재', '청운 에이전시', 43, 19, 3300],
-    ['방도철', '철갑 헌터스', 40, 18, 2900],
-    ['유가람', '바람결 컴퍼니', 37, 17, 2600],
-    ['진무열', '독립 헌터', 35, 16, 2350],
-    ['나세아', '독립 헌터', 33, 15, 2150],
+    ['천도결', L('하늘문 길드', 'Skygate Guild'), 72, 20, 9000],
+    ['서리안', L('청운 에이전시', 'Bluecloud Agency'), 64, 20, 7200],
+    ['마태한', L('철갑 헌터스', 'Ironclad Hunters'), 58, 20, 5800],
+    ['연소휘', L('하늘문 길드', 'Skygate Guild'), 52, 20, 4700],
+    ['구자겸', L('바람결 컴퍼니', 'Windward Company'), 47, 20, 3900],
+    ['하은재', L('청운 에이전시', 'Bluecloud Agency'), 43, 19, 3300],
+    ['방도철', L('철갑 헌터스', 'Ironclad Hunters'), 40, 18, 2900],
+    ['유가람', L('바람결 컴퍼니', 'Windward Company'), 37, 17, 2600],
+    ['진무열', L('독립 헌터', 'Independent'), 35, 16, 2350],
+    ['나세아', L('독립 헌터', 'Independent'), 33, 15, 2150],
   ];
   return list.map(([name, agency, level, bestFloor, score], i) => ({
     id: -1 - i, name, agency, level, bestFloor, score, cls: CLASS_IDS[(i * 3 + 1) % CLASS_IDS.length],
@@ -125,16 +126,16 @@ function resolveRaids(state: GameState, rng: Rng, news: string[]) {
   for (const g of [...gates]) {
     const r = g.rival;
     if (!r) continue;
-    const who = r.hunter ? `${r.agency}의 ${r.hunter}` : r.agency;
+    const who = r.hunter ? L(`${r.agency}의 ${r.hunter}`, `${r.hunter} of ${r.agency}`) : r.agency;
     if (rng.chance(raidSuccess(g, r.level))) {
       gates.splice(gates.indexOf(g), 1);
       record.rival++;
       const h = state.rival.roster.find((x) => x.id === r.hunterId);
       if (h) levelUp(h);
-      news.push(`${who}이(가) ${gateName(g)}을(를) 먼저 클리어했다.`);
+      news.push(L(`${who}이(가) ${gateName(g)}을(를) 먼저 클리어했다.`, `${who} cleared the ${gateName(g)} first.`));
     } else {
       g.rival = undefined;
-      news.push(`${who}은(는) ${gateName(g)} 공략에 실패하고 물러났다.`);
+      news.push(L(`${who}은(는) ${gateName(g)} 공략에 실패하고 물러났다.`, `${who} failed the ${gateName(g)} and pulled back.`));
     }
   }
 }
@@ -148,8 +149,8 @@ function startRaid(state: GameState, rng: Rng, news: string[]) {
   const fits = open.filter((g) => gateLevel(g) <= team.level + 1);
   const g = fits.length ? fits[fits.length - 1] : open[0];
   g.rival = { agency: state.rival.name, ...team, since: state.day ?? 0 };
-  const who = team.hunter ? `${state.rival.name}의 ${team.hunter}` : state.rival.name;
-  news.push(`${who}이(가) ${gateName(g)}에 들어갔다. 다음 날이면 끝낼지도 모른다.`);
+  const who = team.hunter ? L(`${state.rival.name}의 ${team.hunter}`, `${team.hunter} of ${state.rival.name}`) : state.rival.name;
+  news.push(L(`${who}이(가) ${gateName(g)}에 들어갔다. 다음 날이면 끝낼지도 모른다.`, `${who} entered the ${gateName(g)}. They may finish it by tomorrow.`));
 }
 
 /**
@@ -162,15 +163,15 @@ export function updateRift(state: GameState, rng: Rng, news: string[], closed = 
   const r = state.rift;
   if (r && (r.entered || r.closesOn < day)) {
     if (closed && r.entered) {
-      news.push(`대균열을 막아냈다! 협회가 ${state.agent.name}의 이름을 기억한다.`);
+      news.push(L(`대균열을 막아냈다! 협회가 ${state.agent.name}의 이름을 기억한다.`, `The Great Rift is sealed! The Association will remember ${state.agent.name}.`));
     } else {
       const record = (state.gateRecord ??= { ours: 0, rival: 0 });
       record.rival++;
       const best = [...state.rival.roster].sort((a, b) => combatPower(b) - combatPower(a))[0];
       if (best) for (let i = 0; i < RIFT.rivalLevels; i++) levelUp(best);
       news.push(best
-        ? `대균열을 ${state.rival.name}의 ${best.name}이(가) 막아냈다. 명성을 얻고 더 강해졌다.`
-        : `대균열을 ${state.rival.name}이(가) 막아냈다.`);
+        ? L(`대균열을 ${state.rival.name}의 ${best.name}이(가) 막아냈다. 명성을 얻고 더 강해졌다.`, `${best.name} of ${state.rival.name} sealed the Great Rift, gaining fame and power.`)
+        : L(`대균열을 ${state.rival.name}이(가) 막아냈다.`, `${state.rival.name} sealed the Great Rift.`));
     }
     state.rift = undefined;
     state.nextRiftDay = day + rng.int(RIFT.gapMin, RIFT.gapMax);
@@ -180,7 +181,7 @@ export function updateRift(state: GameState, rng: Rng, news: string[], closed = 
     const id = state.nextGateId ?? 1;
     state.nextGateId = id + 1;
     state.rift = rollRift(rng, id, best, day);
-    news.push(`대균열이 열렸다! ${RIFT.days}일 안에 막지 못하면 ${state.rival.name}이(가) 공을 가져간다.`);
+    news.push(L(`대균열이 열렸다! ${RIFT.days}일 안에 막지 못하면 ${state.rival.name}이(가) 공을 가져간다.`, `A Great Rift has opened! Seal it within ${RIFT.days} days or ${state.rival.name} takes the glory.`));
   }
 }
 
@@ -209,19 +210,20 @@ export function enterGate(state: GameState, id: number): Gate | undefined {
 }
 
 const AGENCY_FIRST = [
-  '새벽', '청람', '북극성', '흑요', '은하', '백랑', '청룡', '주작', '현무', '태양', '월광', '천둥',
-  '바람결', '별빛', '은빛', '금강', '해오름', '노을', '설화', '불꽃', '푸른달', '검은별', '한빛', '창공',
+  L('새벽', 'Dawn'), L('청람', 'Azure'), L('북극성', 'Polaris'), L('흑요', 'Obsidian'), L('은하', 'Galaxy'), L('백랑', 'White Wolf'), L('청룡', 'Azure Dragon'), L('주작', 'Phoenix'), L('현무', 'Black Tortoise'), L('태양', 'Sun'), L('월광', 'Moonlight'), L('천둥', 'Thunder'),
+  L('바람결', 'Windward'), L('별빛', 'Starlight'), L('은빛', 'Silver'), L('금강', 'Diamond'), L('해오름', 'Sunrise'), L('노을', 'Sunset'), L('설화', 'Snowflower'), L('불꽃', 'Flame'), L('푸른달', 'Blue Moon'), L('검은별', 'Black Star'), L('한빛', 'Brightlight'), L('창공', 'Skyward'),
 ];
-const AGENCY_LAST = ['에이전시', '헌터스', '매니지먼트', '컴퍼니', '길드', '헌터 협회', '기획', '엔터'];
-export const AGENCY_NAME_MAX = 12;
+const AGENCY_LAST = [L('에이전시', 'Agency'), L('헌터스', 'Hunters'), L('매니지먼트', 'Management'), L('컴퍼니', 'Company'), L('길드', 'Guild'), L('헌터 협회', 'Hunter Society'), L('기획', 'Works'), L('엔터', 'Entertainment')];
+/** English names run longer, so they get more room. */
+export const AGENCY_NAME_MAX = lang() === 'en' ? 20 : 12;
 
 /** A made-up agency name like "청룡 헌터스", different from any name in avoid. */
 export function randomAgencyName(rng: Rng, avoid: string[] = []): string {
   for (let i = 0; i < 20; i++) {
     const name = `${rng.pick(AGENCY_FIRST)} ${rng.pick(AGENCY_LAST)}`;
-    if (!avoid.includes(name)) return name;
+    if (!avoid.includes(name) && name.length <= AGENCY_NAME_MAX) return name;
   }
-  return `${rng.pick(AGENCY_FIRST)} ${rng.pick(AGENCY_LAST)}`;
+  return cleanAgencyName(`${rng.pick(AGENCY_FIRST)} ${rng.pick(AGENCY_LAST)}`);
 }
 
 /** Trims spaces and cuts to the length limit. Empty means the name can't be used. */
@@ -238,7 +240,7 @@ export function foundAgency(state: GameState, rng: Rng, raw: string): boolean {
   if (state.rival.name === name) state.rival.name = rng.pick(RIVAL_NAMES.filter((n) => n !== name));
   return true;
 }
-const RIVAL_NAMES = ['적월 길드', '흑철 헌터스', '마그나 에이전시', '백야 컴퍼니'];
+const RIVAL_NAMES = [L('적월 길드', 'Red Moon Guild'), L('흑철 헌터스', 'Blackiron Hunters'), L('마그나 에이전시', 'Magna Agency'), L('백야 컴퍼니', 'White Night Company')];
 
 export function newGame(rng: Rng): GameState {
   const state: GameState = {
@@ -340,7 +342,7 @@ export function ranking(state: GameState): RankRow[] {
   for (const h of state.slots) {
     if (h) {
       const score = combatPower(h);
-      rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'ours', note: '우리 소속', cls: h.cls, order: ladderScore(state, h, score) });
+      rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'ours', note: L('우리 소속', 'Ours'), cls: h.cls, order: ladderScore(state, h, score) });
     }
   }
   for (const h of state.rival.roster) {
@@ -452,10 +454,10 @@ function markSSS(state: GameState) {
 // ---------- Training and shop ----------
 
 export const TRAINING: Record<TrainingKind, { label: string; describe: string; apply: (h: Hunter) => void }> = {
-  atk: { label: '공격 훈련', describe: '공격 +1', apply: (h) => (h.atk += 1) },
-  def: { label: '방어 훈련', describe: '방어 +1', apply: (h) => (h.def += 1) },
-  hp: { label: '체력 훈련', describe: '최대 체력 +5', apply: (h) => { h.maxHp += 5; h.hp += 5; } },
-  mp: { label: '마나 훈련', describe: '최대 마나 +3', apply: (h) => { h.maxMp += 3; h.mp += 3; } },
+  atk: { label: L('공격 훈련', 'ATK Training'), describe: L('공격 +1', 'ATK +1'), apply: (h) => (h.atk += 1) },
+  def: { label: L('방어 훈련', 'DEF Training'), describe: L('방어 +1', 'DEF +1'), apply: (h) => (h.def += 1) },
+  hp: { label: L('체력 훈련', 'HP Training'), describe: L('최대 체력 +5', 'Max HP +5'), apply: (h) => { h.maxHp += 5; h.hp += 5; } },
+  mp: { label: L('마나 훈련', 'MP Training'), describe: L('최대 마나 +3', 'Max MP +3'), apply: (h) => { h.maxMp += 3; h.mp += 3; } },
 };
 
 export function trainingCost(h: Hunter, kind: TrainingKind): number {
@@ -715,7 +717,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
     h.mp = h.maxMp;
     state.rival.roster.push(h);
   } else {
-    entry = toRecord(h, grade, `${killer}에게 사망`);
+    entry = toRecord(h, grade, L(`${killer}에게 사망`, `Killed by ${killer}`));
     state.hallOfFame.push(entry);
   }
   const news = afterRun(state, rng, encounters);
@@ -742,7 +744,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], cl
     const h = state.rival.roster[idx];
     if (o.finished) {
       state.rival.roster.splice(idx, 1);
-      state.hallOfFame.push(toRecord(h, powerGrade(h), '우리 헌터에게 완전히 쓰러짐'));
+      state.hallOfFame.push(toRecord(h, powerGrade(h), L('우리 헌터에게 완전히 쓰러짐', 'Finished off by our hunter')));
       news.finished.push(h.name);
     } else {
       spareBoost(h);
@@ -816,9 +818,9 @@ export function spareBoost(h: Hunter) {
 export function rivalTag(state: GameState, h: Hunter): string {
   if (h.origin === 'rival') {
     const target = state.slots.find((s) => s?.id === h.rivalOf);
-    return target ? `${target.name}의 라이벌` : '라이벌';
+    return target ? L(`${target.name}의 라이벌`, `${target.name}'s rival`) : L('라이벌', 'Rival');
   }
-  return h.origin === 'released' ? '방출 → 경쟁사' : '스카웃 → 경쟁사';
+  return h.origin === 'released' ? L('방출 → 경쟁사', 'Released → rival') : L('스카웃 → 경쟁사', 'Scouted → rival');
 }
 
 function createRival(state: GameState, rng: Rng, mine: Hunter): Hunter {
