@@ -7,7 +7,7 @@ import { autoPick, chooseCard, ClassId, CLASS_IDS, CLASSES, classSkills, rollCar
 import { Rng } from '../src/core/rng';
 import { Monster, TowerRun } from '../src/core/run';
 import { loadGame, SAVE_KEY, saveGame } from '../src/core/save';
-import { bossFor, floorExpScale, MONSTERS, overLevelFactor, recommendedLevel, TOP_FLOOR } from '../src/core/monsters';
+import { bossFor, floorExpScale, floorScale, MONSTERS, overLevelFactor, recommendedLevel, TOP_FLOOR } from '../src/core/monsters';
 import { BAG_MAX, CURSE_FROM_FLOOR, equipIfBetter, Gear, rollChest, rollGear } from '../src/core/items';
 
 const createHunter = (rng: Rng) => makeHunter(rng, 1, [], 'sword');
@@ -663,7 +663,7 @@ describe('saving a run in progress', () => {
 
 describe('experience and ranged enemies', () => {
   it('higher floors give more experience; far over-levelled hunters get little', () => {
-    expect(floorExpScale(10)).toBeGreaterThan(3);
+    expect(floorExpScale(10)).toBeGreaterThan(floorScale(10));
     expect(overLevelFactor(recommendedLevel(5), 5)).toBe(1);
     expect(overLevelFactor(20, 1)).toBe(0.1);
     const fresh = createHunter(new Rng(1));
