@@ -120,8 +120,45 @@ export interface RunOptions {
   gate?: Gate;
   /** Fight an association ranker in the arena instead. */
   duel?: Duel;
+  /** Survive waves in the closed arena instead. */
+  survival?: Survival;
   /** A brand-new agency's first climb: floor 1 has only a couple of monsters and one chest. */
   easyFirst?: boolean;
+}
+
+/**
+ * The survival arena: waves of monsters in a closed, lit room, each one harder.
+ * Between waves the hunter may go home with what was banked. Falling is not death:
+ * the referee pulls the hunter out, and only the wave in progress is lost.
+ */
+export interface Survival {
+  /** The wave now being fought (1 for the first). */
+  wave: number;
+  /** Gold and mana stones safe at the last wave cleared. */
+  banked: number;
+  bankedStones: number;
+  /** Set when the hunter fell and was pulled out. */
+  fell?: boolean;
+}
+
+/** Waves are as dangerous as the tower floor of the same number. */
+export const ARENA_MAX_MONSTERS = 12;
+/** Health and mana given back after each wave, as a share of the maximum. */
+export const ARENA_WAVE_HEAL = 0.2;
+/** Every 5th wave brings a boss and mana stones; every 10th a strong piece of gear. */
+export const ARENA_BOSS_EVERY = 5;
+export const ARENA_GEAR_EVERY = 10;
+
+export function waveCount(wave: number): number {
+  return Math.min(ARENA_MAX_MONSTERS, 2 + Math.ceil(wave * 0.6));
+}
+
+export function waveReward(wave: number): { gold: number; stones: number; tier: number } {
+  return {
+    gold: 10 * wave,
+    stones: wave % ARENA_BOSS_EVERY === 0 ? 2 + wave / ARENA_BOSS_EVERY : 0,
+    tier: wave % ARENA_GEAR_EVERY === 0 ? Math.min(9, 5 + wave / ARENA_GEAR_EVERY) : 0,
+  };
 }
 
 /** A challenge against an association ranker: one fight in a closed arena. Losing is not death. */
@@ -192,7 +229,9 @@ export type RunEvent =
   /** An abyss stalker has come for the hunter. */
   | { type: 'stalker'; nth: number }
   /** A ranker challenge is over. */
-  | { type: 'duelEnd'; won: boolean };
+  | { type: 'duelEnd'; won: boolean }
+  /** A survival-arena wave was cleared, or a new one began. */
+  | { type: 'wave'; wave: number; cleared: boolean };
 
 /** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
 export interface RunSnapshot {
@@ -224,6 +263,7 @@ export interface RunSnapshot {
   traps?: Trap[];
   gate?: Gate;
   duel?: Duel;
+  survival?: Survival;
 }
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
@@ -272,6 +312,8 @@ export class TowerRun {
   gate?: Gate;
   /** Set when this run is a ranker challenge in the arena. */
   duel?: Duel;
+  /** Set when this run is the survival arena. */
+  survival?: Survival;
 
   constructor(
     public hunter: Hunter,
@@ -281,7 +323,9 @@ export class TowerRun {
   ) {
     this.gate = options.gate;
     this.duel = options.duel;
+    this.survival = options.survival;
     if (start && this.duel) this.enterArena();
+    else if (start && this.survival) this.enterSurvival();
     else if (start) this.enterFloor(this.gate ? 1 : Math.max(1, options.startFloor ?? 1));
   }
 
@@ -324,6 +368,7 @@ export class TowerRun {
       regenAcc: this.regenAcc,
       gate: this.gate,
       duel: this.duel,
+      survival: this.survival,
     };
   }
 
@@ -363,6 +408,7 @@ export class TowerRun {
     run.abyssRules = s.abyssRules ?? [];
     run.gate = s.gate;
     run.duel = s.duel;
+    run.survival = s.survival;
     return run;
   }
 
@@ -372,12 +418,13 @@ export class TowerRun {
 
   /** Last floor of a gate. The tower has none: above floor 20 the abyss goes on. */
   get isTopFloor(): boolean {
+    if (this.survival) return false;
     return this.duel ? true : this.gate ? this.floor >= gateFloors(this.gate) : false;
   }
 
   /** In the abyss above the tower's last floor. */
   get inAbyss(): boolean {
-    return !this.gate && !this.duel && this.floor > TOP_FLOOR;
+    return !this.gate && !this.duel && !this.survival && this.floor > TOP_FLOOR;
   }
 
   /** The tower floor this floor is as dangerous as. In the tower that is the floor itself. */
@@ -388,7 +435,7 @@ export class TowerRun {
   /** How far the hunter sees. Dark gates cut it short. */
   get sight(): number {
     // The arena is lit: both fighters see each other from the start.
-    if (this.duel) return 20;
+    if (this.duel || this.survival) return 20;
     if (this.inAbyss) return Math.max(3, SIGHT - stacks(this.abyssRules, 'dim'));
     return this.gate?.rule === 'dark' ? DARK_SIGHT : SIGHT;
   }
@@ -396,6 +443,7 @@ export class TowerRun {
   /** Where the hunter is, for the screen: "7층" or "C급 독안개 늪 2/4층". */
   get placeName(): string {
     if (this.duel) return L('결투장', 'Arena');
+    if (this.survival) return L(`생존 아레나 ${this.survival.wave}웨이브`, `Survival Arena wave ${this.survival.wave}`);
     if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
     return this.gate ? L(`${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층`, `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
@@ -403,6 +451,7 @@ export class TowerRun {
   /** Short form for the top bar: "7층" or "게이트 2/4층". */
   get placeShort(): string {
     if (this.duel) return L('결투장', 'Arena');
+    if (this.survival) return L(`아레나 ${this.survival.wave}웨이브`, `Arena W${this.survival.wave}`);
     if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
     return this.gate ? L(`게이트 ${this.floor}/${gateFloors(this.gate)}층`, `Gate ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
@@ -551,6 +600,89 @@ export class TowerRun {
     this.say(L('쓰러뜨리면 순위를 빼앗는다. 져도 목숨은 잃지 않는다.', 'Win to take their rank. Losing will not cost your life.'));
     this.events.push({ type: 'floor' });
     this.updateSight();
+  }
+
+  /** The survival arena: a wide lit room, the hunter in the middle, the first wave coming in. */
+  enterSurvival() {
+    const W = this.options.mapSize?.w ?? MAP_W;
+    const H = this.options.mapSize?.h ?? MAP_H;
+    const rw = Math.min(17, W - 4);
+    const rh = Math.min(15, H - 4);
+    const room = { x: Math.floor((W - rw) / 2), y: Math.floor((H - rh) / 2), w: rw, h: rh };
+    const tiles: Tile[][] = Array.from({ length: H }, (_, y) =>
+      Array.from({ length: W }, (_, x) => (x >= room.x && x < room.x + rw && y >= room.y && y < room.y + rh ? Tile.Floor : Tile.Wall)));
+    const start = center(room);
+    this.map = { tiles, rooms: [room], start, stairs: { x: 0, y: 0 } };
+    this.pos = { ...start };
+    this.monsters = [];
+    this.chests = [];
+    this.merchant = undefined;
+    this.traps = [];
+    this.floorTurn = 0;
+    this.stalkers = 0;
+    this.seen = Array.from({ length: H }, () => Array<boolean>(W).fill(false));
+    this.say(L('생존 아레나에 들어섰다. 웨이브를 넘길 때마다 더 강한 적이 몰려온다.', 'You enter the Survival Arena. Every wave brings stronger foes.'));
+    this.say(L('쓰러져도 목숨은 잃지 않지만, 진행 중인 웨이브의 수입은 잃는다.', 'Falling will not kill you, but you lose what this wave earned.'));
+    this.survival!.wave = 0;
+    this.nextWave();
+    this.events.push({ type: 'floor' });
+    this.updateSight();
+  }
+
+  /** The next wave pours in from the edges of the arena. Every fifth one brings a boss. */
+  private nextWave() {
+    const sv = this.survival!;
+    sv.wave += 1;
+    const wave = sv.wave;
+    this.floor = wave;
+    this.status = 'playing';
+    const room = this.map.rooms[0];
+    const free = (x: number, y: number) => !this.blocked(x, y) && TowerRun.cheb({ x, y }, this.pos) >= 4;
+    const spot = (): Point | undefined => {
+      for (let i = 0; i < 60; i++) {
+        const x = this.rng.int(room.x, room.x + room.w - 1);
+        const y = this.rng.int(room.y, room.y + room.h - 1);
+        if (free(x, y)) return { x, y };
+      }
+      return undefined;
+    };
+    const pool = monsterPool(wave);
+    // A boss wave brings fewer followers.
+    const count = waveCount(wave) - (wave % ARENA_BOSS_EVERY === 0 ? 2 : 0);
+    for (let i = 0; i < count; i++) {
+      const p = spot();
+      if (p) this.spawn(this.rng.pick(pool), p.x, p.y, wave);
+    }
+    const boss = wave % ARENA_BOSS_EVERY === 0 ? bossFor(Math.min(TOP_FLOOR, wave)) : undefined;
+    const bp = boss && spot();
+    if (boss && bp) this.spawn({ ...boss, name: L(`아레나 챔피언 ${boss.name}`, `Arena Champion ${boss.name}`) }, bp.x, bp.y, wave);
+    for (const m of this.monsters) m.awake = true;
+    this.say(boss ? L(`${wave}웨이브! ${boss.name}이(가) 이끄는 무리가 들어온다.`, `Wave ${wave}! A horde led by ${boss.name} comes in.`) : L(`${wave}웨이브! 적 ${this.monsters.length}마리가 들어온다.`, `Wave ${wave}! ${this.monsters.length} foes come in.`));
+    this.events.push({ type: 'wave', wave, cleared: false });
+  }
+
+  /** The last monster of the wave fell: rewards, a breather, and the choice to go on or go home. */
+  private waveCleared() {
+    const sv = this.survival!;
+    const h = this.hunter;
+    const r = waveReward(sv.wave);
+    this.runGold += r.gold;
+    this.say(L(`${sv.wave}웨이브 돌파! +${r.gold}G`, `Wave ${sv.wave} cleared! +${r.gold}G`));
+    if (r.stones) this.gainStones(r.stones, this.pos.x, this.pos.y);
+    if (r.tier) {
+      this.say(L(`${sv.wave}웨이브 기념 장비!`, `Wave ${sv.wave} prize gear!`));
+      this.takeGear(makeGear(this.rng, r.tier));
+    }
+    const hp = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * ARENA_WAVE_HEAL));
+    const mp = Math.min(h.maxMp - h.mp, Math.ceil(h.maxMp * ARENA_WAVE_HEAL));
+    h.hp += hp;
+    h.mp += mp;
+    if (hp > 0) this.events.push({ type: 'heal', amount: hp });
+    if (sv.wave > (h.arenaBest ?? 0)) h.arenaBest = sv.wave;
+    sv.banked = this.runGold;
+    sv.bankedStones = this.stones;
+    this.events.push({ type: 'wave', wave: sv.wave, cleared: true });
+    this.status = 'onStairs';
   }
 
   private maybeSpawnRival(floor: number) {
@@ -954,7 +1086,8 @@ export class TowerRun {
     if (this.guardTurns > 0) this.guardTurns -= 1;
     this.tickBuffs();
     this.regenerate();
-    if (!this.duel && (this.status === 'playing' || this.status === 'onStairs')) this.tickFloor();
+    if (!this.duel && !this.survival && (this.status === 'playing' || this.status === 'onStairs')) this.tickFloor();
+    if (this.survival && this.status === 'playing' && this.monsters.length === 0) this.waveCleared();
     this.updateSight();
     return true;
   }
@@ -1663,6 +1796,17 @@ export class TowerRun {
     h.hp -= dmg;
     this.events.push({ type: 'hurt', amount: dmg });
     this.say(L(`${m.kind.name}의 ${label}! ${dmg} 피해.`, `${m.kind.name}'s ${label}! ${dmg} damage.`));
+    if (h.hp <= 0 && this.survival) {
+      const sv = this.survival;
+      h.hp = 1;
+      sv.fell = true;
+      this.runGold = sv.banked;
+      this.stones = sv.bankedStones;
+      this.status = 'returned';
+      this.say(L(`${m.kind.name}에게 쓰러졌다... 심판이 끌어냈다. ${sv.wave}웨이브의 수입은 잃었다.`, `Fell to ${m.kind.name}... the referee pulled you out. Wave ${sv.wave}'s income is lost.`));
+      this.events.push({ type: 'wave', wave: sv.wave, cleared: false });
+      return;
+    }
     if (h.hp <= 0 && h.rescues > 0 && !this.duel) {
       h.rescues -= 1;
       h.hp = Math.ceil(h.maxHp * 0.3);
@@ -1731,6 +1875,11 @@ export class TowerRun {
 
   /** Go up from the stairs. Gives a floor-clear bonus. */
   climb(): boolean {
+    if (this.survival && this.status === 'onStairs') {
+      this.nextWave();
+      this.updateSight();
+      return true;
+    }
     if (this.status !== 'onStairs' || this.isTopFloor) return false;
     const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
@@ -1742,6 +1891,11 @@ export class TowerRun {
   /** Leave the tower from the stairs, keeping this run's gold. */
   retreat(): boolean {
     if (this.status !== 'onStairs') return false;
+    if (this.survival) {
+      this.say(L(`${this.survival.wave}웨이브까지 버티고 아레나를 나섰다.`, `Left the arena after wave ${this.survival.wave}.`));
+      this.status = 'returned';
+      return true;
+    }
     const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
     this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));

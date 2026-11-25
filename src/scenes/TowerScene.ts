@@ -11,7 +11,7 @@ import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
 import { abyssDepth, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
-import { Action, Duel, REWARDS, RunEvent, TowerRun } from '../core/run';
+import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
@@ -83,11 +83,14 @@ export class TowerScene extends Phaser.Scene {
   private gateId?: number;
   /** Ranker challenge set up at the agency, if this trip is a duel. */
   private duel?: Duel;
+  /** Survival arena set up at the agency, if this trip is one. */
+  private survival?: Survival;
 
-  init(data: { startFloor?: number; gateId?: number; duel?: Duel }) {
+  init(data: { startFloor?: number; gateId?: number; duel?: Duel; survival?: Survival }) {
     this.startFloor = data?.startFloor ?? 1;
     this.gateId = data?.gateId;
     this.duel = data?.duel;
+    this.survival = data?.survival;
   }
 
   create() {
@@ -98,7 +101,7 @@ export class TowerScene extends Phaser.Scene {
     this.noticeUp = undefined;
     this.clearPending = false;
     this.guiding = false;
-    this.tutorial = (state.day ?? 0) === 0 && !this.gateId && !this.duel && !state.run?.data.gate;
+    this.tutorial = (state.day ?? 0) === 0 && !this.gateId && !this.duel && !this.survival && !state.run?.data.gate && !state.run?.data.survival;
     this.run = this.resumeOrStart();
     this.killsAtStart = this.run.hunter.kills;
     this.overlay = [];
@@ -173,6 +176,7 @@ export class TowerScene extends Phaser.Scene {
       return true;
     };
     if (run.duel) return tip('duel', TIPS.duel());
+    if (run.survival) return tip('arena', TIPS.arena());
     if (this.tutorial) {
       const touch = this.sys.game.device.input.touch;
       const dpad = moveControl() === 'dpad';
@@ -432,8 +436,8 @@ export class TowerScene extends Phaser.Scene {
     const hunter = activeHunter(state)!;
     // The very first climb of a new agency starts on an easy floor.
     const easyFirst = this.tutorial && hunter.bestFloor === 0 && this.startFloor === 1;
-    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, easyFirst });
-    if (this.startFloor > 1 && !this.duel) {
+    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, survival: this.survival, easyFirst });
+    if (this.startFloor > 1 && !this.duel && !this.survival) {
       run.log.push(this.startFloor > TOP_FLOOR ? L(`이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.`, `Skipped ahead past Abyss ${this.startFloor - TOP_FLOOR - 1}F, already cleared.`) : L(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`, `Skipped ahead past ${this.startFloor - 1}F, already cleared.`));
     }
     return run;
@@ -542,6 +546,7 @@ export class TowerScene extends Phaser.Scene {
     if (run.status === 'trading' && !this.overlay.length) this.showMerchant();
     if (run.status === 'returned' && !this.overlay.length) {
       if (run.duel) this.showDuelEnd();
+      else if (run.survival?.fell) this.showArenaFall();
       else this.finishReturn();
     }
   }
@@ -905,6 +910,15 @@ export class TowerScene extends Phaser.Scene {
             ms: 3200,
           });
           break;
+        case 'wave':
+          if (!e.cleared && e.wave > 1) {
+            sfx.curse();
+            this.notice({ heading: L(`${e.wave}웨이브`, `Wave ${e.wave}`), color: INK.red, lines: [[L(`적 ${this.run.monsters.length}마리`, `${this.run.monsters.length} foes`), INK.text, 15]], ms: 1400 });
+          } else if (e.cleared) {
+            cam.flash(250, 229, 174, 70);
+            sfx.levelup();
+          }
+          break;
         case 'gateClear':
           this.clearPending = true;
           cam.flash(300, 229, 174, 70);
@@ -1047,7 +1061,7 @@ export class TowerScene extends Phaser.Scene {
    * Under the minimap in portrait, top right of the map in landscape.
    */
   private drawStalkerClock() {
-    if (this.run.duel) return;
+    if (this.run.duel || this.run.survival) return;
     const run = this.run;
     const r = this.minimapRect();
     const x = r ? r.x + r.w : GW - 10;
@@ -1174,9 +1188,41 @@ export class TowerScene extends Phaser.Scene {
     this.dialog(d.won ? L('도전 성공!', 'Challenge won!') : L('도전 실패', 'Challenge lost'), lines, [[L('본부로 돌아가기', 'Back to HQ'), () => { this.closeOverlay(); this.finishReturn(); }, true]], d.won ? INK.gold : INK.red);
   }
 
+  /** A wave is down: show what was banked, then go on or go home. */
+  private showWaveClear() {
+    const run = this.run;
+    const h = run.hunter;
+    const sv = run.survival!;
+    const next = sv.wave + 1;
+    const r = waveReward(sv.wave);
+    const lines = [
+      L(`${sv.wave}웨이브 돌파! 지금까지 수입 ${run.runGold}G · 마력석 ${run.stones}`, `Wave ${sv.wave} cleared! Income so far ${run.runGold}G · Stones ${run.stones}`),
+      L(`체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`, `HP ${h.hp}/${h.maxHp} · MP ${h.mp}/${h.maxMp} · Pots ${this.bagLine()}`),
+      L(`최고 기록 ${h.arenaBest ?? sv.wave}웨이브`, `Best ${h.arenaBest ?? sv.wave} waves`) + (r.tier ? L(' · 기념 장비 획득!', ' · Prize gear!') : ''),
+      next % 5 === 0 ? L(`다음은 ${next}웨이브: 챔피언이 나온다! (돌파하면 마력석)`, `Next, wave ${next}: a champion comes! (Mana stones if you win)`) : L(`다음은 ${next}웨이브. 쓰러지면 그 웨이브 수입만 잃는다.`, `Next, wave ${next}. Fall and you lose only that wave's income.`),
+    ];
+    this.dialog(L('웨이브 돌파', 'Wave cleared'), lines, [
+      [L(`다음 웨이브 (${next})`, `Next wave (${next})`), () => { this.closeOverlay(); run.climb(); this.redraw(); }, true],
+      [L('귀환하기', 'Return'), () => { this.closeOverlay(); run.retreat(); this.finishReturn(); }],
+    ], INK.gold);
+  }
+
+  /** Fell in the arena: pulled out alive, keeping what was banked. */
+  private showArenaFall() {
+    const run = this.run;
+    const sv = run.survival!;
+    this.joyClear();
+    this.dialog(L('아레나에서 쓰러졌다', 'Fell in the arena'), [
+      L(`${sv.wave}웨이브에서 쓰러져 심판이 끌어냈다. 목숨은 건졌다.`, `Fell in wave ${sv.wave}; the referee pulled you out alive.`),
+      L(`${sv.wave - 1}웨이브까지의 수입 ${run.runGold}G · 마력석 ${run.stones}개는 챙겼다.`, `Kept ${run.runGold}G and ${run.stones} stones from the first ${sv.wave - 1} waves.`),
+      L(`최고 기록 ${run.hunter.arenaBest ?? 0}웨이브. 내일 다시 도전할 수 있다.`, `Best ${run.hunter.arenaBest ?? 0} waves. Try again tomorrow.`),
+    ], [[L('본부로 돌아가기', 'Back to HQ'), () => { this.closeOverlay(); this.finishReturn(); }, true]], INK.red);
+  }
+
   private showStairs() {
     const run = this.run;
     const h = run.hunter;
+    if (run.survival) return this.showWaveClear();
     if (run.gateCleared) return this.showGateClear();
     const lines = [
       L(`${run.placeName} 돌파! 이번 수입 ${run.runGold}G (+돌파 보상 ${10 * run.danger}G)`, `${run.placeName} cleared! Income ${run.runGold}G (+${10 * run.danger}G bonus)`),
@@ -1240,7 +1286,9 @@ export class TowerScene extends Phaser.Scene {
     const duelWon = run.duel ? settleDuel(state, run.duel) : false;
     const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones);
     const stolen = cleared && run.gate?.rival ? L(` ${run.gate.rival.agency}보다 먼저 해냈다!`, ` Beat ${run.gate.rival.agency} to it!`) : '';
-    const where = run.duel
+    const where = run.survival
+      ? L(`생존 아레나 ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave}웨이브 돌파 (최고 ${run.hunter.arenaBest ?? 0}).`, `Survival Arena: ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave} waves (best ${run.hunter.arenaBest ?? 0}).`)
+      : run.duel
       ? (duelWon ? L(`${run.duel.rank}위 ${run.duel.name}에게 도전해 이겼다! 지금 ${gradeIn(state, run.hunter)}급.`, `Challenged #${run.duel.rank} ${run.duel.name} and won! Now ${gradeIn(state, run.hunter)}-Rank.`) : L(`${run.duel.rank}위 ${run.duel.name}에게 도전했지만 졌다.`, `Challenged #${run.duel.rank} ${run.duel.name} and lost.`))
       : run.gate ? (cleared ? L(`${gateName(run.gate)} 클리어!${stolen}`, `${gateName(run.gate)} cleared!${stolen}`) : L(`${run.placeName}에서 귀환.`, `Returned from ${run.placeName}.`)) : L(`${run.placeName}에서 귀환.`, `Returned from ${run.placeName}.`);
     const msgs = [

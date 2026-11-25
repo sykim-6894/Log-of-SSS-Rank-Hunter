@@ -7,7 +7,7 @@ import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE,
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, rollGate, rollGateGrade, rollRift } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
-import type { Duel, RunSnapshot } from './run';
+import type { Duel, RunSnapshot, Survival } from './run';
 import { L, lang } from './lang';
 import { applyRookie, canRetireGrade, Legacy, perkLevel, RETIRE_POINTS } from './legacy';
 
@@ -39,6 +39,7 @@ export interface HallOfFameEntry {
   retired?: boolean;
   legend?: boolean;
   abyssBest?: number;
+  arenaBest?: number;
 }
 
 export interface RivalAgency {
@@ -352,6 +353,7 @@ export function retire(state: GameState, slot: number): RetireResult | undefined
   entry.retired = true;
   entry.legend = legend;
   entry.abyssBest = h.abyssBest;
+  entry.arenaBest = h.arenaBest;
   state.hallOfFame.push(entry);
   state.slots[slot] = null;
   const legacy = (state.agent.legacy ??= { points: 0, perks: {} });
@@ -369,6 +371,37 @@ export function abyssRecord(state: GameState): { depth: number; name: string } |
   for (const h of state.slots) if (h) see(h.abyssBest, h.name);
   for (const e of state.hallOfFame) see(e.abyssBest, e.name);
   return best;
+}
+
+/** The most survival-arena waves any of the agency's hunters ever cleared, and who. */
+export function arenaRecord(state: GameState): { wave: number; name: string } | undefined {
+  let best: { wave: number; name: string } | undefined;
+  const see = (wave: number | undefined, name: string) => {
+    if (wave && (!best || wave > best.wave)) best = { wave, name };
+  };
+  for (const h of state.slots) if (h) see(h.arenaBest, h.name);
+  for (const e of state.hallOfFame) see(e.arenaBest, e.name);
+  return best;
+}
+
+/** The survival arena opens once the hunter has beaten the tower's first boss (floor 5). */
+export const ARENA_UNLOCK_FLOOR = 5;
+
+export function arenaUnlocked(h: Hunter): boolean {
+  return h.bestFloor >= ARENA_UNLOCK_FLOOR;
+}
+
+/** Once a day per hunter: a day passes each time a hunter comes back. */
+export function canEnterArena(state: GameState, h: Hunter): boolean {
+  return arenaUnlocked(h) && h.arenaDay !== (state.day ?? 0);
+}
+
+/** Books today's arena entry for the active hunter. */
+export function startSurvival(state: GameState): Survival | undefined {
+  const h = activeHunter(state);
+  if (!h || !canEnterArena(state, h)) return undefined;
+  h.arenaDay = state.day ?? 0;
+  return { wave: 0, banked: 0, bankedStones: 0 };
 }
 
 function pickActiveSlot(state: GameState) {
@@ -800,7 +833,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
 function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
   return {
     id: h.id, name: h.name, grade, level: h.level, kills: h.kills, bestFloor: h.bestFloor,
-    totalTribute: h.totalTribute, score: hallOfFameScore(h), power: combatPower(h), fate, abyssBest: h.abyssBest,
+    totalTribute: h.totalTribute, score: hallOfFameScore(h), power: combatPower(h), fate, abyssBest: h.abyssBest, arenaBest: h.arenaBest,
   };
 }
 

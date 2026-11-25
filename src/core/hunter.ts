@@ -39,6 +39,10 @@ export interface Hunter {
   bestFloor: number;
   /** Deepest floor of the abyss above floor 20 reached, counted from 1. */
   abyssBest?: number;
+  /** Most survival-arena waves cleared. */
+  arenaBest?: number;
+  /** Day of the last survival-arena entry: once a day. */
+  arenaDay?: number;
   /** Association rankers (by id) this hunter has beaten in a challenge. */
   beaten?: number[];
   /** Day of the last ranker challenge: one a day. */
