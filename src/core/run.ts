@@ -4,7 +4,7 @@ import type { EncounterOutcome } from './agency';
 import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateClearStones, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import {
   abyssDepth, bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
-  stalkerKind, TOP_FLOOR, TRAIT_RULES,
+  stalkerKind, TOP_FLOOR, TRAIT_RULES, Element, elementFactor,
 } from './monsters';
 import {
   addToBag,
@@ -154,6 +154,7 @@ export const STONE_DROP = 0.1;
 
 export type RunEvent =
   | { type: 'hit'; x: number; y: number; amount: number }
+  | { type: 'element'; x: number; y: number; weak: boolean }
   | { type: 'hurt'; amount: number }
   | { type: 'shot'; x: number; y: number; fromHunter?: boolean }
   | { type: 'miss'; x: number; y: number }
@@ -1040,9 +1041,14 @@ export class TowerRun {
   }
 
   /** Hits with the hunter's attack times mult. Returns true if it killed. */
+  /** Element of the skill being cast right now, if any. */
+  private element?: Element;
+
   private strike(m: Monster, mult: number, ignoreDef = false): boolean {
     if (!this.monsters.includes(m)) return false;
-    this.hitMonster(m, this.damage(this.atkNow(), ignoreDef ? 0 : m.def, mult));
+    const ef = elementFactor(m.kind, this.element);
+    if (ef !== 1) this.events.push({ type: 'element', x: m.x, y: m.y, weak: ef > 1 });
+    this.hitMonster(m, this.damage(this.atkNow(), ignoreDef ? 0 : m.def, mult * ef));
     return !this.monsters.includes(m);
   }
 
@@ -1142,7 +1148,10 @@ export class TowerRun {
     h.mp -= cost;
     this.events.push({ type: 'skill', name: info.name });
     this.say(`${info.name}!`);
-    if (!this.castSkill(s)) {
+    this.element = info.element;
+    const cast = this.castSkill(s);
+    this.element = undefined;
+    if (!cast) {
       h.mp += cost; // nothing to hit: no mana, no turn
       this.events.pop();
       this.log.splice(this.log.lastIndexOf(`${info.name}!`), 1);
