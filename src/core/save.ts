@@ -157,6 +157,12 @@ export function parseSave(raw: string | null): GameState | undefined {
     const state = data.version === 1 ? migrateV1(data) : data.version === 2 ? migrateV2(data) : data.version === 3 ? data : undefined;
     if (state) {
       refreshWorldRankers(state);
+      // Agency levels came later: older saves count the cut paid so far and keep every feature open.
+      if (state.agent.exp === undefined) {
+        const paid = [...state.slots.map((h) => h?.totalTribute ?? 0), ...state.hallOfFame.map((e) => e.totalTribute ?? 0)];
+        state.agent.exp = paid.reduce((a, b) => a + b, 0);
+        state.agent.allOpen = (state.day ?? 0) > 0 || state.hallOfFame.length > 0;
+      }
       for (const h of [...state.slots, ...state.rival.roster]) {
         if (!h) continue;
         giveClass(h);

@@ -1,9 +1,9 @@
 import * as Phaser from 'phaser';
-import { abyssRecord, activeHunter, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { abyssRecord, activeHunter, invest, slotOpen, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
-import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind, TRIBUTE_RATE } from '../core/hunter';
+import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
 import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
@@ -18,7 +18,8 @@ import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../ga
 import { L, Lang, lang, LANG_KEY } from '../core/lang';
 import { GuidePage, guideIsOff, resetGuide, showGuide, tipWanted, markTip } from '../game/guide';
 import { TIPS } from '../game/tips';
-import { buyPerk, PERK_IDS, PERKS, perkCost, perkLevel, RETIRE_POINTS } from '../core/legacy';
+import { buyPerk, PERK_IDS, PERKS, perkCost, perkLevel, perkMax, RETIRE_POINTS } from '../core/legacy';
+import { agencyLevel, cutDiscount, cutRate, Feature, FEATURE_LEVEL, INVEST_EXP, levelProgress, levelUpMessage, MAX_AGENCY_LEVEL, unlocked } from '../core/agencyLevel';
 
 export interface HQData {
   messages?: string[];
@@ -346,15 +347,15 @@ export class HQScene extends Phaser.Scene {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
       }, { primary: true, size, enabled: !!h });
-      const arenaOk = !!h && canEnterArena(state, h);
-      button(this, x + tw + 8, y, gw, hgt, L('아레나', 'Arena'), () =>
+      const arenaOk = !!h && unlocked(state.agent, 'arena') && canEnterArena(state, h);
+      this.featureButton('arena', x + tw + 8, y, gw, hgt, L('아레나', 'Arena'), () =>
         this.scene.restart({ messages: this.messages, arena: true }), { size: Math.min(size, 18), enabled: !!h, primary: false });
       if (arenaOk) {
         const dot = this.add.graphics();
         dot.fillStyle(0xe0574f, 1).fillCircle(x + tw + 8 + gw - 10, y + 10, 5);
       }
       const rift = state.rift && !state.rift.entered;
-      button(this, x + w - gw, y, gw, hgt, rift ? L(`게이트 ${state.gates?.length ?? 0}·균열`, `Gates ${state.gates?.length ?? 0}·Rift`) : L(`게이트 ${state.gates?.length ?? 0}`, `Gates ${state.gates?.length ?? 0}`), () =>
+      this.featureButton('gates', x + w - gw, y, gw, hgt, rift ? L(`게이트 ${state.gates?.length ?? 0}·균열`, `Gates ${state.gates?.length ?? 0}·Rift`) : L(`게이트 ${state.gates?.length ?? 0}`, `Gates ${state.gates?.length ?? 0}`), () =>
         this.scene.restart({ messages: this.messages, gates: true }), { size: Math.min(size, 18), enabled: !!h });
       return;
     }
@@ -374,7 +375,7 @@ export class HQScene extends Phaser.Scene {
     const w = GW - 28;
     title(this, x, 12, L('주인공을 찾습니다', 'Wanted: The Protagonist'), lang() === 'en' ? 15 : 20, INK.text);
     text(this, x + 2, 38, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
-    text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
+    fit(text(this, GW - x, 12, `${agent.name} Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0), 120);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
     this.soundButton(236, 4, 70, 26);
@@ -424,7 +425,7 @@ export class HQScene extends Phaser.Scene {
     const { agent } = state;
     title(this, 24, 18, L('주인공을 찾습니다', 'Wanted: The Protagonist'), 30, INK.text);
     text(this, 26, 58, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
-    text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
+    text(this, 936, 22, `${agent.name} · Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, L(`운영 자금 ${agent.gold}G`, `Funds ${agent.gold}G`), 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
     this.legacyButton(572, 20, 96, 28);
@@ -495,14 +496,16 @@ export class HQScene extends Phaser.Scene {
     PERK_IDS.forEach((id, i) => {
       const info = PERKS[id];
       const lv = perkLevel(legacy, id);
+      const extra = agencyLevel(state.agent) >= MAX_AGENCY_LEVEL ? 1 : 0;
+      const max = perkMax(id, extra);
       const ry = top + 18 + i * rowH;
       const bw = PORTRAIT ? 104 : 120;
-      title(this, x + 16, ry, `${info.name}  ${lv}/${info.max}`, 14, lv > 0 ? INK.gold : INK.text);
+      title(this, x + 16, ry, `${info.name}  ${lv}/${max}`, 14, lv > 0 ? INK.gold : INK.text);
       fit(text(this, x + 16, ry + 22, info.text, 12, INK.quiet), w - bw - 40);
-      const maxed = lv >= info.max;
+      const maxed = lv >= max;
       const cost = perkCost(legacy, id);
       button(this, x + w - bw - 14, ry + 2, bw, 36, maxed ? L('최대', 'Maxed') : L(`올리기 (${cost})`, `Raise (${cost})`), () => {
-        if (!buyPerk(legacy, id)) return;
+        if (!buyPerk(legacy, id, extra)) return;
         persist();
         sfx.gear();
         this.scene.restart({ legacy: true, messages: [L(`${info.name} ${lv + 1}단계!`, `${info.name} level ${lv + 1}!`), ...this.messages] });
@@ -547,7 +550,7 @@ export class HQScene extends Phaser.Scene {
     }
     if (day >= 1 && day <= 2 && tip('hq-return', TIPS['hq-return']())) return;
     if (state.rift && tip('rift', TIPS.rift(), true)) return;
-    if ((state.agent.stones ?? 0) > 0) tip('stones', TIPS.stones(), true);
+    if ((state.agent.stones ?? 0) > 0 && unlocked(state.agent, 'enhance')) tip('stones', TIPS.stones(), true);
   }
 
   /** Sound and how to move on a touch screen. */
@@ -639,6 +642,8 @@ export class HQScene extends Phaser.Scene {
           state.activeSlot = i;
           this.refresh();
         }, { primary: i === state.activeSlot });
+      } else if (!slotOpen(state, i)) {
+        button(this, bx, y, w, 44, L(`에이전시 Lv.${i >= 2 ? 5 : 2}\n에 열림`, `Opens at\nagency Lv.${i >= 2 ? 5 : 2}`), () => this.refresh([L(`헌터 ${i + 1}번 슬롯은 에이전시 Lv.${i >= 2 ? 5 : 2}에 열린다.`, `Hunter slot ${i + 1} opens at agency Lv.${i >= 2 ? 5 : 2}.`)]), { enabled: false, size: 12 });
       } else {
         button(this, bx, y, w, 44, L('+ 새 헌터 고용', '+ Hire hunter'), () => this.scene.restart({ messages: this.messages, hire: { slot: i } }));
       }
@@ -682,7 +687,7 @@ export class HQScene extends Phaser.Scene {
     title(this, x + 106, y + 40, h.name, 23, INK.ink);
     text(this, x + 106, y + 72, L(`Lv.${h.level}   경험치 ${h.exp}/${expToNext(h.level)}`, `Lv.${h.level}   EXP ${h.exp}/${expToNext(h.level)}`), 12, INK.inkQuiet);
     fit(text(this, x + 106, y + 92, `${CLASSES[h.cls].passive}: ${CLASSES[h.cls].passiveText}`, 12, INK.inkQuiet), w - 260);
-    text(this, x + 106, y + 112, L(`계약 ${h.contractGrade}급 · 상납 ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`, `Contract ${h.contractGrade} · Cut ${Math.round(TRIBUTE_RATE[h.contractGrade] * 100)}%`), 12, INK.inkQuiet);
+    text(this, x + 106, y + 112, L(`계약 ${h.contractGrade}급 · 상납 ${Math.round(cutRate(h) * 100)}%${cutDiscount(h) ? ` (투자 -${cutDiscount(h)}%p)` : ''}`, `Contract ${h.contractGrade} · Cut ${Math.round(cutRate(h) * 100)}%${cutDiscount(h) ? ` (invest -${cutDiscount(h)}pt)` : ''}`), 12, INK.inkQuiet);
 
     // Grade stamp
     const stamp = this.add.container(x + w - 70, y + 82).setAngle(-9);
@@ -762,18 +767,47 @@ export class HQScene extends Phaser.Scene {
     const hunter = activeHunter(state);
     if (!hunter) return;
     const bw = (w - 40) / 2;
-    panel(this, x, y, w, 158, L('에이전시 투자', 'Agency investment'));
-    text(this, x + w - 14, y + 16, L('운영 자금에서 지출', 'Paid from funds'), 12, INK.faint).setOrigin(1, 0);
+    panel(this, x, y, w, 158, L('훈련 · 투자', 'Training · Investment'));
+    text(this, x + w - 14, y + 14, L('훈련비는 운영 자금에서', 'Training uses agency funds'), 12, INK.faint).setOrigin(1, 0);
     const kinds: TrainingKind[] = ['atk', 'def', 'hp', 'mp'];
     kinds.forEach((kind, i) => {
-      const cost = trainingCost(hunter, kind, state.agent.legacy);
+      const cost = trainingCost(hunter, kind, state.agent.legacy, agencyLevel(agent));
       const t = TRAINING[kind];
       const bx = x + 16 + (i % 2) * (bw + 8);
-      const by = y + 36 + Math.floor(i / 2) * 56;
-      button(this, bx, by, bw, 48, `${t.label}  ${cost}G\n${t.describe}`, () => {
+      const by = y + 32 + Math.floor(i / 2) * 44;
+      button(this, bx, by, bw, 38, `${t.label}  ${cost}G\n${t.describe}`, () => {
         if (train(state, kind)) this.refresh([L(`${t.label} 완료. ${t.describe}`, `${t.label} done. ${t.describe}`)]);
-      }, { enabled: agent.gold >= cost });
+      }, { enabled: agent.gold >= cost, size: 12 });
     });
+    // The agency's level, and the hunter putting their own gold into it.
+    const ry = y + 122;
+    const lv = agencyLevel(agent);
+    const prog = levelProgress(agent);
+    const iw = 66;
+    const barW = w - 32 - 2 * (iw + 6) - 6;
+    const label = prog ? L(`에이전시 Lv.${lv}  ${prog.have}/${prog.need}`, `Agency Lv.${lv}  ${prog.have}/${prog.need}`) : L(`에이전시 Lv.${lv} (최고)`, `Agency Lv.${lv} (max)`);
+    const g = this.add.graphics();
+    g.fillStyle(0x2a221c, 1).fillRect(x + 16, ry + 16, barW, 6);
+    g.fillStyle(0xd9a441, 1).fillRect(x + 16, ry + 16, prog ? Math.round((barW * prog.have) / prog.need) : barW, 6);
+    fit(text(this, x + 16, ry - 2, label, 12, INK.gold), barW);
+    const doInvest = (amount: number) => {
+      const r = invest(state, amount);
+      if (!r) return;
+      sfx.gear();
+      const msgs = [L(`${hunter.name}이(가) 에이전시에 ${r.amount}G를 투자했다. (경험치 +${Math.round(r.amount * INVEST_EXP)}, 상납 ${Math.round(cutRate(hunter) * 100)}%)`, `${hunter.name} invested ${r.amount}G in the agency. (EXP +${Math.round(r.amount * INVEST_EXP)}, cut ${Math.round(cutRate(hunter) * 100)}%)`)];
+      if (r.levelUp) msgs.unshift(levelUpMessage(r.levelUp));
+      this.refresh(msgs);
+    };
+    const step = 100;
+    button(this, x + w - 16 - 2 * iw - 6, ry, iw, 26, L(`투자 ${step}`, `Invest ${step}`), () => doInvest(step), { enabled: hunter.gold >= step, size: 12 });
+    button(this, x + w - 16 - iw, ry, iw, 26, L('전부', 'All'), () => doInvest(hunter.gold), { enabled: hunter.gold > 0, size: 12, primary: hunter.gold >= step });
+  }
+
+  /** A feature button, or its locked face that says which agency level opens it. */
+  private featureButton(f: Feature, x: number, y: number, w: number, h: number, label: string, onClick: () => void, opts: { enabled?: boolean; primary?: boolean; size?: number } = {}) {
+    if (unlocked(state.agent, f)) return button(this, x, y, w, h, label, onClick, opts);
+    const short = label.split(/[\s·]/)[0].replace('▶', '');
+    return button(this, x, y, w, h, h >= 40 ? `${short}\nLv.${FEATURE_LEVEL[f]}` : `Lv.${FEATURE_LEVEL[f]}`, () => {}, { ...opts, enabled: false, primary: false, size: h >= 40 ? 14 : opts.size });
   }
 
   private buy(kind: ConsumableKind) {
@@ -799,8 +833,8 @@ export class HQScene extends Phaser.Scene {
       showGear = !showGear;
       this.scene.restart({ messages: this.messages });
     });
-    button(this, x + 116, y + 14, 60, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
-    button(this, x + 182, y + 14, 56, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
+    this.featureButton('gacha', x + 116, y + 14, 60, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
+    this.featureButton('enhance', x + 182, y + 14, 56, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
     text(this, x + 16, y + 48, L(`물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, `HP pot ${h.bag.hp} · MP pot ${h.bag.mp} · Guard ${h.bag.guard} · Return ${h.bag.escape}`), 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
@@ -985,8 +1019,8 @@ export class HQScene extends Phaser.Scene {
     if (!h) return;
     panel(this, x, y, w, DOLL_H + 40, L('장비', 'Gear'));
     if (PORTRAIT) {
-      button(this, x + w - 160, y + 8, 70, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
-      button(this, x + w - 84, y + 8, 72, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
+      this.featureButton('gacha', x + w - 160, y + 8, 70, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
+      this.featureButton('enhance', x + w - 84, y + 8, 72, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
     }
     else text(this, x + w - 16, y + 12, L('더 좋은 장비를 얻으면 바꿔 낌', 'Better gear is swapped in'), 12, INK.faint).setOrigin(1, 0);
     drawPaperDoll(this, x + 12, y + 32, w - 24, h);
@@ -1049,6 +1083,10 @@ export class HQScene extends Phaser.Scene {
   private challengeButton(x: number, y: number, w: number) {
     const h = activeHunter(state);
     if (!h) return;
+    if (!unlocked(state.agent, 'duel')) {
+      text(this, x + 4, y + 6, L(`랭커 도전은 에이전시 Lv.${FEATURE_LEVEL.duel}에 열린다.`, `Ranker challenges open at agency Lv.${FEATURE_LEVEL.duel}.`), 12, INK.faint);
+      return;
+    }
     const next = nextChallenge(state, h);
     if (!next) {
       text(this, x + 4, y + 6, L('협회 랭커를 모두 꺾었다.', 'You beat every Association ranker.'), 12, INK.gold);

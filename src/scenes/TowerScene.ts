@@ -11,6 +11,7 @@ import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
 import { abyssDepth, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
+import { levelUpMessage } from '../core/agencyLevel';
 import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
@@ -1294,6 +1295,7 @@ export class TowerScene extends Phaser.Scene {
     const msgs = [
       L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
+    if (r.agencyUp) msgs.unshift(levelUpMessage(r.agencyUp));
     if (r.backing > 0) msgs.push(L(`협회 후원 +${r.backing}G.`, `Association backing +${r.backing}G.`));
     if (r.promotedTo) {
       msgs.push(L(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`, `Re-graded: ${r.promotedFrom} → ${r.promotedTo}! Re-signing bonus ${r.signingSupport}G.`));

@@ -42,7 +42,8 @@ export const TIPS = {
   ],
   'hq-return': (): GuidePage[] => [
     { text: L('첫 탐험 수고하셨어요! 헌터가 번 돈의 일부는 운영 자금으로 들어와요(상납). 등급이 오를수록 상납 비율은 낮아져요.', 'Great first run! Part of what the hunter earns comes to the agency as its cut. The higher the rank, the smaller the cut.') },
-    { text: L('운영 자금으로는 훈련을, 헌터 소지금으로는 물약을 사요. 하루가 지날 때마다 새 게이트도 열려요.', 'Agency funds pay for training; the hunter\'s purse buys potions. New gates open every day.') },
+    { text: L('운영 자금으로는 훈련을, 헌터 소지금으로는 물약을 사요.', "Agency funds pay for training; the hunter's purse buys potions.") },
+    { text: L('상납금이 쌓이면 에이전시 레벨이 올라 게이트, 장비 뽑기, 강화 같은 기능이 하나씩 열려요. 헌터 소지금을 [투자]하면 1.5배로 쳐 줘서 더 빨리 올라요.', 'The cut raises the agency level, which opens gates, gear draws, enhancing and more. Investing the hunter\'s gold counts 1.5x, so it levels faster.'), target: L('투자', 'Invest') },
   ],
 
   // Once, the first time each thing turns up.
