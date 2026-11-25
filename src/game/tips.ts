@@ -74,6 +74,9 @@ export const TIPS = {
   arena: (): GuidePage[] => [
     { text: L('생존 아레나예요! 적이 웨이브로 몰려오고, 넘길 때마다 더 강해져요. 웨이브 사이에 나갈 수 있고, 쓰러져도 목숨은 잃지 않아요. 대신 진행 중인 웨이브의 수입은 잃어요.', 'The Survival Arena! Foes come in waves, stronger each time. You can leave between waves, and falling will not kill you, but you lose what the current wave earned.') },
   ],
+  quests: (): GuidePage[] => [
+    { text: L('협회 의뢰판이에요! 의뢰는 3일 동안 열려 있고, 헌터가 살아서 돌아와야 진행이 인정돼요. 깨면 운영 자금, 마력석, 에이전시 경험치를 받아요.', 'The Association quest board! Each quest is up for 3 days, and progress counts only when the hunter comes home. Finishing one pays funds, mana stones and agency EXP.') },
+  ],
   gates: (): GuidePage[] => [
     { text: L('게이트는 이세계로 통하는 짧은 던전이에요. 한 번 들어가면 닫히고, 경쟁사도 노려요. 클리어하면 큰 보상과 장비를 받아요.', 'Gates are short dungeons into the other world. They close once entered, and the rival wants them too. Clear one for a big reward and gear.') },
   ],

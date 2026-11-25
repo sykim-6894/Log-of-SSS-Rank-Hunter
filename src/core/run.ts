@@ -1,5 +1,5 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth, Point, Tile, center } from './dungeon';
-import { combatPower, gainExp, Hunter } from './hunter';
+import { combatPower, gainExp, Hunter, PrepId } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateClearStones, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import {
@@ -8,6 +8,7 @@ import {
 } from './monsters';
 import {
   addToBag,
+  bagMax,
   ChestContent,
   CONSUMABLES,
   ConsumableKind,
@@ -106,6 +107,10 @@ export interface RunOptions {
   /** Hunters of the rival agency who may turn up in the tower. */
   rivals?: Hunter[];
   rivalAgency?: string;
+  /** Agency name for each rival hunter, when there is more than one rival agency. */
+  rivalAgencies?: Record<number, string>;
+  /** Departure prep bought at the agency for this run. */
+  prep?: PrepId;
   /** Chance per floor (from floor 2) that one of them appears. */
   encounterChance?: number;
   /** Chance per floor (from floor 3, not boss floors) of a mid-boss. */
@@ -267,7 +272,14 @@ export interface RunSnapshot {
   duel?: Duel;
   survival?: Survival;
   spare?: Gear[];
+  prep?: PrepId;
+  tally?: Record<string, number>;
 }
+
+/** Departure prep: experience, kill gold and attack multipliers. */
+export const PREP_INTEL = 1.25;
+export const PREP_LOOT = 1.25;
+export const PREP_EDGE = 1.1;
 
 /** One trip into the Tower of Growth. Pure game rules, no drawing. */
 export class TowerRun {
@@ -319,6 +331,10 @@ export class TowerRun {
   survival?: Survival;
   /** Gear kept for the agency's storage. Lost if the hunter dies. */
   spare: Gear[] = [];
+  /** Departure prep in force this run. */
+  prep?: PrepId;
+  /** Kills this run by monster id, plus 'boss' and 'elite'. For the association's quests. */
+  tally: Record<string, number> = {};
 
   constructor(
     public hunter: Hunter,
@@ -328,6 +344,7 @@ export class TowerRun {
   ) {
     this.gate = options.gate;
     this.duel = options.duel;
+    this.prep = options.prep;
     this.survival = options.survival;
     if (start && this.duel) this.enterArena();
     else if (start && this.survival) this.enterSurvival();
@@ -375,6 +392,8 @@ export class TowerRun {
       duel: this.duel,
       survival: this.survival,
       spare: this.spare,
+      prep: this.prep,
+      tally: this.tally,
     };
   }
 
@@ -416,6 +435,8 @@ export class TowerRun {
     run.duel = s.duel;
     run.survival = s.survival;
     run.spare = s.spare ?? [];
+    run.prep = s.prep;
+    run.tally = s.tally ?? {};
     return run;
   }
 
@@ -697,7 +718,7 @@ export class TowerRun {
     // Old colleagues at the rival agency only show up for a hunter who could stand up to them.
     const cap = combatPower(this.hunter) * FORMER_POWER_CAP;
     const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id) &&
-      (h.origin === 'rival' ? h.rivalOf === this.hunter.id : combatPower(h) <= cap));
+      h.origin !== 'crew' && (h.origin === 'rival' ? h.rivalOf === this.hunter.id : combatPower(h) <= cap));
     if (floor < 2 || pool.length === 0) return;
     if (!this.rng.chance(this.options.encounterChance ?? 0.25)) return;
     // The hunter's own rival shows up more often than the others.
@@ -708,7 +729,7 @@ export class TowerRun {
     const y = this.rng.int(room.y, room.y + room.h - 1);
     if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) return;
     this.met.add(h.id);
-    const agency = this.options.rivalAgency ?? L('경쟁사', 'Rival agency');
+    const agency = this.options.rivalAgencies?.[h.id] ?? this.options.rivalAgency ?? L('경쟁사', 'Rival agency');
     const kind: MonsterKind = {
       id: `hunter-${h.id}`,
       name: `${agency} ${h.name}`,
@@ -775,7 +796,7 @@ export class TowerRun {
       return '';
     }
     const h = this.hunter;
-    if (o.type === 'item' && h.bag[o.item] >= 5) {
+    if (o.type === 'item' && h.bag[o.item] >= bagMax(h)) {
       this.say(L('가방에 더 넣을 자리가 없다.', 'No room left in the bag.'));
       return '';
     }
@@ -1224,7 +1245,7 @@ export class TowerRun {
   }
 
   private atkNow(): number {
-    return this.hunter.atk * (this.buffs.rage?.mult ?? 1);
+    return this.hunter.atk * (this.buffs.rage?.mult ?? 1) * (this.prep === 'edge' ? PREP_EDGE : 1);
   }
 
   /** Hits with the hunter's attack times mult. Returns true if it killed. */
@@ -1637,8 +1658,12 @@ export class TowerRun {
       this.events.push({ type: 'heal', amount: heal });
     }
     const scale = m.hunter ? 1 : floorScale(this.danger);
-    const gold = Math.round(m.kind.gold * scale * this.abyssGold);
+    const gold = Math.round(m.kind.gold * scale * this.abyssGold * (this.prep === 'loot' ? PREP_LOOT : 1));
     this.runGold += gold;
+    const t = this.tally;
+    t[m.kind.id] = (t[m.kind.id] ?? 0) + 1;
+    if (m.kind.boss) t.boss = (t.boss ?? 0) + 1;
+    if (m.kind.elite) t.elite = (t.elite ?? 0) + 1;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
     this.say(L(`${m.kind.name} 처치! +${gold}G`, `${m.kind.name} defeated! +${gold}G`));
@@ -1646,7 +1671,7 @@ export class TowerRun {
       this.events.push({ type: 'gateClear' });
       this.say(L(`${gateName(this.gate!)} 클리어!`, `${gateName(this.gate!)} cleared!`));
     }
-    const expScale = m.hunter ? 1 : floorExpScale(this.danger) * overLevelFactor(this.hunter.level, this.danger);
+    const expScale = (m.hunter ? 1 : floorExpScale(this.danger) * overLevelFactor(this.hunter.level, this.danger)) * (this.prep === 'intel' ? PREP_INTEL : 1);
     const levels = gainExp(this.hunter, Math.max(1, Math.round(m.kind.exp * expScale)));
     if (levels > 0) this.events.push({ type: 'levelup' });
     if (levels > 0) this.say(L(`레벨 업! Lv.${this.hunter.level} · 체력·마나 모두 회복`, `Level up! Lv.${this.hunter.level} · HP and MP restored`));

@@ -1,15 +1,16 @@
 import {
   combatPower, createHunter, gainExp, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
-  TrainingKind,
+  PrepId, TrainingKind,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag, gearLevel } from './items';
+import { bagMax, BIG_BAG, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag, gearLevel } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, rollGate, rollGateGrade, rollRift } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { Duel, RunSnapshot, Survival } from './run';
 import { AgencyProgress, agencyLevel, cutRate, gainAgencyExp, INVEST_EXP, MAX_AGENCY_LEVEL, openSlots, TOP_TRAINING_DISCOUNT, unlocked } from './agencyLevel';
 import { L, lang } from './lang';
+import { applyReport, Quest, QuestBoard, QuestContext, refreshBoard, RunReport } from './quests';
 import { applyRookie, canRetireGrade, Legacy, perkLevel, RETIRE_POINTS } from './legacy';
 
 export interface Agent extends AgencyProgress {
@@ -100,6 +101,8 @@ export interface GameState {
   activeSlot: number;
   hallOfFame: HallOfFameEntry[];
   rival: RivalAgency;
+  /** A second rival agency, which enters the business once ours reaches the top level. */
+  rival2?: RivalAgency;
   world: WorldRanker[];
   nextHunterId: number;
   /** How many hunters this agency has ever signed. */
@@ -112,22 +115,121 @@ export interface GameState {
   day?: number;
   nextGateId?: number;
   /** Gates cleared by us and by the rival agency. */
-  gateRecord?: { ours: number; rival: number };
+  gateRecord?: { ours: number; rival: number; rival2?: number };
   /** The great rift, while it is open (or our hunter is inside). */
   rift?: Gate;
   /** Day the next great rift opens. */
   nextRiftDay?: number;
   /** Today's candidates at the scout center. */
   scouts?: { day: number; list: Hunter[] };
+  /** The association's quest board, once the agency can take quests. */
+  quests?: QuestBoard;
+}
+
+/** Every rival agency in business: the first one, and the second once it has come. */
+export function rivalAgencies(state: GameState): RivalAgency[] {
+  return state.rival2 ? [state.rival, state.rival2] : [state.rival];
+}
+
+/** All hunters at rival agencies. */
+export function rivalHunters(state: GameState): Hunter[] {
+  return rivalAgencies(state).flatMap((a) => a.roster);
+}
+
+/** The rival agency a hunter is signed to. */
+export function agencyOf(state: GameState, id: number): RivalAgency {
+  return rivalAgencies(state).find((a) => a.roster.some((h) => h.id === id)) ?? state.rival;
+}
+
+/** Agency name for each rival hunter, for the tower to label them. */
+export function rivalAgencyNames(state: GameState): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const a of rivalAgencies(state)) for (const h of a.roster) out[h.id] = a.name;
+  return out;
+}
+
+/** Hands our hunters what the agency's level gives them (bigger bags). */
+export function syncPerks(state: GameState) {
+  const big = unlocked(state.agent, 'bag');
+  for (const h of state.slots) {
+    if (!h) continue;
+    h.bagSize = big ? BIG_BAG : undefined;
+  }
+}
+
+/** The second rival agency's own hunters at the start: about as strong as our best. */
+export const RIVAL2_CREW = 3;
+
+/** Once the agency is at the top level, a second rival agency enters the business. */
+function openRival2(state: GameState, rng: Rng, news: string[]) {
+  if (state.rival2 || !unlocked(state.agent, 'rival2') || state.agent.allOpen && agencyLevel(state.agent) < MAX_AGENCY_LEVEL) return;
+  const taken = [state.agent.name, state.rival.name];
+  const name = RIVAL_NAMES.find((n) => !taken.includes(n) && rng.chance(0.5)) ?? RIVAL_NAMES.find((n) => !taken.includes(n)) ?? randomAgencyName(rng, taken);
+  const best = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
+  const roster: Hunter[] = [];
+  state.rival2 = { name, roster };
+  for (let i = 0; i < RIVAL2_CREW; i++) {
+    const h = createHunter(rng, state.nextHunterId++, allNames(state), rng.pick(CLASS_IDS));
+    h.origin = 'crew';
+    const goal = Math.max(1, best - 3 + i * 2 + rng.int(-1, 1));
+    while (h.level < goal) levelUp(h);
+    autoPick(h, rng);
+    h.bestFloor = Math.min(TOP_FLOOR, Math.max(1, h.level - 2));
+    roster.push(h);
+  }
+  news.push(L(`새 경쟁사 ${name}이(가) 업계에 뛰어들었다! 게이트와 순위를 두고 다툰다.`, `A new rival, ${name}, has entered the business! They will fight for gates and ranks.`));
+}
+
+/** What the quest board needs to know to post a fitting quest. */
+function questContext(state: GameState): QuestContext {
+  const ours = state.slots.filter((h): h is Hunter => !!h);
+  return {
+    day: state.day ?? 0,
+    level: Math.max(1, ...ours.map((h) => h.level)),
+    bestFloor: Math.max(1, ...ours.map((h) => h.bestFloor)),
+    arenaBest: Math.max(0, ...ours.map((h) => h.arenaBest ?? 0)),
+    gates: unlocked(state.agent, 'gates'),
+    arena: unlocked(state.agent, 'arena'),
+  };
+}
+
+/** Fills the quest board once the agency can take quests. */
+export function refreshQuests(state: GameState, rng: Rng) {
+  if (!unlocked(state.agent, 'quests')) return;
+  state.quests ??= { list: [], nextId: 1, done: 0 };
+  refreshBoard(state.quests, rng, questContext(state));
+}
+
+/** Departure prep, bought with agency funds before a run. One at a time; it lasts one run. */
+export const PREPS: Record<PrepId, { name: string; describe: string }> = {
+  intel: { name: L('정보 분석', 'Intel briefing'), describe: L('이번 출정 경험치 +25%', 'EXP +25% this run') },
+  loot: { name: L('전리품 계약', 'Loot contract'), describe: L('이번 출정 처치 골드 +25%', 'Kill gold +25% this run') },
+  edge: { name: L('무기 정비', 'Weapon tune-up'), describe: L('이번 출정 공격력 +10%', 'Attack +10% this run') },
+};
+export const PREP_IDS: PrepId[] = ['intel', 'loot', 'edge'];
+
+export function prepCost(h: Hunter): number {
+  return 30 + 6 * h.level;
+}
+
+/** Buys departure prep for the active hunter from agency funds. Swapping refunds nothing. */
+export function buyPrep(state: GameState, id: PrepId): boolean {
+  const h = activeHunter(state);
+  if (!h || h.prep === id) return false;
+  const cost = prepCost(h);
+  if (state.agent.gold < cost) return false;
+  state.agent.gold -= cost;
+  h.prep = id;
+  return true;
 }
 
 /** Each day the rival agency sends a team into one open gate with this chance. */
 export const RIVAL_RAID_CHANCE = 0.5;
 
 /** The team the rival agency would send: its strongest hunter if it keeps up with ours, else its own crew. */
-function rivalTeam(state: GameState, rng: Rng): { hunter?: string; hunterId?: number; level: number } {
+function rivalTeam(state: GameState, rng: Rng, agency: RivalAgency): { hunter?: string; hunterId?: number; level: number } {
   const ours = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
-  const best = [...state.rival.roster].sort((a, b) => b.level - a.level)[0];
+  const best = [...agency.roster].sort((a, b) => b.level - a.level)[0];
   if (best && best.level >= ours - 2) return { hunter: best.name, hunterId: best.id, level: best.level };
   return { level: Math.max(1, ours + rng.int(-1, 1)) };
 }
@@ -142,8 +244,10 @@ function resolveRaids(state: GameState, rng: Rng, news: string[]) {
     const who = r.hunter ? L(`${r.agency}의 ${r.hunter}`, `${r.hunter} of ${r.agency}`) : r.agency;
     if (rng.chance(raidSuccess(g, r.level))) {
       gates.splice(gates.indexOf(g), 1);
-      record.rival++;
-      const h = state.rival.roster.find((x) => x.id === r.hunterId);
+      const second = state.rival2 && r.agency === state.rival2.name;
+      if (second) record.rival2 = (record.rival2 ?? 0) + 1;
+      else record.rival++;
+      const h = rivalHunters(state).find((x) => x.id === r.hunterId);
       if (h) levelUp(h);
       news.push(L(`${who}이(가) ${gateName(g)}을(를) 먼저 클리어했다.`, `${who} cleared the ${gateName(g)} first.`));
     } else {
@@ -154,15 +258,15 @@ function resolveRaids(state: GameState, rng: Rng, news: string[]) {
 }
 
 /** Some days the rival agency picks the hardest open gate its team can handle and goes in. */
-function startRaid(state: GameState, rng: Rng, news: string[]) {
+function startRaid(state: GameState, rng: Rng, news: string[], agency: RivalAgency) {
   if (!rng.chance(RIVAL_RAID_CHANCE)) return;
   const open = (state.gates ?? []).filter((g) => !g.rival);
   if (!open.length) return;
-  const team = rivalTeam(state, rng);
+  const team = rivalTeam(state, rng, agency);
   const fits = open.filter((g) => gateLevel(g) <= team.level + 1);
   const g = fits.length ? fits[fits.length - 1] : open[0];
-  g.rival = { agency: state.rival.name, ...team, since: state.day ?? 0 };
-  const who = team.hunter ? L(`${state.rival.name}의 ${team.hunter}`, `${team.hunter} of ${state.rival.name}`) : state.rival.name;
+  g.rival = { agency: agency.name, ...team, since: state.day ?? 0 };
+  const who = team.hunter ? L(`${agency.name}의 ${team.hunter}`, `${team.hunter} of ${agency.name}`) : agency.name;
   news.push(L(`${who}이(가) ${gateName(g)}에 들어갔다. 다음 날이면 끝낼지도 모른다.`, `${who} entered the ${gateName(g)}. They may finish it by tomorrow.`));
 }
 
@@ -279,7 +383,7 @@ export function activeHunter(state: GameState): Hunter | undefined {
 function allNames(state: GameState): string[] {
   return [
     ...state.slots.filter((h): h is Hunter => !!h).map((h) => h.name),
-    ...state.rival.roster.map((h) => h.name),
+    ...rivalHunters(state).map((h) => h.name),
     ...state.hallOfFame.map((e) => e.name),
     ...state.world.map((w) => w.name),
   ];
@@ -293,6 +397,7 @@ export function hire(state: GameState, rng: Rng, slot: number, cls?: ClassId, fi
   h.bag = homeBag(state);
   h.contractGrade = powerGrade(h);
   state.slots[slot] = h;
+  syncPerks(state);
   state.hunterNumber += 1;
   state.activeSlot = slot;
   return h;
@@ -439,7 +544,7 @@ export function ranking(state: GameState): RankRow[] {
       rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'ours', note: L('우리 소속', 'Ours'), cls: h.cls, order: ladderScore(state, h, score) });
     }
   }
-  for (const h of state.rival.roster) {
+  for (const h of rivalHunters(state)) {
     const note = rivalTag(state, h);
     const score = combatPower(h);
     rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'rival', note, cls: h.cls, order: score });
@@ -542,7 +647,7 @@ export function startFloors(_state: GameState, h: Hunter): number[] {
 function markSSS(state: GameState) {
   const top = ranking(state)[0];
   if (!top) return;
-  const h = [...state.slots, ...state.rival.roster].find((x) => x?.id === top.id);
+  const h = [...state.slots, ...rivalHunters(state)].find((x) => x?.id === top.id);
   if (h) h.everSSS = true;
 }
 
@@ -777,7 +882,8 @@ export function buyItem(state: GameState, rng: Rng, kind: ConsumableKind): Purch
   const hunter = activeHunter(state);
   const price = CONSUMABLES[kind].price;
   const fail = { ok: false, hunterPaid: 0, agentPaid: 0 };
-  if (!hunter || price === undefined || hunter.bag[kind] >= BAG_MAX) return fail;
+  if (!hunter || price === undefined || hunter.bag[kind] >= bagMax(hunter)) return fail;
+  if (CONSUMABLES[kind].bigShop && !unlocked(agent, 'shop')) return fail;
   let agentPaid = 0;
   if (agent.gold >= SUPPORT_MIN_AGENT_GOLD && rng.chance(SUPPORT_CHANCE)) {
     agentPaid = Math.floor(price * SUPPORT_SHARE);
@@ -924,6 +1030,8 @@ export interface ReturnResult extends AfterRunNews {
   stones: number;
   /** The agency's new level, if the cut raised it. */
   agencyUp?: number;
+  /** Association quests this run finished, already paid. */
+  quests?: Quest[];
 }
 
 /** What the bag holds at the start of each run: one health potion, more with the supply perk. */
@@ -935,10 +1043,17 @@ export function homeBag(state: GameState) {
 
 /** Hunter came back alive: pay tribute under the current contract, then re-contract on promotion. */
 export function settleReturn(
-  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0,
+  state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0, report?: RunReport,
 ): ReturnResult {
   const { agent } = state;
   const levelBefore = agencyLevel(agent);
+  // Association quests: progress counts only for hunters who come home.
+  const quests = report && state.quests && unlocked(agent, 'quests') ? applyReport(state.quests, report, state.day ?? 0) : [];
+  for (const q of quests) {
+    agent.gold += q.gold;
+    agent.stones = (agent.stones ?? 0) + q.stones;
+    gainAgencyExp(agent, q.exp);
+  }
   const appraised = Math.round(stones * (1 + 0.2 * perkLevel(agent.legacy, 'stones')));
   agent.stones = (agent.stones ?? 0) + appraised;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
@@ -953,12 +1068,13 @@ export function settleReturn(
   hunter.totalTribute += tribute;
   hunter.hp = hunter.maxHp;
   hunter.mp = hunter.maxMp;
+  hunter.prep = undefined;
   // Potions and scrolls don't come home: the bag goes back to one health potion.
   hunter.bag = homeBag(state);
 
   const news = afterRun(state, rng, encounters, clearedGate);
   const agencyUp = agencyLevel(agent) > levelBefore ? agencyLevel(agent) : undefined;
-  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, agencyUp, ...news };
+  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, agencyUp, quests, ...news };
 
   const now = gradeIn(state, hunter);
   if (gradeRank(now) > gradeRank(hunter.contractGrade)) {
@@ -996,6 +1112,8 @@ export function upgradeScoutGear(h: Hunter, rng: Rng): Gear | undefined {
 export interface DeathResult extends AfterRunNews {
   hunter: Hunter;
   scouted: boolean;
+  /** The rival agency that took the hunter in, if scouted. */
+  agency?: string;
   /** Gear the rival agency gave a scouted hunter. */
   newGear?: Gear[];
   entry?: HallOfFameEntry;
@@ -1018,6 +1136,9 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
   state.slots[slot] = null;
   let entry: HallOfFameEntry | undefined;
   let newGear: Gear[] | undefined;
+  // With two rival agencies, either one may be the one passing by.
+  const taker = state.rival2 && rng.chance(0.5) ? state.rival2 : state.rival;
+  h.prep = undefined;
   if (scouted) {
     h.origin = 'scouted';
     for (let i = 0; i < SCOUT_GEAR_UPGRADES; i++) {
@@ -1026,7 +1147,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
     }
     h.hp = h.maxHp;
     h.mp = h.maxMp;
-    state.rival.roster.push(h);
+    taker.roster.push(h);
   } else {
     entry = toRecord(h, grade, L(`${killer}에게 사망`, `Killed by ${killer}`));
     state.hallOfFame.push(entry);
@@ -1034,7 +1155,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
   const news = afterRun(state, rng, encounters);
   if (!state.slots.some((s) => !!s)) hire(state, rng, slot);
   pickActiveSlot(state);
-  return { hunter: h, scouted, entry, newGear, ...news, signingSupport: 0 };
+  return { hunter: h, scouted, agency: scouted ? taker.name : undefined, entry, newGear, ...news, signingSupport: 0 };
 }
 
 function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
@@ -1050,11 +1171,12 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], cl
 
   // Rival hunters met in the tower: finished for good, or back and stronger.
   for (const o of encounters) {
-    const idx = state.rival.roster.findIndex((h) => h.id === o.hunterId);
+    const roster = agencyOf(state, o.hunterId).roster;
+    const idx = roster.findIndex((h) => h.id === o.hunterId);
     if (idx < 0) continue;
-    const h = state.rival.roster[idx];
+    const h = roster[idx];
     if (o.finished) {
-      state.rival.roster.splice(idx, 1);
+      roster.splice(idx, 1);
       state.hallOfFame.push(toRecord(h, powerGrade(h), L('우리 헌터에게 완전히 쓰러짐', 'Finished off by our hunter')));
       news.finished.push(h.name);
     } else {
@@ -1064,14 +1186,17 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], cl
   }
 
   // The rival agency trains its hunters too, and keeps outfitting the ones it scouted.
-  for (const h of state.rival.roster) {
+  const ourBest = Math.max(1, ...state.slots.map((h) => h?.level ?? 1));
+  for (const h of rivalHunters(state)) {
     if (h.origin === 'rival') continue;
     if (rng.chance(0.5)) levelUp(h);
+    // The second agency's own crew doesn't fall far behind our best.
+    if (h.origin === 'crew' && h.level < ourBest - 3) levelUp(h);
     if (h.origin === 'scouted' && rng.chance(SCOUT_GEAR_DAILY)) upgradeScoutGear(h, rng);
   }
 
   // Hunters nobody plays pick their own level-up cards.
-  for (const h of state.rival.roster) autoPick(h, rng);
+  for (const h of rivalHunters(state)) autoPick(h, rng);
 
   // Rival hunters keep pace with the hunter they shadow.
   for (const r of state.rival.roster.filter((h) => h.origin === 'rival')) {
@@ -1098,11 +1223,14 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], cl
   }
 
   markSSS(state);
+  openRival2(state, rng, news.gateNews);
   news.dispatched = resolveDispatches(state, rng);
   state.day = (state.day ?? 0) + 1;
   resolveRaids(state, rng, news.gateNews);
   refreshGates(state, rng);
-  startRaid(state, rng, news.gateNews);
+  for (const a of rivalAgencies(state)) startRaid(state, rng, news.gateNews, a);
+  refreshQuests(state, rng);
+  syncPerks(state);
   updateRift(state, rng, news.gateNews, clearedGate);
   return news;
 }
@@ -1132,7 +1260,9 @@ export function rivalTag(state: GameState, h: Hunter): string {
     const target = state.slots.find((s) => s?.id === h.rivalOf);
     return target ? L(`${target.name}의 라이벌`, `${target.name}'s rival`) : L('라이벌', 'Rival');
   }
-  return h.origin === 'released' ? L('방출 → 경쟁사', 'Released → rival') : L('스카웃 → 경쟁사', 'Scouted → rival');
+  if (h.origin === 'crew') return agencyOf(state, h.id).name;
+  const second = state.rival2?.roster.includes(h);
+  return h.origin === 'released' ? L('방출 → 경쟁사', 'Released → rival') : second ? L('스카웃 → 새 경쟁사', 'Scouted → new rival') : L('스카웃 → 경쟁사', 'Scouted → rival');
 }
 
 function createRival(state: GameState, rng: Rng, mine: Hunter): Hunter {

@@ -7,12 +7,12 @@ import { L } from './lang';
 export type ConsumableKind = 'hp' | 'mp' | 'guard' | 'escape';
 export const CONSUMABLE_KINDS: ConsumableKind[] = ['hp', 'mp', 'guard', 'escape'];
 
-/** price: sold at the office. where: how to get the ones that are not. */
-export const CONSUMABLES: Record<ConsumableKind, { name: string; describe: string; price?: number; where?: string }> = {
+/** price: sold at the office. where: how to get the ones that are not. bigShop: only once the agency's shop grows. */
+export const CONSUMABLES: Record<ConsumableKind, { name: string; describe: string; price?: number; where?: string; bigShop?: boolean }> = {
   hp: { name: L('체력 물약', 'HP Potion'), describe: L('체력 40% 회복', 'Restores 40% HP'), price: 15 },
   mp: { name: L('마나 물약', 'MP Potion'), describe: L('마나 60% 회복', 'Restores 60% MP'), price: 15 },
-  guard: { name: L('무적 물약', 'Guard Potion'), describe: L('3턴 동안 피해 무시', 'Ignore damage for 3 turns'), where: L('보물상자·상인', 'Chests · merchants') },
-  escape: { name: L('귀환 주문서', 'Return Scroll'), describe: L('바로 귀환, 돌파 보상 없음', 'Return at once, no clear reward'), where: L('탑 속 상인', 'Tower merchant') },
+  guard: { name: L('무적 물약', 'Guard Potion'), describe: L('3턴 동안 피해 무시', 'Ignore damage for 3 turns'), where: L('보물상자·상인', 'Chests · merchants'), price: 60, bigShop: true },
+  escape: { name: L('귀환 주문서', 'Return Scroll'), describe: L('바로 귀환, 돌파 보상 없음', 'Return at once, no clear reward'), where: L('탑 속 상인', 'Tower merchant'), price: 40, bigShop: true },
 };
 
 export const HP_POTION_HEAL = 0.4;
@@ -20,6 +20,13 @@ export const MP_POTION_RESTORE = 0.6;
 export const GUARD_TURNS = 3;
 /** Most of one kind the bag holds. */
 export const BAG_MAX = 5;
+/** With the agency's bigger bags (agency level). */
+export const BIG_BAG = 8;
+
+/** How many of one kind this hunter's bag holds. */
+export function bagMax(h: Hunter): number {
+  return h.bagSize ?? BAG_MAX;
+}
 
 export type Bag = Record<ConsumableKind, number>;
 
@@ -34,7 +41,7 @@ export function startingBag(): Bag {
 
 /** Puts items in the bag. Returns how many fit; the rest are left behind. */
 export function addToBag(h: Hunter, kind: ConsumableKind, count = 1): number {
-  const fit = Math.max(0, Math.min(count, BAG_MAX - h.bag[kind]));
+  const fit = Math.max(0, Math.min(count, bagMax(h) - h.bag[kind]));
   h.bag[kind] += fit;
   return fit;
 }
