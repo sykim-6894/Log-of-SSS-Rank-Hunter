@@ -10,7 +10,7 @@ import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
-import { recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
+import { abyssDepth, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { Action, Duel, REWARDS, RunEvent, TowerRun } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
@@ -19,6 +19,7 @@ import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui'
 import { L } from '../core/lang';
 import { GuidePage, showGuide, tipWanted, markTip } from '../game/guide';
 import { TIPS } from '../game/tips';
+import { ABYSS_GOLD_PER_RULE, ABYSS_RULE_EVERY, rulesLine } from '../core/abyss';
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
@@ -1182,6 +1183,12 @@ export class TowerScene extends Phaser.Scene {
       L(`체력 ${h.hp}/${h.maxHp} · 마나 ${h.mp}/${h.maxMp} · 물약 ${this.bagLine()}`, `HP ${h.hp}/${h.maxHp} · MP ${h.mp}/${h.maxMp} · Pots ${this.bagLine()}`),
       L('죽으면 이번 수입은 모두 잃습니다.', 'Die and you lose all of this run’s income.'),
     ];
+    if (run.inAbyss && run.abyssRules.length) {
+      const bonus = Math.round(run.abyssRules.length * ABYSS_GOLD_PER_RULE * 100);
+      lines.push(L(`심연 규칙: ${rulesLine(run.abyssRules)} · 수입 +${bonus}%`, `Abyss rules: ${rulesLine(run.abyssRules)} · Income +${bonus}%`));
+      const next = ABYSS_RULE_EVERY - (abyssDepth(run.floor) % ABYSS_RULE_EVERY);
+      lines.push(next === 1 ? L('다음 층에서 규칙이 하나 더 붙는다.', 'One more rule joins on the next floor.') : L(`${next}층 더 가면 규칙이 하나 더 붙는다.`, `Another rule joins in ${next} floors.`));
+    }
     const buttons: Array<[string, () => void, boolean?]> = [];
     if (run.gate) lines.push(L('지금 나가면 이 게이트는 닫힙니다.', 'Leaving now closes this gate.'));
     if (!run.isTopFloor) {
@@ -1239,11 +1246,13 @@ export class TowerScene extends Phaser.Scene {
     const msgs = [
       L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
+    if (r.backing > 0) msgs.push(L(`협회 후원 +${r.backing}G.`, `Association backing +${r.backing}G.`));
     if (r.promotedTo) {
       msgs.push(L(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`, `Re-graded: ${r.promotedFrom} → ${r.promotedTo}! Re-signing bonus ${r.signingSupport}G.`));
     }
-    if (run.stones > 0) msgs.push(L(`마력석 ${run.stones}개를 에이전시 창고에 넣었다. (보유 ${state.agent.stones}개)`, `Stored ${run.stones} mana stones at the agency. (Total ${state.agent.stones})`));
-    msgs.push(L('남은 물약은 모두 두고 왔다. 가방에는 체력 물약 1개만 챙겼다.', 'Left the other potions behind; the bag holds 1 HP potion.'));
+    if (r.stones > 0) msgs.push(L(`마력석 ${r.stones}개를 에이전시 창고에 넣었다. (보유 ${state.agent.stones}개)`, `Stored ${r.stones} mana stones at the agency. (Total ${state.agent.stones})`));
+    const pots = run.hunter.bag.hp;
+    msgs.push(L(`남은 물약은 모두 두고 왔다. 가방에는 체력 물약 ${pots}개만 챙겼다.`, `Left the other potions behind; the bag holds ${pots} HP potion${pots > 1 ? 's' : ''}.`));
     msgs.push(...this.newsLines(r));
     state.run = undefined;
     persist();

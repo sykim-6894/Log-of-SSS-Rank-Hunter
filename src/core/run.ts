@@ -24,7 +24,7 @@ import {
   offerLabel,
   rollOffers,
   rollChest,
-  rollGear, gearLabel
+  rollGear, gearLabel, makeGear
 } from './items';
 import { Rng } from './rng';
 import {
@@ -32,6 +32,7 @@ import {
   ClassId, OwnedSkill, SkillId, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
 import { L } from './lang';
+import { ABYSS_GOLD_PER_RULE, ABYSS_MILESTONE, ABYSS_RULE_IDS, ABYSS_RULES, abyssRuleCount, AbyssRule, milestoneReward, stacks } from './abyss';
 
 export interface Monster {
   id: number;
@@ -217,6 +218,7 @@ export interface RunSnapshot {
   floorTurn?: number;
   stalkers?: number;
   regenAcc?: { hp: number; mp: number };
+  abyssRules?: AbyssRule[];
   facing?: Point;
   buffs?: Buffs;
   traps?: Trap[];
@@ -260,6 +262,8 @@ export class TowerRun {
   floorTurn = 0;
   /** Abyss stalkers already on this floor. */
   stalkers = 0;
+  /** Abyss rules in force this run. They pile up as the hunter goes deeper. */
+  abyssRules: AbyssRule[] = [];
   /** Fractions of health and mana regeneration carried to the next turn. */
   private regenAcc = { hp: 0, mp: 0 };
   /** Mana handed back by the skill just used (a finishing smash at upgrade 5). */
@@ -316,6 +320,7 @@ export class TowerRun {
       traps: this.traps,
       floorTurn: this.floorTurn,
       stalkers: this.stalkers,
+      abyssRules: this.abyssRules,
       regenAcc: this.regenAcc,
       gate: this.gate,
       duel: this.duel,
@@ -355,6 +360,7 @@ export class TowerRun {
     run.floorTurn = s.floorTurn ?? 0;
     run.stalkers = s.stalkers ?? 0;
     run.regenAcc = s.regenAcc ?? { hp: 0, mp: 0 };
+    run.abyssRules = s.abyssRules ?? [];
     run.gate = s.gate;
     run.duel = s.duel;
     return run;
@@ -383,6 +389,7 @@ export class TowerRun {
   get sight(): number {
     // The arena is lit: both fighters see each other from the start.
     if (this.duel) return 20;
+    if (this.inAbyss) return Math.max(3, SIGHT - stacks(this.abyssRules, 'dim'));
     return this.gate?.rule === 'dark' ? DARK_SIGHT : SIGHT;
   }
 
@@ -421,13 +428,26 @@ export class TowerRun {
     this.stalkers = 0;
     if (!this.gate) {
       this.hunter.bestFloor = Math.max(this.hunter.bestFloor, Math.min(TOP_FLOOR, n));
-      if (n > TOP_FLOOR) this.hunter.abyssBest = Math.max(this.hunter.abyssBest ?? 0, abyssDepth(n));
+      if (n > TOP_FLOOR) {
+        const depth = abyssDepth(n);
+        const before = this.hunter.abyssBest ?? 0;
+        this.hunter.abyssBest = Math.max(before, depth);
+        while (this.abyssRules.length < abyssRuleCount(depth)) {
+          const rule = this.rng.pick(ABYSS_RULE_IDS);
+          this.abyssRules.push(rule);
+          if (this.abyssRules.length === abyssRuleCount(depth)) {
+            this.say(L(`심연 규칙 추가: [${ABYSS_RULES[rule].name}] ${ABYSS_RULES[rule].text}. 수입 +${Math.round(this.abyssRules.length * ABYSS_GOLD_PER_RULE * 100)}%`, `New abyss rule: [${ABYSS_RULES[rule].name}] ${ABYSS_RULES[rule].text}. Income +${Math.round(this.abyssRules.length * ABYSS_GOLD_PER_RULE * 100)}%`));
+          }
+        }
+        this.milestone = depth % ABYSS_MILESTONE === 0 && depth > before ? depth : 0;
+      }
     }
 
     const danger = this.danger;
     const pool = this.pool;
     const easy = n === 1 && !!this.options.easyFirst && !this.gate && !this.duel;
-    const count = easy ? 2 : Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1));
+    const horde = this.inAbyss ? 1.25 ** stacks(this.abyssRules, 'horde') : 1;
+    const count = easy ? 2 : Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1) * horde);
     const rooms = this.map.rooms.slice(1);
     for (let i = 0; i < count; i++) {
       const room = this.rng.pick(rooms);
@@ -469,6 +489,24 @@ export class TowerRun {
     } else this.say(L(`성장의 탑 ${n}층에 들어섰다.`, `Entered Tower of Growth ${n}F.`));
     this.events.push({ type: 'floor' });
     this.updateSight();
+    if (this.milestone) this.claimMilestone(this.milestone);
+  }
+
+  /** Abyss depth whose milestone this floor gives, or 0. */
+  private milestone = 0;
+
+  /** First time this hunter reaches abyss 10, 20, 30...: stones and a strong piece of gear. */
+  private claimMilestone(depth: number) {
+    this.milestone = 0;
+    const r = milestoneReward(depth);
+    this.stones += r.stones;
+    this.say(L(`심연 ${depth}층 도달 기념! 마력석 +${r.stones}`, `Reached Abyss ${depth}F! Mana stones +${r.stones}`));
+    this.takeGear(makeGear(this.rng, r.tier));
+  }
+
+  /** Gold multiplier from abyss rules in force. */
+  private get abyssGold(): number {
+    return this.inAbyss ? 1 + this.abyssRules.length * ABYSS_GOLD_PER_RULE : 1;
   }
 
   /** A closed arena with the ranker across from the hunter. No stairs: it ends when one falls. */
@@ -721,7 +759,8 @@ export class TowerRun {
 
   private spawn(kind: MonsterKind, x: number, y: number, floor: number) {
     const s = floorScale(floor);
-    const hp = Math.round(kind.hp * s);
+    const abyss = this.inAbyss && !kind.stalker;
+    const hp = Math.round(kind.hp * s * (abyss ? 1.2 ** stacks(this.abyssRules, 'iron') : 1));
     this.monsters.push({
       id: this.nextId++,
       kind,
@@ -729,7 +768,7 @@ export class TowerRun {
       y,
       hp,
       maxHp: hp,
-      atk: Math.round(kind.atk * s),
+      atk: Math.round(kind.atk * s * (abyss ? 1.15 ** stacks(this.abyssRules, 'fury') : 1)),
       def: Math.round(kind.def * s),
       awake: false,
     });
@@ -925,8 +964,9 @@ export class TowerRun {
     const h = this.hunter;
     if (h.hp <= 0) return;
     const acc = this.regenAcc;
-    acc.hp += h.hpRegen ?? 0;
-    acc.mp += h.mpRegen ?? 0;
+    const drain = this.inAbyss ? 0.5 ** stacks(this.abyssRules, 'drain') : 1;
+    acc.hp += (h.hpRegen ?? 0) * drain;
+    acc.mp += (h.mpRegen ?? 0) * drain;
     const hp = Math.floor(acc.hp);
     const mp = Math.floor(acc.mp);
     acc.hp -= hp;
@@ -1454,7 +1494,7 @@ export class TowerRun {
       this.events.push({ type: 'heal', amount: heal });
     }
     const scale = m.hunter ? 1 : floorScale(this.danger);
-    const gold = Math.round(m.kind.gold * scale);
+    const gold = Math.round(m.kind.gold * scale * this.abyssGold);
     this.runGold += gold;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
@@ -1692,7 +1732,7 @@ export class TowerRun {
   /** Go up from the stairs. Gives a floor-clear bonus. */
   climb(): boolean {
     if (this.status !== 'onStairs' || this.isTopFloor) return false;
-    const bonus = 10 * this.danger;
+    const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
     this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
     this.enterFloor(this.floor + 1);
@@ -1702,7 +1742,7 @@ export class TowerRun {
   /** Leave the tower from the stairs, keeping this run's gold. */
   retreat(): boolean {
     if (this.status !== 'onStairs') return false;
-    const bonus = 10 * this.danger;
+    const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
     this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
     this.status = 'returned';
