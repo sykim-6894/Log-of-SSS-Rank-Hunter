@@ -32,8 +32,8 @@ export class TitleScene extends Phaser.Scene {
     const w = Math.min(GW - 40, 420);
     const x = (GW - w) / 2;
     const top = PORTRAIT ? 150 : 90;
-    title(this, GW / 2, top, 'SSS급 헌터의 성장기', PORTRAIT ? 28 : 36, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, top + (PORTRAIT ? 44 : 54), '— 과연 너일까', 14, INK.rust).setOrigin(0.5, 0);
+    title(this, GW / 2, top, '주인공을 찾습니다', PORTRAIT ? 28 : 36, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, top + (PORTRAIT ? 44 : 54), '— SSS급 헌터 에이전시', 14, INK.rust).setOrigin(0.5, 0);
     dots(this, x, top + (PORTRAIT ? 78 : 92), w);
     const by = top + (PORTRAIT ? 104 : 120);
 
