@@ -10,7 +10,7 @@ import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
-import { recommendedLevel, TOP_FLOOR, TRAITS } from '../core/monsters';
+import { recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { Action, Duel, REWARDS, RunEvent, TowerRun } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
@@ -283,7 +283,9 @@ export class TowerScene extends Phaser.Scene {
       if (!this.run.canSee(m) || this.metKinds.has(m.kind.id)) continue;
       this.metKinds.add(m.kind.id);
       const trait = m.kind.trait ? TRAITS[m.kind.trait] : undefined;
-      if (trait) this.run.log.push(`[${trait.name}] ${m.kind.name}: ${trait.text}`);
+      const el = elementNote(m.kind);
+      if (trait) this.run.log.push(`[${trait.name}] ${m.kind.name}: ${trait.text}${el ? ` (${el})` : ''}`);
+      else if (el) this.run.log.push(`${m.kind.name}: ${el}`);
       fresh = true;
     }
     return fresh;
@@ -745,6 +747,9 @@ export class TowerScene extends Phaser.Scene {
     let hurt = 0;
     for (const e of events) {
       switch (e.type) {
+        case 'element':
+          this.floatText(e.x, e.y - 1, e.weak ? '약점!' : '저항', e.weak ? INK.gold : '#9a8f84');
+          break;
         case 'hit':
           this.floatText(e.x, e.y, `${e.amount}`, '#fff4e2');
           this.tileFlash(e.x, e.y);
