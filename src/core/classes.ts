@@ -1,4 +1,5 @@
 import type { Hunter } from './hunter';
+import type { Element } from './monsters';
 import { Rng } from './rng';
 
 // ---------- Classes ----------
@@ -77,6 +78,8 @@ export interface SkillInfo {
   ultimate?: boolean;
   /** Needs a direction: uses the way the hunter last moved. */
   aimed?: boolean;
+  /** Fire, ice or lightning: monsters may be weak to it or resist it. */
+  element?: Element;
   text: string;
   max: string;
 }
@@ -88,12 +91,12 @@ export const SKILLS: Record<SkillId, SkillInfo> = {
   stance: { cls: 'sword', name: '반격 자세', mp: 4, text: '3턴 동안 맞을 때마다 ×1.2 반격', max: '받는 피해 절반' },
   warcry: { cls: 'sword', name: '전투 함성', mp: 6, text: '4턴 동안 공격 +30%', max: '주변 적 1턴 기절' },
   storm: { cls: 'sword', name: '검기 폭풍', mp: 15, mpMax: 10, ultimate: true, text: '2칸 안 모든 적 ×2.5', max: '마나 10' },
-  fireball: { cls: 'mage', name: '화염구', mp: 5, text: '4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', max: '3턴 화상' },
-  icebolt: { cls: 'mage', name: '얼음 화살', mp: 5, aimed: true, text: '직선 5칸 첫 적 ×1.3 + 2턴 빙결', max: '빙결 3턴, 관통' },
-  chain: { cls: 'mage', name: '번개 사슬', mp: 7, text: '가까운 적부터 3명 연쇄 ×1.2', max: '5명까지' },
+  fireball: { cls: 'mage', name: '화염구', mp: 5, element: 'fire', text: '[화염] 4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', max: '3턴 화상' },
+  icebolt: { cls: 'mage', name: '얼음 화살', mp: 5, aimed: true, element: 'ice', text: '[냉기] 직선 5칸 첫 적 ×1.3 + 2턴 빙결', max: '빙결 3턴, 관통' },
+  chain: { cls: 'mage', name: '번개 사슬', mp: 7, element: 'lightning', text: '[번개] 가까운 적부터 3명 연쇄 ×1.2', max: '5명까지' },
   manashield: { cls: 'mage', name: '마나 보호막', mp: 6, text: '5턴 동안 피해를 마나로 대신 받음', max: '마나 1로 피해 2 막음' },
   blink: { cls: 'mage', name: '점멸', mp: 4, aimed: true, text: '바라보는 방향 최대 4칸 순간이동', max: '떠난 자리 ×1.5 폭발' },
-  meteor: { cls: 'mage', name: '유성 낙하', mp: 20, mpMax: 15, ultimate: true, text: '보이는 모든 적 ×1.8', max: '마나 15' },
+  meteor: { cls: 'mage', name: '유성 낙하', mp: 20, mpMax: 15, ultimate: true, element: 'fire', text: '[화염] 보이는 모든 적 ×1.8', max: '마나 15' },
   pierce: { cls: 'archer', name: '관통 화살', mp: 5, aimed: true, text: '직선 6칸 모든 적 ×1.4', max: '방어 무시' },
   backshot: { cls: 'archer', name: '물러서며 쏘기', mp: 5, text: '붙은 적 ×1.2 후 2칸 물러남', max: '맞은 적 1턴 기절' },
   poison: { cls: 'archer', name: '독화살', mp: 4, text: '가까운 적 ×1.0 + 4턴 독', max: '독이 주변 적에게 퍼짐' },

@@ -20,6 +20,36 @@ export interface MonsterKind {
   stalker?: boolean;
   /** An association ranker met in a challenge duel. */
   ranker?: boolean;
+  /** Takes 1.5x from this element. */
+  weak?: Element;
+  /** Takes half from this element. */
+  resist?: Element;
+}
+
+/** Elements of magic skills. Monsters may be weak to one and resist another. */
+export type Element = 'fire' | 'ice' | 'lightning';
+export const ELEMENTS: Record<Element, { name: string; color: string }> = {
+  fire: { name: '화염', color: '#ff8a4a' },
+  ice: { name: '냉기', color: '#8fd3ff' },
+  lightning: { name: '번개', color: '#ffe066' },
+};
+export const WEAK_MULT = 1.5;
+export const RESIST_MULT = 0.5;
+
+/** Damage multiplier for an element hitting this kind of monster. */
+export function elementFactor(kind: MonsterKind, el?: Element): number {
+  if (!el) return 1;
+  if (kind.weak === el) return WEAK_MULT;
+  if (kind.resist === el) return RESIST_MULT;
+  return 1;
+}
+
+/** "약점 화염 · 저항 냉기", or empty. */
+export function elementNote(kind: MonsterKind): string {
+  const parts: string[] = [];
+  if (kind.weak) parts.push(`약점 ${ELEMENTS[kind.weak].name}`);
+  if (kind.resist) parts.push(`저항 ${ELEMENTS[kind.resist].name}`);
+  return parts.join(' · ');
 }
 
 export type TraitId = 'pack' | 'kite' | 'swift' | 'rage' | 'regen' | 'stealth' | 'healer' | 'thorns';
@@ -50,18 +80,18 @@ export const TRAIT_RULES = {
 };
 
 export const MONSTERS: Record<string, MonsterKind> = {
-  goblin: { id: 'goblin', name: '게이트 고블린', glyph: 'g', hp: 9, atk: 5, def: 0, exp: 5, gold: 4, score: 5, trait: 'pack' },
-  archer: { id: 'archer', name: '고블린 궁수', glyph: 'a', hp: 8, atk: 5, def: 0, exp: 8, gold: 5, score: 7, range: 4, trait: 'kite' },
-  wolf: { id: 'wolf', name: '이계 늑대', glyph: 'w', hp: 13, atk: 7, def: 1, exp: 8, gold: 5, score: 8, trait: 'swift' },
-  orc: { id: 'orc', name: '오크 전사', glyph: 'o', hp: 23, atk: 8, def: 2, exp: 14, gold: 9, score: 14, trait: 'rage' },
-  lizard: { id: 'lizard', name: '리자드맨', glyph: 'L', hp: 28, atk: 10, def: 3, exp: 18, gold: 12, score: 20, trait: 'regen' },
-  knight: { id: 'knight', name: '그림자 기사', glyph: 'k', hp: 30, atk: 11, def: 4, exp: 24, gold: 16, score: 28, trait: 'stealth' },
-  shaman: { id: 'shaman', name: '이계 주술사', glyph: 's', hp: 22, atk: 10, def: 2, exp: 26, gold: 18, score: 30, range: 5, trait: 'healer' },
-  beast: { id: 'beast', name: '이계 마수', glyph: 'B', hp: 38, atk: 13, def: 5, exp: 30, gold: 20, score: 36, trait: 'thorns' },
-  warden: { id: 'warden', name: '게이트 수문장', glyph: 'W', hp: 80, atk: 12, def: 4, exp: 70, gold: 50, score: 100, boss: true },
-  overlord: { id: 'overlord', name: '이계의 군주', glyph: 'K', hp: 150, atk: 17, def: 6, exp: 180, gold: 120, score: 300, boss: true },
-  dragon: { id: 'dragon', name: '균열의 용', glyph: 'D', hp: 170, atk: 19, def: 7, exp: 320, gold: 220, score: 600, boss: true },
-  master: { id: 'master', name: '탑의 주인', glyph: 'M', hp: 200, atk: 21, def: 8, exp: 500, gold: 400, score: 1000, boss: true },
+  goblin: { id: 'goblin', name: '게이트 고블린', glyph: 'g', hp: 9, atk: 5, def: 0, exp: 5, gold: 4, score: 5, trait: 'pack', weak: 'fire' },
+  archer: { id: 'archer', name: '고블린 궁수', glyph: 'a', hp: 8, atk: 5, def: 0, exp: 8, gold: 5, score: 7, range: 4, trait: 'kite', weak: 'lightning' },
+  wolf: { id: 'wolf', name: '이계 늑대', glyph: 'w', hp: 13, atk: 7, def: 1, exp: 8, gold: 5, score: 8, trait: 'swift', weak: 'fire', resist: 'ice' },
+  orc: { id: 'orc', name: '오크 전사', glyph: 'o', hp: 23, atk: 8, def: 2, exp: 14, gold: 9, score: 14, trait: 'rage', weak: 'ice' },
+  lizard: { id: 'lizard', name: '리자드맨', glyph: 'L', hp: 28, atk: 10, def: 3, exp: 18, gold: 12, score: 20, trait: 'regen', weak: 'ice', resist: 'lightning' },
+  knight: { id: 'knight', name: '그림자 기사', glyph: 'k', hp: 30, atk: 11, def: 4, exp: 24, gold: 16, score: 28, trait: 'stealth', weak: 'lightning', resist: 'ice' },
+  shaman: { id: 'shaman', name: '이계 주술사', glyph: 's', hp: 22, atk: 10, def: 2, exp: 26, gold: 18, score: 30, range: 5, trait: 'healer', weak: 'fire', resist: 'lightning' },
+  beast: { id: 'beast', name: '이계 마수', glyph: 'B', hp: 38, atk: 13, def: 5, exp: 30, gold: 20, score: 36, trait: 'thorns', weak: 'ice', resist: 'fire' },
+  warden: { id: 'warden', name: '게이트 수문장', glyph: 'W', hp: 80, atk: 12, def: 4, exp: 70, gold: 50, score: 100, boss: true, weak: 'lightning' },
+  overlord: { id: 'overlord', name: '이계의 군주', glyph: 'K', hp: 150, atk: 17, def: 6, exp: 180, gold: 120, score: 300, boss: true, weak: 'ice', resist: 'fire' },
+  dragon: { id: 'dragon', name: '균열의 용', glyph: 'D', hp: 170, atk: 19, def: 7, exp: 320, gold: 220, score: 600, boss: true, weak: 'ice', resist: 'fire' },
+  master: { id: 'master', name: '탑의 주인', glyph: 'M', hp: 200, atk: 21, def: 8, exp: 500, gold: 400, score: 1000, boss: true, resist: 'lightning' },
 };
 
 /** Highest floor for now. A boss guards every fifth floor. */
