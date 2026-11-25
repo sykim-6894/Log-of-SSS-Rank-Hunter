@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AGENCY_NAME_MAX, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { abyssRecord, activeHunter, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
@@ -18,11 +18,16 @@ import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../ga
 import { L, Lang, lang, LANG_KEY } from '../core/lang';
 import { GuidePage, guideIsOff, resetGuide, showGuide, tipWanted, markTip } from '../game/guide';
 import { TIPS } from '../game/tips';
+import { buyPerk, PERK_IDS, PERKS, perkCost, perkLevel, RETIRE_POINTS } from '../core/legacy';
 
 export interface HQData {
   messages?: string[];
   /** Second click on 방출 confirms the release. */
   armRelease?: boolean;
+  /** Second click on 은퇴 confirms the retirement. */
+  armRetire?: boolean;
+  /** Show the legacy screen (perks bought with points from retired hunters). */
+  legacy?: boolean;
   /** Show the start floor choices instead of the depart button. */
   pickStart?: boolean;
   /** Hiring screen: the slot being filled, and whether it re-signs an untouched hunter in another class. */
@@ -65,6 +70,8 @@ function fit(t: Phaser.GameObjects.Text, width: number) {
 export class HQScene extends Phaser.Scene {
   private messages: string[] = [];
   private releaseArmed = false;
+  private retireArmed = false;
+  private showingLegacy = false;
   private pickingStart = false;
   private hiring?: HQData['hire'];
   private showingGates = false;
@@ -81,6 +88,8 @@ export class HQScene extends Phaser.Scene {
   init(data: HQData) {
     this.messages = data.messages ?? [];
     this.releaseArmed = !!data.armRelease;
+    this.retireArmed = !!data.armRetire;
+    this.showingLegacy = !!data.legacy;
     this.pickingStart = !!data.pickStart;
     this.hiring = data.hire;
     this.showingGates = !!data.gates;
@@ -124,6 +133,7 @@ export class HQScene extends Phaser.Scene {
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
     if (this.settings) return this.drawSettings();
+    if (this.showingLegacy) return this.drawLegacy();
     if (this.gacha) return this.drawGacha(this.gacha.result);
     if (this.enhancing) return this.drawEnhance(this.enhancing.result);
     if (PORTRAIT) return this.createPortrait();
@@ -354,7 +364,8 @@ export class HQScene extends Phaser.Scene {
     text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
-    this.soundButton(236, 14, 70);
+    this.soundButton(236, 4, 70, 26);
+    this.legacyButton(236, 33, 70, 24);
     this.drawSlots(x, 70, w);
 
     const top = 132;
@@ -403,11 +414,62 @@ export class HQScene extends Phaser.Scene {
     text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, L(`운영 자금 ${agent.gold}G`, `Funds ${agent.gold}G`), 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
+    this.legacyButton(572, 20, 96, 28);
     this.soundButton(676, 20, 96);
   }
 
-  private soundButton(x: number, y: number, w: number) {
-    button(this, x, y, w, 28, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }));
+  private soundButton(x: number, y: number, w: number, h = 28) {
+    button(this, x, y, w, h, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }));
+  }
+
+  private legacyButton(x: number, y: number, w: number, h: number) {
+    const pts = state.agent.legacy?.points ?? 0;
+    button(this, x, y, w, h, pts > 0 ? L(`전승 ${pts}`, `Legacy ${pts}`) : L('전승', 'Legacy'), () => this.scene.restart({ legacy: true, messages: this.messages }), { primary: pts > 0, size: 12 });
+  }
+
+  /** Legacy: perks bought with points from retired hunters, the legends, the abyss record. */
+  private drawLegacy() {
+    const w = Math.min(GW - 28, 600);
+    const x = (GW - w) / 2;
+    const legacy = (state.agent.legacy ??= { points: 0, perks: {} });
+    title(this, GW / 2, 16, L('전승', 'Legacy'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 48, L('S급 이상 헌터가 은퇴하면 전승 포인트를 남긴다.\n(S 1 · SS 3 · SSS 10) 보너스는 영원히 남는다.', 'S-Rank or better hunters can retire for legacy points (S 1 · SS 3 · SSS 10).\nBonuses bought with them last forever, for every hunter after.'), 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
+    const py = PORTRAIT ? 100 : 92;
+    title(this, GW / 2, py, L(`전승 포인트 ${legacy.points}`, `Legacy points ${legacy.points}`), 17, INK.gold).setOrigin(0.5, 0);
+    const rowH = PORTRAIT ? 62 : 54;
+    const top = py + 34;
+    panel(this, x, top, w, 20 + PERK_IDS.length * rowH, L('영구 보너스', 'Permanent bonuses'));
+    PERK_IDS.forEach((id, i) => {
+      const info = PERKS[id];
+      const lv = perkLevel(legacy, id);
+      const ry = top + 18 + i * rowH;
+      const bw = PORTRAIT ? 104 : 120;
+      title(this, x + 16, ry, `${info.name}  ${lv}/${info.max}`, 14, lv > 0 ? INK.gold : INK.text);
+      fit(text(this, x + 16, ry + 22, info.text, 12, INK.quiet), w - bw - 40);
+      const maxed = lv >= info.max;
+      const cost = perkCost(legacy, id);
+      button(this, x + w - bw - 14, ry + 2, bw, 36, maxed ? L('최대', 'Maxed') : L(`올리기 (${cost})`, `Raise (${cost})`), () => {
+        if (!buyPerk(legacy, id)) return;
+        persist();
+        sfx.gear();
+        this.scene.restart({ legacy: true, messages: [L(`${info.name} ${lv + 1}단계!`, `${info.name} level ${lv + 1}!`), ...this.messages] });
+      }, { enabled: !maxed && legacy.points >= cost, primary: !maxed && legacy.points >= cost, size: 12 });
+    });
+    let y = top + 20 + PERK_IDS.length * rowH + 22;
+    const legends = state.hallOfFame.filter((e) => e.retired);
+    const rec = abyssRecord(state);
+    const lines = [
+      rec ? L(`심연 최고 기록: 심연 ${rec.depth}층 · ${rec.name}`, `Abyss record: Abyss ${rec.depth}F · ${rec.name}`) : L('심연 최고 기록: 아직 없음 (21층부터 심연)', 'Abyss record: none yet (the abyss starts at 21F)'),
+      legends.length ? L(`은퇴한 헌터 ${legends.length}명`, `${legends.length} retired`) : L('은퇴한 헌터가 아직 없다.', 'No one has retired yet.'),
+      ...legends.slice(-4).reverse().map((e) => `${e.legend ? '★ ' : '· '}${e.name} · ${e.grade}${L('급', '-Rank')} · Lv.${e.level}${e.abyssBest ? L(` · 심연 ${e.abyssBest}층`, ` · Abyss ${e.abyssBest}F`) : ''}`),
+    ];
+    lines.forEach((line, i) => {
+      text(this, x + 6, y, line, 12, i === 0 ? INK.gate : line.startsWith('★') ? INK.gold : INK.quiet);
+      y += 20;
+    });
+    if (this.messages[0]?.includes(L('단계!', 'level '))) text(this, GW / 2, Math.min(GH - 92, y + 4), this.messages[0], 12, INK.gold).setOrigin(0.5, 0);
+    button(this, x, GH - 64, w, 48, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages.filter((m) => !m.includes(L('단계!', 'level '))) }));
   }
 
   /** One of Officer Yoon's tips, if one fits this screen. */
@@ -601,7 +663,34 @@ export class HQScene extends Phaser.Scene {
       fit(text(this, x + 130, y + 228, L(`스킬 ${skills}`, `Skills ${skills}`), 12, INK.inkQuiet), w - 236);
     } else {
       const extras = [h.rescues ? L(`위기 지원 ${h.rescues}`, `Rescues ${h.rescues}`) : ''].filter(Boolean).join(' · ');
-      fit(text(this, x + 18, y + 228, L(`스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}`, `Skills ${skills} · Kills ${h.kills} · Best ${h.bestFloor}F${h.abyssBest ? `·Abyss ${h.abyssBest}F` : ''}`) + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120);
+      const retirable = canRetire(state, h);
+      fit(text(this, x + 18, y + 228, L(`스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}`, `Skills ${skills} · Kills ${h.kills} · Best ${h.bestFloor}F${h.abyssBest ? `·Abyss ${h.abyssBest}F` : ''}`) + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - (retirable ? 196 : 120));
+      if (retirable) {
+        const grade = gradeIn(state, h);
+        const pts = RETIRE_POINTS[grade] ?? 0;
+        button(this, x + w - 162, y + 222, 70, 26, this.retireArmed ? L('정말?', 'Sure?') : L('은퇴', 'Retire'), () => {
+          if (!this.retireArmed) {
+            persist();
+            this.scene.restart({
+              messages: [grade === 'SSS'
+                ? L(`전설로 은퇴: 전승 +${pts}, 순위에서 빠짐. 한 번 더 누르면 은퇴`, `Retire a legend: legacy +${pts}, leaves the ranking. Tap again.`)
+                : L(`은퇴: 전승 +${pts}, 순위에서 빠짐 (SSS면 +10). 한 번 더 누르면 은퇴`, `Retire: legacy +${pts}, leaves the ranking (SSS: +10). Tap again.`)],
+              armRetire: true,
+            });
+            return;
+          }
+          const slot = state.activeSlot;
+          const r = retire(state, slot);
+          if (!r) return;
+          persist();
+          sfx.gear();
+          const msg = r.legend
+            ? L(`${r.hunter.name}이(가) 전설로 은퇴했다. 그래, 너였구나. 전승 포인트 +${r.points}.`, `${r.hunter.name} retired a legend. So it was you. Legacy points +${r.points}.`)
+            : L(`${r.hunter.name}이(가) ${r.grade}급으로 은퇴했다. 전승 포인트 +${r.points}.`, `${r.hunter.name} retired at ${r.grade}-Rank. Legacy points +${r.points}.`);
+          if (!state.slots.some(Boolean)) this.scene.restart({ messages: [msg], hire: { slot } });
+          else this.scene.restart({ messages: [msg] });
+        }, { primary: this.retireArmed });
+      }
     }
     const others = state.slots.filter(Boolean).length > 1;
     button(this, x + w - 86, y + 222, 70, 26, this.releaseArmed ? L('정말?', 'Sure?') : L('방출', 'Release'), () => {
@@ -623,7 +712,7 @@ export class HQScene extends Phaser.Scene {
     text(this, x + w - 14, y + 16, L('운영 자금에서 지출', 'Paid from funds'), 12, INK.faint).setOrigin(1, 0);
     const kinds: TrainingKind[] = ['atk', 'def', 'hp', 'mp'];
     kinds.forEach((kind, i) => {
-      const cost = trainingCost(hunter, kind);
+      const cost = trainingCost(hunter, kind, state.agent.legacy);
       const t = TRAINING[kind];
       const bx = x + 16 + (i % 2) * (bw + 8);
       const by = y + 36 + Math.floor(i / 2) * 56;

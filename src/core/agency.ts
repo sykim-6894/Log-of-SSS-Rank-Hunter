@@ -9,6 +9,7 @@ import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { Duel, RunSnapshot } from './run';
 import { L, lang } from './lang';
+import { applyRookie, canRetireGrade, Legacy, perkLevel, RETIRE_POINTS } from './legacy';
 
 export interface Agent {
   name: string;
@@ -17,6 +18,8 @@ export interface Agent {
   named?: boolean;
   /** 마력석 in the agency's store, for enhancing gear. Kept between runs. */
   stones?: number;
+  /** Points and bonuses left by retired hunters. Older saves have none. */
+  legacy?: Legacy;
 }
 
 /** A hunter who is gone for good: died unrescued, or was finished off. */
@@ -32,6 +35,10 @@ export interface HallOfFameEntry {
   /** Combat power when they fell. Older saves lack it. */
   power?: number;
   fate: string;
+  /** Retired by the agency: off the ranking for good. A retired SSS is a legend. */
+  retired?: boolean;
+  legend?: boolean;
+  abyssBest?: number;
 }
 
 export interface RivalAgency {
@@ -276,6 +283,8 @@ function allNames(state: GameState): string[] {
 export function hire(state: GameState, rng: Rng, slot: number, cls?: ClassId, firstSkill?: SkillId): Hunter | undefined {
   if (state.slots[slot]) return undefined;
   const h = createHunter(rng, state.nextHunterId++, allNames(state), cls, firstSkill);
+  applyRookie(state.agent.legacy, h);
+  h.bag = homeBag(state);
   h.contractGrade = powerGrade(h);
   state.slots[slot] = h;
   state.hunterNumber += 1;
@@ -295,6 +304,7 @@ export function changeClass(state: GameState, rng: Rng, slot: number, cls: Class
   if (!old || !untouched(old)) return undefined;
   const h = createHunter(rng, old.id, [], cls, firstSkill);
   h.name = old.name;
+  applyRookie(state.agent.legacy, h);
   h.bag = old.bag;
   h.gold = old.gold;
   h.contractGrade = powerGrade(h);
@@ -313,6 +323,52 @@ export function release(state: GameState, slot: number): Hunter | undefined {
   state.rival.roster.push(h);
   pickActiveSlot(state);
   return h;
+}
+
+/** Whether this hunter may retire now: S-rank or better on the current ranking. */
+export function canRetire(state: GameState, h: Hunter): boolean {
+  return canRetireGrade(gradeIn(state, h));
+}
+
+export interface RetireResult {
+  hunter: Hunter;
+  grade: Grade;
+  points: number;
+  legend: boolean;
+}
+
+/**
+ * The hunter retires: off the ranking for good, into the hall of fame (as a legend if SSS),
+ * leaving legacy points behind. The slot is freed for a new hunter.
+ */
+export function retire(state: GameState, slot: number): RetireResult | undefined {
+  const h = state.slots[slot];
+  if (!h) return undefined;
+  const grade = gradeIn(state, h);
+  const points = RETIRE_POINTS[grade];
+  if (points === undefined) return undefined;
+  const legend = grade === 'SSS';
+  const entry = toRecord(h, grade, legend ? L('은퇴 · 전설', 'Retired · Legend') : L('은퇴', 'Retired'));
+  entry.retired = true;
+  entry.legend = legend;
+  entry.abyssBest = h.abyssBest;
+  state.hallOfFame.push(entry);
+  state.slots[slot] = null;
+  const legacy = (state.agent.legacy ??= { points: 0, perks: {} });
+  legacy.points += points;
+  pickActiveSlot(state);
+  return { hunter: h, grade, points, legend };
+}
+
+/** Deepest abyss floor any of our hunters reached, alive or retired. */
+export function abyssRecord(state: GameState): { depth: number; name: string } | undefined {
+  let best: { depth: number; name: string } | undefined;
+  const see = (depth: number | undefined, name: string) => {
+    if (depth && (!best || depth > best.depth)) best = { depth, name };
+  };
+  for (const h of state.slots) if (h) see(h.abyssBest, h.name);
+  for (const e of state.hallOfFame) see(e.abyssBest, e.name);
+  return best;
 }
 
 function pickActiveSlot(state: GameState) {
@@ -351,6 +407,7 @@ export function ranking(state: GameState): RankRow[] {
     rows.push({ id: h.id, name: h.name, level: h.level, bestFloor: h.bestFloor, score, status: 'rival', note, cls: h.cls, order: score });
   }
   for (const e of state.hallOfFame) {
+    if (e.retired) continue;
     const score = e.power ?? estimatePower(e.level);
     rows.push({ id: e.id, name: e.name, level: e.level, bestFloor: e.bestFloor, score, status: 'gone', note: e.fate, order: score });
   }
@@ -460,15 +517,16 @@ export const TRAINING: Record<TrainingKind, { label: string; describe: string; a
   mp: { label: L('마나 훈련', 'MP Training'), describe: L('최대 마나 +3', 'Max MP +3'), apply: (h) => { h.maxMp += 3; h.mp += 3; } },
 };
 
-export function trainingCost(h: Hunter, kind: TrainingKind): number {
-  return 20 + 15 * h.training[kind];
+export function trainingCost(h: Hunter, kind: TrainingKind, legacy?: Legacy): number {
+  const base = 20 + 15 * h.training[kind];
+  return Math.max(1, Math.round(base * (1 - 0.1 * perkLevel(legacy, 'train'))));
 }
 
 /** The agent invests in the active hunter. Paid from agent gold. */
 export function train(state: GameState, kind: TrainingKind): boolean {
   const h = activeHunter(state);
   if (!h) return false;
-  const cost = trainingCost(h, kind);
+  const cost = trainingCost(h, kind, state.agent.legacy);
   if (state.agent.gold < cost) return false;
   state.agent.gold -= cost;
   h.training[kind] += 1;
@@ -626,6 +684,16 @@ export interface ReturnResult extends AfterRunNews {
   tribute: number;
   kept: number;
   rate: number;
+  /** Extra from the Association (legacy perk), and mana stones after appraisal. */
+  backing: number;
+  stones: number;
+}
+
+/** What the bag holds at the start of each run: one health potion, more with the supply perk. */
+export function homeBag(state: GameState) {
+  const bag = startingBag();
+  bag.hp += perkLevel(state.agent.legacy, 'potion');
+  return bag;
 }
 
 /** Hunter came back alive: pay tribute under the current contract, then re-contract on promotion. */
@@ -633,21 +701,24 @@ export function settleReturn(
   state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0,
 ): ReturnResult {
   const { agent } = state;
-  agent.stones = (agent.stones ?? 0) + stones;
+  const appraised = Math.round(stones * (1 + 0.2 * perkLevel(agent.legacy, 'stones')));
+  agent.stones = (agent.stones ?? 0) + appraised;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
   const rate = TRIBUTE_RATE[hunter.contractGrade];
   const tribute = Math.floor(earned * rate);
-  agent.gold += tribute;
+  // Association backing (legacy): extra on top of the cut, not taken from the hunter.
+  const backing = Math.floor(tribute * 0.1 * perkLevel(agent.legacy, 'tribute'));
+  agent.gold += tribute + backing;
   hunter.gold += earned - tribute;
   hunter.totalTribute += tribute;
   hunter.hp = hunter.maxHp;
   hunter.mp = hunter.maxMp;
   // Potions and scrolls don't come home: the bag goes back to one health potion.
-  hunter.bag = startingBag();
+  hunter.bag = homeBag(state);
 
   const news = afterRun(state, rng, encounters, clearedGate);
-  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, ...news };
+  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, ...news };
 
   const now = gradeIn(state, hunter);
   if (gradeRank(now) > gradeRank(hunter.contractGrade)) {
@@ -729,7 +800,7 @@ export function settleDeath(state: GameState, rng: Rng, killer: string, encounte
 function toRecord(h: Hunter, grade: Grade, fate: string): HallOfFameEntry {
   return {
     id: h.id, name: h.name, grade, level: h.level, kills: h.kills, bestFloor: h.bestFloor,
-    totalTribute: h.totalTribute, score: hallOfFameScore(h), power: combatPower(h), fate,
+    totalTribute: h.totalTribute, score: hallOfFameScore(h), power: combatPower(h), fate, abyssBest: h.abyssBest,
   };
 }
 
