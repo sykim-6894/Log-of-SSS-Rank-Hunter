@@ -1,6 +1,6 @@
 import {
   combatPower, createHunter, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
-  TrainingKind, TRIBUTE_RATE,
+  TrainingKind,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
@@ -8,10 +8,11 @@ import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, 
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
 import type { Duel, RunSnapshot, Survival } from './run';
+import { AgencyProgress, agencyLevel, cutRate, gainAgencyExp, INVEST_EXP, MAX_AGENCY_LEVEL, openSlots, TOP_TRAINING_DISCOUNT, unlocked } from './agencyLevel';
 import { L, lang } from './lang';
 import { applyRookie, canRetireGrade, Legacy, perkLevel, RETIRE_POINTS } from './legacy';
 
-export interface Agent {
+export interface Agent extends AgencyProgress {
   name: string;
   gold: number;
   /** False until the player names the agency on the first screen. Older saves never had this. */
@@ -253,7 +254,7 @@ const RIVAL_NAMES = [L('적월 길드', 'Red Moon Guild'), L('흑철 헌터스',
 export function newGame(rng: Rng): GameState {
   const state: GameState = {
     version: 3,
-    agent: { name: randomAgencyName(rng), gold: 100, named: false },
+    agent: { name: randomAgencyName(rng), gold: 100, named: false, exp: 0 },
     slots: [null, null, null],
     activeSlot: 0,
     hallOfFame: [],
@@ -550,16 +551,35 @@ export const TRAINING: Record<TrainingKind, { label: string; describe: string; a
   mp: { label: L('마나 훈련', 'MP Training'), describe: L('최대 마나 +3', 'Max MP +3'), apply: (h) => { h.maxMp += 3; h.mp += 3; } },
 };
 
-export function trainingCost(h: Hunter, kind: TrainingKind, legacy?: Legacy): number {
+export function trainingCost(h: Hunter, kind: TrainingKind, legacy?: Legacy, agencyLv = 1): number {
   const base = 20 + 15 * h.training[kind];
-  return Math.max(1, Math.round(base * (1 - 0.1 * perkLevel(legacy, 'train'))));
+  const top = agencyLv >= MAX_AGENCY_LEVEL ? TOP_TRAINING_DISCOUNT : 0;
+  return Math.max(1, Math.round(base * (1 - 0.1 * perkLevel(legacy, 'train') - top)));
 }
+
+/** The hunter puts some of their own gold into the agency. Returns the new agency level if it went up. */
+export function invest(state: GameState, amount: number): { amount: number; levelUp?: number } | undefined {
+  const h = activeHunter(state);
+  const n = Math.min(Math.floor(amount), h?.gold ?? 0);
+  if (!h || n <= 0) return undefined;
+  h.gold -= n;
+  h.invested = (h.invested ?? 0) + n;
+  state.agent.gold += n;
+  return { amount: n, levelUp: gainAgencyExp(state.agent, n * INVEST_EXP) };
+}
+
+/** Whether this slot can take a hunter at the agency's level. */
+export function slotOpen(state: GameState, slot: number): boolean {
+  return slot < openSlots(state.agent) || !!state.slots[slot];
+}
+
+export { agencyLevel, unlocked };
 
 /** The agent invests in the active hunter. Paid from agent gold. */
 export function train(state: GameState, kind: TrainingKind): boolean {
   const h = activeHunter(state);
   if (!h) return false;
-  const cost = trainingCost(h, kind, state.agent.legacy);
+  const cost = trainingCost(h, kind, state.agent.legacy, agencyLevel(state.agent));
   if (state.agent.gold < cost) return false;
   state.agent.gold -= cost;
   h.training[kind] += 1;
@@ -720,6 +740,8 @@ export interface ReturnResult extends AfterRunNews {
   /** Extra from the Association (legacy perk), and mana stones after appraisal. */
   backing: number;
   stones: number;
+  /** The agency's new level, if the cut raised it. */
+  agencyUp?: number;
 }
 
 /** What the bag holds at the start of each run: one health potion, more with the supply perk. */
@@ -738,8 +760,9 @@ export function settleReturn(
   agent.stones = (agent.stones ?? 0) + appraised;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
-  const rate = TRIBUTE_RATE[hunter.contractGrade];
+  const rate = cutRate(hunter);
   const tribute = Math.floor(earned * rate);
+  const agencyUp = gainAgencyExp(agent, tribute);
   // Association backing (legacy): extra on top of the cut, not taken from the hunter.
   const backing = Math.floor(tribute * 0.1 * perkLevel(agent.legacy, 'tribute'));
   agent.gold += tribute + backing;
@@ -751,7 +774,7 @@ export function settleReturn(
   hunter.bag = homeBag(state);
 
   const news = afterRun(state, rng, encounters, clearedGate);
-  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, ...news };
+  const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, agencyUp, ...news };
 
   const now = gradeIn(state, hunter);
   if (gradeRank(now) > gradeRank(hunter.contractGrade)) {

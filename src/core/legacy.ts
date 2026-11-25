@@ -45,10 +45,15 @@ export function perkCost(legacy: Legacy | undefined, id: PerkId): number {
   return perkLevel(legacy, id) + 1;
 }
 
-export function buyPerk(legacy: Legacy, id: PerkId): boolean {
+/** A top-level agency lifts every perk's cap by one. */
+export function perkMax(id: PerkId, extra = 0): number {
+  return PERKS[id].max + extra;
+}
+
+export function buyPerk(legacy: Legacy, id: PerkId, extra = 0): boolean {
   const lv = perkLevel(legacy, id);
   const cost = lv + 1;
-  if (lv >= PERKS[id].max || legacy.points < cost) return false;
+  if (lv >= perkMax(id, extra) || legacy.points < cost) return false;
   legacy.points -= cost;
   legacy.perks[id] = lv + 1;
   return true;

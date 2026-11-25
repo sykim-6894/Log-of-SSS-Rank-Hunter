@@ -43,6 +43,8 @@ export interface Hunter {
   arenaBest?: number;
   /** Day of the last survival-arena entry: once a day. */
   arenaDay?: number;
+  /** Gold this hunter put into the agency. Lowers their cut. */
+  invested?: number;
   /** Association rankers (by id) this hunter has beaten in a challenge. */
   beaten?: number[];
   /** Day of the last ranker challenge: one a day. */
