@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleDuel, settleReturn } from '../core/agency';
+import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
@@ -11,7 +11,7 @@ import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
 import { abyssDepth, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
-import { levelUpMessage } from '../core/agencyLevel';
+import { levelUpMessage, unlocked } from '../core/agencyLevel';
 import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
@@ -419,6 +419,7 @@ export class TowerScene extends Phaser.Scene {
       rivals: state.rival.roster,
       rivalAgency: state.rival.name,
       mapSize: PORTRAIT ? { w: TALL_MAP_W, h: TALL_MAP_H } : undefined,
+      keepSpare: unlocked(state.agent, 'stash'),
     };
     const saved = state.run;
     if (saved) {
@@ -1279,6 +1280,7 @@ export class TowerScene extends Phaser.Scene {
     for (const name of n.grewStronger) msgs.push(L(`${name}은(는) ${state.rival.name}에서 훨씬 강해졌다.`, `${name} grew much stronger at ${state.rival.name}.`));
     if (n.rivalCreated) msgs.push(L(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`, `Hearing of the S-Rank promotion, ${state.rival.name} fielded a rival: ${n.rivalCreated.name}!`));
     msgs.push(...n.gateNews);
+    for (const d of n.dispatched ?? []) msgs.push(L(`${d.name}이(가) 파견에서 돌아왔다. 수입 ${d.earned}G 중 ${d.tribute}G 상납 · 경험치 +${d.exp}.`, `${d.name} is back from dispatch. Paid ${d.tribute}G of ${d.earned}G · EXP +${d.exp}.`));
     return msgs;
   }
 
@@ -1296,6 +1298,12 @@ export class TowerScene extends Phaser.Scene {
       L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
     if (r.agencyUp) msgs.unshift(levelUpMessage(r.agencyUp));
+    if (run.spare.length) {
+      const kept = storeSpare(state, run.spare);
+      msgs.push(kept === run.spare.length
+        ? L(`쓰지 않는 장비 ${kept}개를 창고에 넣었다.`, `Put ${kept} spare piece${kept > 1 ? 's' : ''} of gear in storage.`)
+        : L(`쓰지 않는 장비 ${kept}개를 창고에 넣었다. 창고가 가득 차서 ${run.spare.length - kept}개는 버렸다.`, `Stored ${kept} spare piece(s); storage is full, so ${run.spare.length - kept} were thrown away.`));
+    }
     if (r.backing > 0) msgs.push(L(`협회 후원 +${r.backing}G.`, `Association backing +${r.backing}G.`));
     if (r.promotedTo) {
       msgs.push(L(`등급 재심사: ${r.promotedFrom}급 → ${r.promotedTo}급! 재계약 지원금 ${r.signingSupport}G.`, `Re-graded: ${r.promotedFrom} → ${r.promotedTo}! Re-signing bonus ${r.signingSupport}G.`));

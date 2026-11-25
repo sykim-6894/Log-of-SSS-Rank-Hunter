@@ -12,13 +12,13 @@ export interface AgencyProgress {
   allOpen?: boolean;
 }
 
-export type Feature = 'gates' | 'gacha' | 'enhance' | 'duel' | 'arena';
+export type Feature = 'gates' | 'gacha' | 'enhance' | 'duel' | 'arena' | 'stash' | 'dispatch' | 'scout';
 
 /** Experience needed to reach each level (index 0 is level 1). */
-export const AGENCY_LEVEL_EXP = [0, 150, 1500, 5000, 10000, 20000];
+export const AGENCY_LEVEL_EXP = [0, 150, 1500, 5000, 10000, 20000, 35000, 60000];
 export const MAX_AGENCY_LEVEL = AGENCY_LEVEL_EXP.length;
 
-export const FEATURE_LEVEL: Record<Feature, number> = { gates: 2, gacha: 3, enhance: 4, duel: 5, arena: 5 };
+export const FEATURE_LEVEL: Record<Feature, number> = { gates: 2, gacha: 3, enhance: 4, stash: 4, duel: 5, arena: 5, dispatch: 6, scout: 7 };
 
 export function featureName(f: Feature): string {
   return {
@@ -27,6 +27,9 @@ export function featureName(f: Feature): string {
     enhance: L('장비 강화', 'Gear enhancing'),
     duel: L('랭커 도전', 'Ranker challenges'),
     arena: L('생존 아레나', 'Survival Arena'),
+    stash: L('장비 창고', 'Gear storage'),
+    dispatch: L('파견', 'Dispatch'),
+    scout: L('스카웃 센터', 'Scout center'),
   }[f];
 }
 

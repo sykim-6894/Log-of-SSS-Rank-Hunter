@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser';
-import { abyssRecord, activeHunter, invest, slotOpen, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { abyssRecord, activeHunter, invest, slotOpen, canDispatch, dispatch, dispatchPay, isAway, TALENTS, TalentId, depositGear, withdrawGear, sellStashed, stashFee, stashPrice, STASH_SIZE, scoutCandidates, hireScout, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
 import { MONSTERS, TOP_FLOOR } from '../core/monsters';
 import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
+import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, gearLevel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
 import { sfx, soundOn, toggleSound } from '../game/sfx';
@@ -34,7 +34,9 @@ export interface HQData {
   /** Show the start floor choices instead of the depart button. */
   pickStart?: boolean;
   /** Hiring screen: the slot being filled, and whether it re-signs an untouched hunter in another class. */
-  hire?: { slot: number; change?: boolean; cls?: ClassId; skills?: SkillId[] };
+  hire?: { slot: number; change?: boolean; cls?: ClassId; skills?: SkillId[]; direct?: boolean };
+  /** Show the agency's gear storage. */
+  stash?: boolean;
   /** Show the board of open gates. */
   gates?: boolean;
   /** Show the gear draw, with the last result if there is one. */
@@ -84,6 +86,7 @@ export class HQScene extends Phaser.Scene {
   /** Save slot waiting for a second press to be overwritten. */
   private armSave?: number;
   private enhancing?: HQData['enhance'];
+  private showingStash = false;
 
   constructor() {
     super('HQ');
@@ -101,6 +104,7 @@ export class HQScene extends Phaser.Scene {
     this.gacha = data.gacha;
     this.settings = !!data.settings;
     this.enhancing = data.enhance;
+    this.showingStash = !!data.stash;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
     if (takeWelcome() && this.messages.length === 0) {
@@ -142,6 +146,7 @@ export class HQScene extends Phaser.Scene {
     if (this.showingArena) return this.drawArena();
     if (this.gacha) return this.drawGacha(this.gacha.result);
     if (this.enhancing) return this.drawEnhance(this.enhancing.result);
+    if (this.showingStash) return this.drawStash();
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -158,11 +163,46 @@ export class HQScene extends Phaser.Scene {
     text(this, 480, 698, L('방향키·WASD 이동/공격   Z 제자리 공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기', 'Arrows/WASD move   Z attack   1·2·3 skills   E·R·F·X potions/return   B bag   Space wait'), 12, INK.faint).setOrigin(0.5, 0);
   }
 
+  /** Scout center: today's three candidates, each with a talent and a few levels. */
+  private drawScouts(hr: NonNullable<HQData['hire']>) {
+    const x = 14;
+    const w = GW - 28;
+    const list = scoutCandidates(state, rng);
+    persist();
+    title(this, GW / 2, 18, L('스카웃 센터', 'Scout Center'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 52, L('오늘의 후보들이다. 재능을 하나씩 갖고 있다. 후보는 하루가 지나면 바뀐다.', "Today's candidates, each with a talent. They change every day."), 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
+    const cardH = PORTRAIT ? 150 : 120;
+    const cols = PORTRAIT ? 1 : 3;
+    const cw = (w - (cols - 1) * 12) / cols;
+    list.forEach((h, i) => {
+      const c = CLASSES[h.cls ?? 'sword'];
+      const cx = x + (i % cols) * (cw + 12);
+      const cy = 86 + Math.floor(i / cols) * (cardH + 10);
+      panel(this, cx, cy, cw, cardH);
+      const g = this.add.graphics();
+      drawLook(g, c.look, cx + 12, cy + 14, 5);
+      fit(title(this, cx + 82, cy + 12, `${h.name}  ·  ${c.name}`, 15, INK.gold), cw - 94);
+      text(this, cx + 82, cy + 36, L(`Lv.${h.level} · 전투력 ${combatPower(h)}`, `Lv.${h.level} · Power ${combatPower(h)}`), 12, INK.text);
+      const t = TALENTS[h.talent as TalentId];
+      if (t) fit(text(this, cx + 82, cy + 54, L(`재능 [${t.name()}] ${t.text()}`, `Talent [${t.name()}] ${t.text()}`), 12, INK.gate), cw - 94);
+      fit(text(this, cx + 82, cy + 72, L(`체력 ${h.maxHp} 마나 ${h.maxMp} 공격 ${h.atk} 방어 ${h.def}`, `HP ${h.maxHp} MP ${h.maxMp} ATK ${h.atk} DEF ${h.def}`), 12, INK.quiet), cw - 94);
+      button(this, cx + 12, cy + cardH - 40, cw - 24, 30, L(`${h.name}와(과) 계약`, `Sign ${h.name}`), () => {
+        const signed = hireScout(state, hr.slot, i);
+        if (signed) this.refresh([L(`스카웃 센터에서 ${c.name} ${signed.name}와(과) 계약했다.`, `Signed ${c.name} ${signed.name} from the scout center.`)]);
+      }, { primary: true, size: 12 });
+    });
+    if (!list.length) text(this, GW / 2, 100, L('오늘 후보는 모두 계약했다. 직업을 골라 새로 뽑을 수 있다.', 'All of today\'s candidates are signed. You can still hire by class.'), 12, INK.faint).setOrigin(0.5, 0);
+    button(this, x, GH - 130, w, 50, L('직업 골라서 뽑기', 'Hire by class instead'), () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, direct: true } }));
+    button(this, x, GH - 70, w, 50, L('취소', 'Cancel'), () => this.scene.restart({ messages: this.messages }));
+  }
+
   /**
    * Hiring screen in two steps: pick a class, then one of two first skills.
    * Also used to re-sign an untouched hunter in another class.
    */
   private drawHiring(hr: NonNullable<HQData['hire']>) {
+    if (!hr.cls && !hr.change && !hr.direct && unlocked(state.agent, 'scout')) return this.drawScouts(hr);
     const x = 14;
     const w = GW - 28;
     const back = () => this.scene.restart({ messages: this.messages });
@@ -205,7 +245,7 @@ export class HQScene extends Phaser.Scene {
         this.refresh([msg]);
       }, { primary: true, size: 12 });
     });
-    button(this, x, GH - 130, w, 50, L('직업 다시 고르기', 'Pick class again'), () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change } }));
+    button(this, x, GH - 130, w, 50, L('직업 다시 고르기', 'Pick class again'), () => this.scene.restart({ messages: this.messages, hire: { slot: hr.slot, change: hr.change, direct: hr.direct } }));
     button(this, x, GH - 70, w, 50, L('취소', 'Cancel'), back);
   }
 
@@ -343,10 +383,11 @@ export class HQScene extends Phaser.Scene {
     if (!this.pickingStart || floors.length < 2) {
       const gw = Math.round(w * 0.25);
       const tw = w - 2 * gw - 16;
-      button(this, x, y, tw, hgt, L('▶  성장의 탑', '▶  Tower of Growth'), () => {
+      const away = isAway(h);
+      button(this, x, y, tw, hgt, away ? L('파견 중인 헌터', 'Hunter is away') : L('▶  성장의 탑', '▶  Tower of Growth'), () => {
         if (floors.length > 1) this.scene.restart({ messages: this.messages, pickStart: true });
         else go(1);
-      }, { primary: true, size, enabled: !!h });
+      }, { primary: !away, size: away ? 14 : size, enabled: !!h && !away });
       const arenaOk = !!h && unlocked(state.agent, 'arena') && canEnterArena(state, h);
       this.featureButton('arena', x + tw + 8, y, gw, hgt, L('아레나', 'Arena'), () =>
         this.scene.restart({ messages: this.messages, arena: true }), { size: Math.min(size, 18), enabled: !!h, primary: false });
@@ -439,6 +480,59 @@ export class HQScene extends Phaser.Scene {
   private legacyButton(x: number, y: number, w: number, h: number) {
     const pts = state.agent.legacy?.points ?? 0;
     button(this, x, y, w, h, pts > 0 ? L(`전승 ${pts}`, `Legacy ${pts}`) : L('전승', 'Legacy'), () => this.scene.restart({ legacy: true, messages: this.messages }), { primary: pts > 0, size: 12 });
+  }
+
+  /** The agency's gear storage: what the active hunter wears, and what is kept. */
+  private drawStash() {
+    const h = activeHunter(state);
+    const stash = state.agent.stash ?? [];
+    const x = 14;
+    const w = GW - 28;
+    title(this, GW / 2, 14, L('장비 창고', 'Gear Storage'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 46, L('탐험 중 바꾼 장비는 창고로 온다. 꺼내 입을 땐 운영 자금이 들고, 헌터 레벨이 장비 레벨 이상이어야 한다.', 'Gear swapped out on runs comes here. Taking a piece out costs agency funds and needs the hunter at the gear\'s level.'), 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
+    const rowH = PORTRAIT ? 27 : 30;
+    const cols = PORTRAIT ? 1 : 2;
+    const cw = cols > 1 ? (w - 12) / 2 : w;
+    const top = PORTRAIT ? 100 : 80;
+    const refresh = (msg: string) => this.scene.restart({ messages: [msg, ...this.messages], stash: true });
+    // Worn gear, with "leave it here".
+    const wornH = 24 + GEAR_SLOTS.length * rowH;
+    panel(this, x, top, cw, wornH, h ? L(`${h.name} 착용 (Lv.${h.level})`, `${h.name} wears (Lv.${h.level})`) : L('착용', 'Worn'));
+    GEAR_SLOTS.forEach((slot, i) => {
+      const g = h?.gear[slot];
+      const ry = top + 20 + i * rowH;
+      fit(text(this, x + 12, ry + 5, g ? `${GEAR_SLOT_NAMES[slot]} · ${gearLabel(g)}` : L(`${GEAR_SLOT_NAMES[slot]} · 비어 있음`, `${GEAR_SLOT_NAMES[slot]} · empty`), 12, g ? INK.text : INK.faint), cw - 110);
+      if (g) button(this, x + cw - 86, ry, 74, rowH - 4, L('맡기기', 'Store'), () => {
+        if (depositGear(state, slot)) { persist(); refresh(L(`${gearLabel(g)}을(를) 창고에 맡겼다.`, `Stored ${gearLabel(g)}.`)); }
+      }, { size: 12, enabled: stash.length < STASH_SIZE });
+    });
+    // Stored gear, with "wear" (fee, level) and "sell".
+    const sx = cols > 1 ? x + cw + 12 : x;
+    const sy = cols > 1 ? top : top + wornH + 12;
+    panel(this, sx, sy, cw, 24 + STASH_SIZE * rowH, L(`창고 ${stash.length}/${STASH_SIZE} · 운영 자금 ${state.agent.gold}G`, `Storage ${stash.length}/${STASH_SIZE} · Funds ${state.agent.gold}G`));
+    if (!stash.length) text(this, sx + 12, sy + 26, L('비어 있다. 탐험에서 장비를 바꾸면 쌓인다.', 'Empty. Gear you swap out on runs piles up here.'), 12, INK.faint);
+    stash.forEach((g, i) => {
+      const ry = sy + 20 + i * rowH;
+      const need = gearLevel(g);
+      const fee = stashFee(g);
+      const levelOk = !!h && h.level >= need;
+      fit(text(this, sx + 12, ry + 5, `${GEAR_SLOT_NAMES[g.slot]} · ${gearLabel(g)} · Lv.${need}`, 12, levelOk ? INK.text : INK.red), cw - 190);
+      button(this, sx + cw - 172, ry, 96, rowH - 4, levelOk ? L(`착용 ${fee}G`, `Wear ${fee}G`) : L(`Lv.${need} 필요`, `Needs Lv.${need}`), () => {
+        const r = withdrawGear(state, i);
+        if (!r.ok) return;
+        persist();
+        sfx.gear();
+        refresh(L(`${gearLabel(g)}을(를) 꺼내 입었다. (-${r.fee}G)`, `Put on ${gearLabel(g)}. (-${r.fee}G)`) + (r.swapped ? L(` ${gearLabel(r.swapped)}은(는) 창고로.`, ` ${gearLabel(r.swapped)} went to storage.`) : ''));
+      }, { size: 12, enabled: levelOk && state.agent.gold >= fee, primary: levelOk && state.agent.gold >= fee });
+      button(this, sx + cw - 72, ry, 60, rowH - 4, L(`팔기 ${stashPrice(g)}`, `Sell ${stashPrice(g)}`), () => {
+        const price = sellStashed(state, i);
+        persist();
+        refresh(L(`${gearLabel(g)}을(를) ${price}G에 팔았다.`, `Sold ${gearLabel(g)} for ${price}G.`));
+      }, { size: 12 });
+    });
+    if (this.messages[0]) fit(text(this, GW / 2, GH - 84, this.messages[0], 12, INK.gold).setOrigin(0.5, 0), w);
+    button(this, x, GH - 60, w, 46, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
   }
 
   /** The survival arena's entrance: the rules, the prizes, the records, and the way in. */
@@ -638,7 +732,7 @@ export class HQScene extends Phaser.Scene {
       const h = state.slots[i];
       const bx = x + i * (w + 10);
       if (h) {
-        button(this, bx, y, w, 44, L(`${h.name}\n${gradeIn(state, h)}급 · Lv.${h.level}`, `${h.name}\n${gradeIn(state, h)}-Rank · Lv.${h.level}`), () => {
+        button(this, bx, y, w, 44, isAway(h) ? L(`${h.name}\n파견 중`, `${h.name}\nDispatched`) : L(`${h.name}\n${gradeIn(state, h)}급 · Lv.${h.level}`, `${h.name}\n${gradeIn(state, h)}-Rank · Lv.${h.level}`), () => {
           state.activeSlot = i;
           this.refresh();
         }, { primary: i === state.activeSlot });
@@ -717,13 +811,25 @@ export class HQScene extends Phaser.Scene {
     title(this, x + 18, y + 198, L(`전투력 ${power}`, `Power ${power}`), 15, INK.ink);
     text(this, x + w - 18, y + 201, goal, 12, INK.inkQuiet).setOrigin(1, 0);
     const skills = h.skills.map((sk) => `${SKILLS[sk.id].name} ${sk.lv}`).join(' · ');
+    const retirable = !untouched(h) && canRetire(state, h);
+    // Dispatch: a day away for pay, while another hunter stays home.
+    const showDispatch = unlocked(state.agent, 'dispatch') && (isAway(h) || state.slots.filter(Boolean).length > 1);
+    if (showDispatch) {
+      const dx = x + w - (retirable ? 238 : 162);
+      const pay = dispatchPay(h);
+      button(this, dx, y + 222, 70, 26, isAway(h) ? L('파견 중', 'Away') : L('파견', 'Dispatch'), () => {
+        const slot = state.activeSlot;
+        if (!dispatch(state, slot)) return;
+        this.refresh([L(`${h.name}을(를) 파견 보냈다. 다음 귀환 때 약 ${pay.gold}G, 경험치 ${pay.exp}를 벌어 온다.`, `Sent ${h.name} on a dispatch. Back at the next return with about ${pay.gold}G and ${pay.exp} EXP.`)]);
+      }, { enabled: canDispatch(state, state.activeSlot), size: 12 });
+    }
+    const used = (retirable ? 76 : 0) + (showDispatch ? 76 : 0);
     if (untouched(h)) {
       button(this, x + 18, y + 222, 104, 26, L('직업 바꾸기', 'Change class'), () => this.scene.restart({ messages: this.messages, hire: { slot: state.activeSlot, change: true } }), { size: 12 });
-      fit(text(this, x + 130, y + 228, L(`스킬 ${skills}`, `Skills ${skills}`), 12, INK.inkQuiet), w - 236);
+      fit(text(this, x + 130, y + 228, L(`스킬 ${skills}`, `Skills ${skills}`), 12, INK.inkQuiet), w - 236 - used);
     } else {
-      const extras = [h.rescues ? L(`위기 지원 ${h.rescues}`, `Rescues ${h.rescues}`) : ''].filter(Boolean).join(' · ');
-      const retirable = canRetire(state, h);
-      fit(text(this, x + 18, y + 228, L(`스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}`, `Skills ${skills} · Kills ${h.kills} · Best ${h.bestFloor}F${h.abyssBest ? `·Abyss ${h.abyssBest}F` : ''}`) + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - (retirable ? 196 : 120));
+      const extras = [h.rescues ? L(`위기 지원 ${h.rescues}`, `Rescues ${h.rescues}`) : '', h.talent && TALENTS[h.talent as TalentId] ? TALENTS[h.talent as TalentId].name() : ''].filter(Boolean).join(' · ');
+      fit(text(this, x + 18, y + 228, L(`스킬 ${skills} · 처치 ${h.kills} · 최고 ${h.bestFloor}층${h.abyssBest ? `·심연 ${h.abyssBest}층` : ''}`, `Skills ${skills} · Kills ${h.kills} · Best ${h.bestFloor}F${h.abyssBest ? `·Abyss ${h.abyssBest}F` : ''}`) + (extras ? ` · ${extras}` : ''), 12, INK.inkQuiet), w - 120 - used);
       if (retirable) {
         const grade = gradeIn(state, h);
         const pts = RETIRE_POINTS[grade] ?? 0;
@@ -829,16 +935,17 @@ export class HQScene extends Phaser.Scene {
     const h = activeHunter(state);
     if (!h) return;
     panel(this, x, y, w, 76, L('가방 · 상점', 'Bag · Shop'));
-    button(this, x + 14, y + 14, 96, 26, showGear ? L('순위 보기', 'Rankings') : L('장비 보기', 'Gear'), () => {
+    button(this, x + 14, y + 14, 80, 26, showGear ? L('순위 보기', 'Rankings') : L('장비 보기', 'Gear'), () => {
       showGear = !showGear;
       this.scene.restart({ messages: this.messages });
     });
-    this.featureButton('gacha', x + 116, y + 14, 60, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
-    this.featureButton('enhance', x + 182, y + 14, 56, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
+    this.featureButton('gacha', x + 100, y + 14, 50, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
+    this.featureButton('enhance', x + 154, y + 14, 50, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
+    this.featureButton('stash', x + 208, y + 14, 50, 26, L('창고', 'Storage'), () => this.scene.restart({ messages: this.messages, stash: true }), { primary: true, size: 12 });
     text(this, x + 16, y + 48, L(`물약 체력 ${h.bag.hp} · 마나 ${h.bag.mp} · 무적 ${h.bag.guard} · 귀환서 ${h.bag.escape}`, `HP pot ${h.bag.hp} · MP pot ${h.bag.mp} · Guard ${h.bag.guard} · Return ${h.bag.escape}`), 12, INK.quiet);
     (['hp', 'mp'] as const).forEach((kind, i) => {
       const c = CONSUMABLES[kind];
-      button(this, x + w - 196 + i * 92, y + 16, 86, 44, L(`${c.name.slice(0, 2)} 물약\n${c.price}G`, `${c.name}\n${c.price}G`), () => this.buy(kind), { enabled: this.canBuy(kind) });
+      button(this, x + w - 168 + i * 80, y + 16, 74, 44, L(`${c.name.slice(0, 2)} 물약\n${c.price}G`, `${c.name}\n${c.price}G`), () => this.buy(kind), { enabled: this.canBuy(kind) });
     });
   }
 
@@ -1019,6 +1126,7 @@ export class HQScene extends Phaser.Scene {
     if (!h) return;
     panel(this, x, y, w, DOLL_H + 40, L('장비', 'Gear'));
     if (PORTRAIT) {
+      this.featureButton('stash', x + w - 236, y + 8, 70, 26, L('창고', 'Storage'), () => this.scene.restart({ messages: this.messages, stash: true }), { primary: true, size: 12 });
       this.featureButton('gacha', x + w - 160, y + 8, 70, 26, L('뽑기', 'Draw'), () => this.openGacha(), { primary: true, size: 12 });
       this.featureButton('enhance', x + w - 84, y + 8, 72, 26, L('강화', 'Enhance'), () => this.openEnhance(), { primary: true, size: 12 });
     }

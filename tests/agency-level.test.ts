@@ -33,6 +33,11 @@ describe('agency level', () => {
     expect(unlocked(a, 'arena') && unlocked(a, 'duel')).toBe(true);
     expect(openSlots(a)).toBe(3);
     at(6);
+    expect(unlocked(a, 'dispatch')).toBe(true);
+    expect(unlocked(a, 'scout')).toBe(false);
+    at(7);
+    expect(unlocked(a, 'scout')).toBe(true);
+    at(8);
     expect(agencyLevel(a)).toBe(MAX_AGENCY_LEVEL);
     expect(levelProgress(a)).toBeUndefined();
   });

@@ -45,6 +45,10 @@ export interface Hunter {
   arenaDay?: number;
   /** Gold this hunter put into the agency. Lowers their cut. */
   invested?: number;
+  /** Day this hunter was sent on a dispatch. They come back at the next return. */
+  dispatchDay?: number;
+  /** A scout-center hire's gift. */
+  talent?: string;
   /** Association rankers (by id) this hunter has beaten in a challenge. */
   beaten?: number[];
   /** Day of the last ranker challenge: one a day. */

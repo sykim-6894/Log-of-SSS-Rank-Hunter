@@ -1,9 +1,9 @@
 import {
-  combatPower, createHunter, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
+  combatPower, createHunter, gainExp, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
   TrainingKind,
 } from './hunter';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
-import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag } from './items';
+import { BAG_MAX, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag, gearLevel } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, rollGate, rollGateGrade, rollRift } from './gates';
 import { TOP_FLOOR } from './monsters';
 import { Rng } from './rng';
@@ -21,6 +21,8 @@ export interface Agent extends AgencyProgress {
   stones?: number;
   /** Points and bonuses left by retired hunters. Older saves have none. */
   legacy?: Legacy;
+  /** Gear kept at the agency for any hunter to take out. */
+  stash?: Gear[];
 }
 
 /** A hunter who is gone for good: died unrescued, or was finished off. */
@@ -115,6 +117,8 @@ export interface GameState {
   rift?: Gate;
   /** Day the next great rift opens. */
   nextRiftDay?: number;
+  /** Today's candidates at the scout center. */
+  scouts?: { day: number; list: Hunter[] };
 }
 
 /** Each day the rival agency sends a team into one open gate with this chance. */
@@ -575,6 +579,175 @@ export function slotOpen(state: GameState, slot: number): boolean {
 
 export { agencyLevel, unlocked };
 
+// ---------- Gear storage ----------
+
+export const STASH_SIZE = 12;
+
+/** Agency funds to take a piece out: 15 × tier², a little more for each enhancement. */
+export function stashFee(g: Gear): number {
+  return Math.round(15 * g.tier * g.tier * (1 + 0.1 * (g.plus ?? 0)));
+}
+
+/** What the agency gets for selling a stored piece. */
+export function stashPrice(g: Gear): number {
+  return 5 * g.tier * g.tier;
+}
+
+/** Puts gear swapped out during a run into storage while there is room. Returns how many went in. */
+export function storeSpare(state: GameState, gears: Gear[]): number {
+  const stash = (state.agent.stash ??= []);
+  let n = 0;
+  for (const g of gears) {
+    if (stash.length >= STASH_SIZE) break;
+    stash.push(g);
+    n++;
+  }
+  return n;
+}
+
+/** The active hunter takes off a piece and leaves it at the agency. Free. */
+export function depositGear(state: GameState, slot: GearSlot): boolean {
+  const h = activeHunter(state);
+  const g = h?.gear[slot];
+  const stash = (state.agent.stash ??= []);
+  if (!h || !g || stash.length >= STASH_SIZE) return false;
+  unequip(h, slot);
+  stash.push(g);
+  return true;
+}
+
+export type WithdrawResult = { ok: true; fee: number; swapped?: Gear } | { ok: false; reason: 'level' | 'gold' | 'none' };
+
+/** The active hunter puts on a stored piece: needs the gear's level and pays the fee. What they wore goes into storage. */
+export function withdrawGear(state: GameState, index: number): WithdrawResult {
+  const h = activeHunter(state);
+  const stash = state.agent.stash ?? [];
+  const g = stash[index];
+  if (!h || !g) return { ok: false, reason: 'none' };
+  if (h.level < gearLevel(g)) return { ok: false, reason: 'level' };
+  const fee = stashFee(g);
+  if (state.agent.gold < fee) return { ok: false, reason: 'gold' };
+  state.agent.gold -= fee;
+  stash.splice(index, 1);
+  const swapped = h.gear[g.slot];
+  if (swapped) {
+    unequip(h, g.slot);
+    stash.push(swapped);
+  }
+  // The slot is empty now, so the stored piece always goes on.
+  equipIfBetter(h, g);
+  return { ok: true, fee, swapped };
+}
+
+export function sellStashed(state: GameState, index: number): number {
+  const stash = state.agent.stash ?? [];
+  const g = stash[index];
+  if (!g) return 0;
+  stash.splice(index, 1);
+  const price = stashPrice(g);
+  state.agent.gold += price;
+  return price;
+}
+
+// ---------- Dispatch ----------
+
+export function isAway(h: Hunter | null | undefined): boolean {
+  return h?.dispatchDay !== undefined;
+}
+
+/** Another hunter has to stay home, so the agency can still send someone up the tower. */
+export function canDispatch(state: GameState, slot: number): boolean {
+  const h = state.slots[slot];
+  if (!h || isAway(h) || !unlocked(state.agent, 'dispatch')) return false;
+  return state.slots.some((o, i) => i !== slot && o && !isAway(o));
+}
+
+export function dispatch(state: GameState, slot: number): boolean {
+  if (!canDispatch(state, slot)) return false;
+  state.slots[slot]!.dispatchDay = state.day ?? 0;
+  if (state.activeSlot === slot) state.activeSlot = state.slots.findIndex((o) => o && !isAway(o));
+  return true;
+}
+
+/** Gold a dispatch brings in, before the agency's cut: about a tenth of a good tower run. */
+export function dispatchPay(h: Hunter): { gold: number; exp: number } {
+  const f = Math.max(1, h.bestFloor);
+  return { gold: 30 + 12 * f, exp: 10 + 6 * f };
+}
+
+/** Dispatched hunters come home at the end of the day with pay and experience. */
+function resolveDispatches(state: GameState, rng: Rng): DispatchReport[] {
+  const out: DispatchReport[] = [];
+  for (const h of state.slots) {
+    if (!h || !isAway(h)) continue;
+    const pay = dispatchPay(h);
+    const earned = Math.round(pay.gold * (0.8 + rng.next() * 0.4));
+    const tribute = Math.floor(earned * cutRate(h));
+    state.agent.gold += tribute;
+    h.gold += earned - tribute;
+    h.totalTribute += tribute;
+    gainAgencyExp(state.agent, tribute);
+    // Level-up cards wait for the next run, as after any trip.
+    gainExp(h, pay.exp);
+    delete h.dispatchDay;
+    out.push({ name: h.name, earned, tribute, exp: pay.exp });
+  }
+  return out;
+}
+
+// ---------- Scout center ----------
+
+export const TALENTS = {
+  strong: { name: () => L('괴력', 'Strong'), text: () => L('공격 +3', 'ATK +3'), apply: (h: Hunter) => { h.atk += 3; } },
+  tough: { name: () => L('강골', 'Tough'), text: () => L('최대 체력 +20', 'Max HP +20'), apply: (h: Hunter) => { h.maxHp += 20; } },
+  guard: { name: () => L('철벽', 'Ironclad'), text: () => L('방어 +2', 'DEF +2'), apply: (h: Hunter) => { h.def += 2; } },
+  mana: { name: () => L('마력 체질', 'Mana-born'), text: () => L('최대 마나 +10 · 마나 회복 +0.2', 'Max MP +10 · MP regen +0.2'), apply: (h: Hunter) => { h.maxMp += 10; h.mpRegen = Math.round(((h.mpRegen ?? 0) + 0.2) * 100) / 100; } },
+  lucky: { name: () => L('행운아', 'Lucky'), text: () => L('위기 지원 1회', 'One emergency rescue'), apply: (h: Hunter) => { h.rescues += 1; } },
+} as const;
+export type TalentId = keyof typeof TALENTS;
+export const SCOUT_COUNT = 3;
+
+/** Candidates come with a talent and some experience: up to Lv.3, or Lv.5 at the top agency level. */
+export function scoutCandidates(state: GameState, rng: Rng): Hunter[] {
+  const day = state.day ?? 0;
+  if (state.scouts?.day === day) return state.scouts.list;
+  const maxLv = agencyLevel(state.agent) >= MAX_AGENCY_LEVEL ? 5 : 3;
+  const names = allNames(state);
+  const classes = rng.shuffle([...CLASS_IDS]);
+  const list: Hunter[] = [];
+  for (let i = 0; i < SCOUT_COUNT; i++) {
+    const h = createHunter(rng, -1 - i, names, classes[i % classes.length]);
+    names.push(h.name);
+    const lv = rng.int(1, maxLv);
+    while (h.level < lv) levelUp(h);
+    autoPick(h, rng);
+    const talent = rng.pick(Object.keys(TALENTS) as TalentId[]);
+    TALENTS[talent].apply(h);
+    h.talent = talent;
+    h.hp = h.maxHp;
+    h.mp = h.maxMp;
+    list.push(h);
+  }
+  state.scouts = { day, list };
+  return list;
+}
+
+/** Signs one of today's candidates into an empty slot. */
+export function hireScout(state: GameState, slot: number, index: number): Hunter | undefined {
+  const list = state.scouts?.list ?? [];
+  const h = list[index];
+  if (!h || state.slots[slot] || !slotOpen(state, slot)) return undefined;
+  list.splice(index, 1);
+  h.id = state.nextHunterId++;
+  applyRookie(state.agent.legacy, h);
+  h.bag = homeBag(state);
+  h.contractGrade = powerGrade(h);
+  state.slots[slot] = h;
+  state.hunterNumber = (state.hunterNumber ?? 0) + 1;
+  state.activeSlot = slot;
+  return h;
+}
+
 /** The agent invests in the active hunter. Paid from agent gold. */
 export function train(state: GameState, kind: TrainingKind): boolean {
   const h = activeHunter(state);
@@ -730,6 +903,15 @@ export interface AfterRunNews {
   grewStronger: string[];
   /** What rival teams did at the gates. */
   gateNews: string[];
+  /** Hunters back from a dispatch. */
+  dispatched?: DispatchReport[];
+}
+
+export interface DispatchReport {
+  name: string;
+  earned: number;
+  tribute: number;
+  exp: number;
 }
 
 export interface ReturnResult extends AfterRunNews {
@@ -756,13 +938,14 @@ export function settleReturn(
   state: GameState, rng: Rng, earned: number, encounters: EncounterOutcome[] = [], clearedGate = false, stones = 0,
 ): ReturnResult {
   const { agent } = state;
+  const levelBefore = agencyLevel(agent);
   const appraised = Math.round(stones * (1 + 0.2 * perkLevel(agent.legacy, 'stones')));
   agent.stones = (agent.stones ?? 0) + appraised;
   if (clearedGate) (state.gateRecord ??= { ours: 0, rival: 0 }).ours++;
   const hunter = activeHunter(state)!;
   const rate = cutRate(hunter);
   const tribute = Math.floor(earned * rate);
-  const agencyUp = gainAgencyExp(agent, tribute);
+  gainAgencyExp(agent, tribute);
   // Association backing (legacy): extra on top of the cut, not taken from the hunter.
   const backing = Math.floor(tribute * 0.1 * perkLevel(agent.legacy, 'tribute'));
   agent.gold += tribute + backing;
@@ -774,6 +957,7 @@ export function settleReturn(
   hunter.bag = homeBag(state);
 
   const news = afterRun(state, rng, encounters, clearedGate);
+  const agencyUp = agencyLevel(agent) > levelBefore ? agencyLevel(agent) : undefined;
   const result: ReturnResult = { earned, tribute, kept: earned - tribute, rate, backing, stones: appraised, agencyUp, ...news };
 
   const now = gradeIn(state, hunter);
@@ -914,6 +1098,7 @@ function afterRun(state: GameState, rng: Rng, encounters: EncounterOutcome[], cl
   }
 
   markSSS(state);
+  news.dispatched = resolveDispatches(state, rng);
   state.day = (state.day ?? 0) + 1;
   resolveRaids(state, rng, news.gateNews);
   refreshGates(state, rng);
