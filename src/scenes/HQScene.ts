@@ -450,7 +450,14 @@ export class HQScene extends Phaser.Scene {
     }
     const by = sy + 34 + SAVE_SLOTS * (rowH + 6) + 12;
     if (this.messages[0]?.includes('슬롯에 저장')) text(this, GW / 2, by - 4, this.messages[0], 12, INK.gate).setOrigin(0.5, 0);
-    button(this, x, Math.min(GH - 54, by + 18), w, 44, '돌아가기', () => {
+    const bw = (w - 10) / 2;
+    const bty = Math.min(GH - 54, by + 18);
+    button(this, x, bty, bw, 44, '시작 화면으로', () => {
+      this.armSave = undefined;
+      persist();
+      this.scene.start('Title', {});
+    });
+    button(this, x + bw + 10, bty, bw, 44, '돌아가기', () => {
       this.armSave = undefined;
       this.scene.restart({ messages: this.messages.filter((m) => !m.includes('슬롯에 저장')) });
     });

@@ -39,11 +39,11 @@ export class TitleScene extends Phaser.Scene {
 
     if (this.data_.loading) return this.drawSlots(x, by, w);
 
-    const going = hadGame || this.data_.armNew;
-    button(this, x, by, w, 54, '이어하기', () => this.scene.start('HQ'), { primary: true, size: 18, enabled: !!going && hadGame });
+    const going = hadGame();
+    button(this, x, by, w, 54, '이어하기', () => this.scene.start('HQ'), { primary: true, size: 18, enabled: going });
     const armed = !!this.data_.armNew;
     button(this, x, by + 66, w, 54, armed ? '정말 새로 시작할까요? (한 번 더 누르기)' : '새로 시작하기', () => {
-      if (hadGame && !armed) return this.scene.restart({ armNew: true });
+      if (going && !armed) return this.scene.restart({ armNew: true });
       resetGame();
       this.scene.start('HQ');
     }, { size: armed ? 14 : 18 });

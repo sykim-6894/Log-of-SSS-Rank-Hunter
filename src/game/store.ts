@@ -15,8 +15,10 @@ function storage() {
 }
 
 const loaded = loadGame(storage());
-/** A game was going on when the page opened (the title screen offers to continue it). */
-export const hadGame = !!loaded && loaded.agent.named !== false;
+/** A game worth continuing: an agency already founded. */
+export function hadGame() {
+  return state.agent.named !== false;
+}
 export let state: GameState = loaded ?? newGame(rng);
 let welcome = !loaded;
 
