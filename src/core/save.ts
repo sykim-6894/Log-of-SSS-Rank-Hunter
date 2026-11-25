@@ -163,7 +163,7 @@ export function parseSave(raw: string | null): GameState | undefined {
         state.agent.exp = paid.reduce((a, b) => a + b, 0);
         state.agent.allOpen = (state.day ?? 0) > 0 || state.hallOfFame.length > 0;
       }
-      for (const h of [...state.slots, ...state.rival.roster]) {
+      for (const h of [...state.slots, ...state.rival.roster, ...(state.rival2?.roster ?? [])]) {
         if (!h) continue;
         giveClass(h);
         if (h.hpRegen === undefined || h.mpRegen === undefined) {

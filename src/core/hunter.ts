@@ -13,13 +13,19 @@ export function gradeRank(g: Grade): number {
   return GRADE_ORDER.indexOf(g);
 }
 
-export type HunterOrigin = 'ours' | 'scouted' | 'released' | 'rival';
+export type HunterOrigin = 'ours' | 'scouted' | 'released' | 'rival' | 'crew';
+/** Departure prep: intel (more experience), loot (more gold from kills), edge (sharper attack). */
+export type PrepId = 'intel' | 'loot' | 'edge';
 
 export interface Hunter {
   id: number;
   name: string;
   /** Where the hunter belongs now and how they got there. */
   origin: HunterOrigin;
+  /** Most of one kind the bag holds, when the agency gives bigger bags. */
+  bagSize?: number;
+  /** Departure prep bought for the next run. */
+  prep?: PrepId;
   level: number;
   exp: number;
   hp: number;

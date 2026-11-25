@@ -1,9 +1,10 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AfterRunNews, enterGate, gradeIn, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
+import { activeHunter, AfterRunNews, agencyOf, enterGate, gradeIn, PREPS, rivalAgencyNames, rivalHunters, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
+import { questReward, questText } from '../core/quests';
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
 import { hallOfFameScore } from '../core/hunter';
-import { BAG_MAX, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
+import { bagMax, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, CurseKind, CURSES, describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, offerLabel } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { lookOf, lookTexture } from '../game/looks';
 import { moveControl } from '../game/controls';
@@ -416,8 +417,9 @@ export class TowerScene extends Phaser.Scene {
   /** Continue the run saved in the game state if there is one, otherwise start a new one. */
   private resumeOrStart(): TowerRun {
     const options = {
-      rivals: state.rival.roster,
+      rivals: rivalHunters(state),
       rivalAgency: state.rival.name,
+      rivalAgencies: rivalAgencyNames(state),
       mapSize: PORTRAIT ? { w: TALL_MAP_W, h: TALL_MAP_H } : undefined,
       keepSpare: unlocked(state.agent, 'stash'),
     };
@@ -438,7 +440,8 @@ export class TowerScene extends Phaser.Scene {
     const hunter = activeHunter(state)!;
     // The very first climb of a new agency starts on an easy floor.
     const easyFirst = this.tutorial && hunter.bestFloor === 0 && this.startFloor === 1;
-    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, survival: this.survival, easyFirst });
+    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, survival: this.survival, easyFirst, prep: hunter.prep });
+    if (hunter.prep) run.log.push(L(`출정 준비: ${PREPS[hunter.prep].name} (${PREPS[hunter.prep].describe})`, `Prep: ${PREPS[hunter.prep].name} (${PREPS[hunter.prep].describe})`));
     if (this.startFloor > 1 && !this.duel && !this.survival) {
       run.log.push(this.startFloor > TOP_FLOOR ? L(`이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.`, `Skipped ahead past Abyss ${this.startFloor - TOP_FLOOR - 1}F, already cleared.`) : L(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`, `Skipped ahead past ${this.startFloor - 1}F, already cleared.`));
     }
@@ -862,7 +865,7 @@ export class TowerScene extends Phaser.Scene {
           this.notice(gearNotice(e.gear, e.equipped, e.old));
           break;
         case 'loot':
-          this.notice(lootNotice(e.item, e.got, e.count));
+          this.notice(lootNotice(e.item, e.got, e.count, bagMax(this.run.hunter)));
           break;
         case 'stone':
           this.floatText(e.x, e.y, L(`마력석 +${e.amount}`, `Stone +${e.amount}`), '#b98cff');
@@ -1264,7 +1267,7 @@ export class TowerScene extends Phaser.Scene {
     };
     this.dialog(
       L(`[${tag}] ${c.hunter.name}을(를) 쓰러뜨렸다`, `[${tag}] You beat ${c.hunter.name}`),
-      [L(`${state.rival.name} 소속 · Lv.${c.hunter.level}`, `${state.rival.name} · Lv.${c.hunter.level}`), c.hunter.origin === 'rival' ? L('보상을 받고 보내주면 훨씬 강해져서 다시 나타난다 (능력치 +25%).', 'Take a reward and let them go: they come back much stronger (stats +25%).') : L('보상을 받고 보내주면 더 강해져서 다시 나타난다 (능력치 +15%).', 'Take a reward and let them go: they come back stronger (stats +15%).'), L('완전히 쓰러뜨리면 다시는 만나지 않는다.', 'Finish them and you will never meet again.')],
+      [L(`${agencyOf(state, c.hunter.id).name} 소속 · Lv.${c.hunter.level}`, `${agencyOf(state, c.hunter.id).name} · Lv.${c.hunter.level}`), c.hunter.origin === 'rival' ? L('보상을 받고 보내주면 훨씬 강해져서 다시 나타난다 (능력치 +25%).', 'Take a reward and let them go: they come back much stronger (stats +25%).') : L('보상을 받고 보내주면 더 강해져서 다시 나타난다 (능력치 +15%).', 'Take a reward and let them go: they come back stronger (stats +15%).'), L('완전히 쓰러뜨리면 다시는 만나지 않는다.', 'Finish them and you will never meet again.')],
       [
         [`${REWARDS[c.rewards[0]].label}: ${REWARDS[c.rewards[0]].describe(c.hunter.level)}`, pick(0), true],
         [`${REWARDS[c.rewards[1]].label}: ${REWARDS[c.rewards[1]].describe(c.hunter.level)}`, pick(1), true],
@@ -1277,7 +1280,7 @@ export class TowerScene extends Phaser.Scene {
   private newsLines(n: AfterRunNews): string[] {
     const msgs: string[] = [];
     for (const name of n.finished) msgs.push(L(`${name}은(는) 명예의 전당에 이름만 남겼다.`, `${name} lives on only in the Hall of Fame.`));
-    for (const name of n.grewStronger) msgs.push(L(`${name}은(는) ${state.rival.name}에서 훨씬 강해졌다.`, `${name} grew much stronger at ${state.rival.name}.`));
+    for (const name of n.grewStronger) msgs.push(L(`${name}은(는) 경쟁사에서 훨씬 강해졌다.`, `${name} grew much stronger at their rival agency.`));
     if (n.rivalCreated) msgs.push(L(`S급 승급 소식에 ${state.rival.name}이(가) 라이벌 ${n.rivalCreated.name}을(를) 내세웠다!`, `Hearing of the S-Rank promotion, ${state.rival.name} fielded a rival: ${n.rivalCreated.name}!`));
     msgs.push(...n.gateNews);
     for (const d of n.dispatched ?? []) msgs.push(L(`${d.name}이(가) 파견에서 돌아왔다. 수입 ${d.earned}G 중 ${d.tribute}G 상납 · 경험치 +${d.exp}.`, `${d.name} is back from dispatch. Paid ${d.tribute}G of ${d.earned}G · EXP +${d.exp}.`));
@@ -1287,7 +1290,11 @@ export class TowerScene extends Phaser.Scene {
   private finishReturn(cleared = false) {
     const run = this.run;
     const duelWon = run.duel ? settleDuel(state, run.duel) : false;
-    const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones);
+    const waves = run.survival ? (run.survival.fell ? run.survival.wave - 1 : run.survival.wave) : 0;
+    const inTower = !run.gate && !run.duel && !run.survival;
+    const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones, {
+      kills: run.tally, floor: inTower ? run.floor : 0, gate: cleared && !!run.gate, waves, gold: run.runGold,
+    });
     const stolen = cleared && run.gate?.rival ? L(` ${run.gate.rival.agency}보다 먼저 해냈다!`, ` Beat ${run.gate.rival.agency} to it!`) : '';
     const where = run.survival
       ? L(`생존 아레나 ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave}웨이브 돌파 (최고 ${run.hunter.arenaBest ?? 0}).`, `Survival Arena: ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave} waves (best ${run.hunter.arenaBest ?? 0}).`)
@@ -1297,6 +1304,7 @@ export class TowerScene extends Phaser.Scene {
     const msgs = [
       L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
+    for (const q of r.quests ?? []) msgs.unshift(L(`의뢰 완료: ${questText(q)}! 보상 ${questReward(q)}.`, `Quest done: ${questText(q)}! Reward ${questReward(q)}.`));
     if (r.agencyUp) msgs.unshift(levelUpMessage(r.agencyUp));
     if (run.spare.length) {
       const kept = storeSpare(state, run.spare);
@@ -1328,11 +1336,11 @@ export class TowerScene extends Phaser.Scene {
     persist();
     const legend = h.everSSS;
     const fateLine = d.scouted
-      ? L(`지나가던 ${state.rival.name}이(가) ${h.name}을(를) 구해 데려갔다...`, `${state.rival.name}, passing by, saved ${h.name} and took them away...`)
+      ? L(`지나가던 ${d.agency}이(가) ${h.name}을(를) 구해 데려갔다...`, `${d.agency}, passing by, saved ${h.name} and took them away...`)
       : L(`${h.name}의 이름은 기록으로만 남는다.`, `${h.name} lives on only in the records.`);
     const msgs = [
-      d.scouted ? L(`${h.name}은(는) ${state.rival.name}에 스카웃됐다. 언젠가 적으로 만날지도.`, `${h.name} was scouted by ${state.rival.name}. You may meet as enemies one day.`) : L(`${h.name}의 기록이 남았다.`, `${h.name}'s record remains.`),
-      ...(d.newGear?.length ? [L(`${state.rival.name}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`, `${state.rival.name} geared up ${h.name}: ${d.newGear.map((g) => g.name).join(', ')}.`)] : []),
+      d.scouted ? L(`${h.name}은(는) ${d.agency}에 스카웃됐다. 언젠가 적으로 만날지도.`, `${h.name} was scouted by ${d.agency}. You may meet as enemies one day.`) : L(`${h.name}의 기록이 남았다.`, `${h.name}'s record remains.`),
+      ...(d.newGear?.length ? [L(`${d.agency}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`, `${d.agency} geared up ${h.name}: ${d.newGear.map((g) => g.name).join(', ')}.`)] : []),
       ...this.newsLines(d),
     ];
     this.dialog(
@@ -1402,7 +1410,7 @@ function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
   return { heading: old ? L('장비 업그레이드!', 'Gear upgrade!') : L('새 장비 장착!', 'New gear equipped!'), color: INK.gold, icon: drawGearIcon(gear), lines };
 }
 
-function lootNotice(item: ConsumableKind, got: boolean, count: number): Notice {
+function lootNotice(item: ConsumableKind, got: boolean, count: number, max: number): Notice {
   const c = CONSUMABLES[item];
   return {
     heading: got ? L('아이템 획득!', 'Item found!') : L('가방이 가득 찼다', 'Bag is full'),
@@ -1411,7 +1419,7 @@ function lootNotice(item: ConsumableKind, got: boolean, count: number): Notice {
     lines: [
       [c.name, INK.text, 15],
       [c.describe, INK.gate],
-      [got ? L(`가방 ${count}/${BAG_MAX}`, `Bag ${count}/${BAG_MAX}`) : L(`가방 ${count}/${BAG_MAX} · 두고 왔다`, `Bag ${count}/${BAG_MAX} · left behind`), got ? INK.quiet : INK.red],
+      [got ? L(`가방 ${count}/${max}`, `Bag ${count}/${max}`) : L(`가방 ${count}/${max} · 두고 왔다`, `Bag ${count}/${max} · left behind`), got ? INK.quiet : INK.red],
     ],
   };
 }
