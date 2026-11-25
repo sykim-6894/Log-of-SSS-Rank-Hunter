@@ -89,10 +89,10 @@ export const MONSTERS: Record<string, MonsterKind> = {
   knight: { id: 'knight', name: L('그림자 기사', 'Shadow Knight'), glyph: 'k', hp: 30, atk: 11, def: 4, exp: 24, gold: 16, score: 28, trait: 'stealth', weak: 'lightning', resist: 'ice' },
   shaman: { id: 'shaman', name: L('이계 주술사', 'Otherworld Shaman'), glyph: 's', hp: 22, atk: 10, def: 2, exp: 26, gold: 18, score: 30, range: 5, trait: 'healer', weak: 'fire', resist: 'lightning' },
   beast: { id: 'beast', name: L('이계 마수', 'Otherworld Beast'), glyph: 'B', hp: 38, atk: 13, def: 5, exp: 30, gold: 20, score: 36, trait: 'thorns', weak: 'ice', resist: 'fire' },
-  warden: { id: 'warden', name: L('게이트 수문장', 'Gate Warden'), glyph: 'W', hp: 80, atk: 12, def: 4, exp: 70, gold: 50, score: 100, boss: true, weak: 'lightning' },
-  overlord: { id: 'overlord', name: L('이계의 군주', 'Otherworld Overlord'), glyph: 'K', hp: 150, atk: 17, def: 6, exp: 180, gold: 120, score: 300, boss: true, weak: 'ice', resist: 'fire' },
-  dragon: { id: 'dragon', name: L('균열의 용', 'Rift Dragon'), glyph: 'D', hp: 170, atk: 19, def: 7, exp: 320, gold: 220, score: 600, boss: true, weak: 'ice', resist: 'fire' },
-  master: { id: 'master', name: L('탑의 주인', 'Master of the Tower'), glyph: 'M', hp: 200, atk: 21, def: 8, exp: 500, gold: 400, score: 1000, boss: true, resist: 'lightning' },
+  warden: { id: 'warden', name: L('게이트 수문장', 'Gate Warden'), glyph: 'W', hp: 70, atk: 10, def: 4, exp: 70, gold: 50, score: 100, boss: true, weak: 'lightning' },
+  overlord: { id: 'overlord', name: L('이계의 군주', 'Otherworld Overlord'), glyph: 'K', hp: 125, atk: 15, def: 6, exp: 180, gold: 120, score: 300, boss: true, weak: 'ice', resist: 'fire' },
+  dragon: { id: 'dragon', name: L('균열의 용', 'Rift Dragon'), glyph: 'D', hp: 150, atk: 17, def: 7, exp: 320, gold: 220, score: 600, boss: true, weak: 'ice', resist: 'fire' },
+  master: { id: 'master', name: L('탑의 주인', 'Master of the Tower'), glyph: 'M', hp: 180, atk: 19, def: 8, exp: 500, gold: 400, score: 1000, boss: true, resist: 'lightning' },
 };
 
 /** Highest floor for now. A boss guards every fifth floor. */
@@ -141,14 +141,14 @@ export function eliteOf(kind: MonsterKind): MonsterKind {
   };
 }
 
-/** Monsters get 17% stronger per floor above the first. Gold follows the same curve. */
+/** Monsters get 13% stronger per floor above the first. Gold follows the same curve. */
 export function floorScale(floor: number): number {
-  return 1 + 0.17 * (floor - 1);
+  return 1 + 0.13 * (floor - 1);
 }
 
 /** Experience grows faster than monster strength, so higher floors are worth the risk. */
 export function floorExpScale(floor: number): number {
-  return 1 + 0.3 * (floor - 1);
+  return 1 + 0.15 * (floor - 1);
 }
 
 /** The level a hunter should be to take on a floor comfortably. */
