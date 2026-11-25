@@ -1,5 +1,5 @@
 import { FloorMap, generateFloor, isWalkable, MAP_H, MAP_W, mapHeight, mapWidth, Point, Tile, center } from './dungeon';
-import { gainExp, Hunter } from './hunter';
+import { combatPower, gainExp, Hunter } from './hunter';
 import type { EncounterOutcome } from './agency';
 import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateClearStones, gateDanger, gateFloors, gateName, gatePool } from './gates';
 import {
@@ -73,6 +73,9 @@ export type Action =
   | { type: 'wait' }
   | { type: 'skill'; slot?: number }
   | { type: 'use'; item: ConsumableKind };
+
+/** An old colleague now at the rival agency appears only if no stronger than this times our hunter. */
+export const FORMER_POWER_CAP = 1.2;
 
 /** Aimed attacks that look for a target in line, and how far. Blink only moves, so it keeps the facing. */
 export const AIM_REACH: Partial<Record<SkillId, number>> = { charge: 3, icebolt: 5, pierce: 6 };
@@ -507,7 +510,10 @@ export class TowerRun {
 
   private maybeSpawnRival(floor: number) {
     // A rival only hunts the hunter they shadow; others' rivals stay away.
-    const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id) && (h.origin !== 'rival' || h.rivalOf === this.hunter.id));
+    // Old colleagues at the rival agency only show up for a hunter who could stand up to them.
+    const cap = combatPower(this.hunter) * FORMER_POWER_CAP;
+    const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id) &&
+      (h.origin === 'rival' ? h.rivalOf === this.hunter.id : combatPower(h) <= cap));
     if (floor < 2 || pool.length === 0) return;
     if (!this.rng.chance(this.options.encounterChance ?? 0.25)) return;
     // The hunter's own rival shows up more often than the others.
