@@ -71,6 +71,8 @@ export interface Trap {
 export type Action =
   | { type: 'move'; dx: number; dy: number }
   | { type: 'wait' }
+  /** Attack without moving: the enemy in front or next to the hunter, or (archer) one in line within range. */
+  | { type: 'attack' }
   | { type: 'skill'; slot?: number }
   | { type: 'use'; item: ConsumableKind };
 
@@ -952,6 +954,8 @@ export class TowerRun {
         return true;
       case 'use':
         return this.useItem(action.item);
+      case 'attack':
+        return this.attackInPlace();
       case 'skill':
         return this.useSkill(action.slot ?? 0);
       case 'move': {
@@ -966,9 +970,7 @@ export class TowerRun {
         }
         const target = this.monsterAt(nx, ny);
         if (target) {
-          const dmg = this.damage(this.atkNow(), target.def);
-          this.hitMonster(target, dmg);
-          if (target.kind.trait === 'thorns' && !target.kind.stalker) this.thorns(target, dmg);
+          this.meleeHit(target);
           return true;
         }
         if (h.cls === 'archer' && this.archerShot(action.dx, action.dy)) return true;
@@ -977,6 +979,36 @@ export class TowerRun {
         return true;
       }
     }
+  }
+
+  /** A basic melee hit on an enemy next to the hunter. */
+  private meleeHit(target: Monster) {
+    const dmg = this.damage(this.atkNow(), target.def);
+    this.hitMonster(target, dmg);
+    if (target.kind.trait === 'thorns' && !target.kind.stalker) this.thorns(target, dmg);
+  }
+
+  /**
+   * Attack without moving. An enemy right in front comes first, then any enemy beside the hunter
+   * (up, down, left, right). An archer with nobody beside them shoots the nearest enemy in line within range.
+   * With nothing to hit, no turn passes.
+   */
+  private attackInPlace(): boolean {
+    const dirs = [this.facing, { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+    for (const d of dirs) {
+      const m = this.monsterAt(this.pos.x + d.x, this.pos.y + d.y);
+      if (m && this.canSee(m)) {
+        this.facing = { x: d.x, y: d.y };
+        this.meleeHit(m);
+        return true;
+      }
+    }
+    if (this.hunter.cls === 'archer') {
+      this.aim(ARCHER_RANGE);
+      if (this.archerShot(this.facing.x, this.facing.y)) return true;
+    }
+    this.say(this.hunter.cls === 'archer' ? `${ARCHER_RANGE}칸 안 일직선에 적이 없다.` : '바로 옆에 공격할 적이 없다.');
+    return false;
   }
 
   /** Steps onto a tile: chests open, the stairs may open, a standing guard breaks. */

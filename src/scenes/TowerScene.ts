@@ -118,6 +118,7 @@ export class TowerScene extends Phaser.Scene {
       f: { type: 'use', item: 'guard' },
       x: { type: 'use', item: 'escape' },
       ' ': { type: 'wait' },
+      z: { type: 'attack' },
     };
     this.input.keyboard?.on('keydown', (ev: KeyboardEvent) => {
       if (ev.key.toLowerCase() === 'b') return this.showBag();
@@ -191,11 +192,8 @@ export class TowerScene extends Phaser.Scene {
 
   /** Where a touch may start the joystick: the map, or (portrait) the left of the thumb area. */
   private joyArea(p: Phaser.Input.Pointer) {
-    if (moveControl() === 'dpad') {
-      // Fixed cross buttons: the map only takes taps (one step toward the tapped tile).
-      if (!PORTRAIT) return p.y < HUD_Y && !this.inDpad(p);
-      return p.y >= P_TOP_H && p.y < P_LOG_Y;
-    }
+    // Fixed cross buttons: touching the map does nothing.
+    if (moveControl() === 'dpad') return false;
     if (!PORTRAIT) return p.y < HUD_Y;
     if (p.y >= P_TOP_H && p.y < P_LOG_Y) return true;
     return p.y >= P_CTL_Y && p.x < P_BTN_X - 6;
@@ -245,16 +243,8 @@ export class TowerScene extends Phaser.Scene {
   private joyEnd(p: Phaser.Input.Pointer) {
     const joy = this.joy;
     if (!joy || p.id !== joy.id) return;
+    // A plain tap without dragging does nothing: only the joystick or the cross buttons move the hunter.
     this.joyClear();
-    if (joy.used || this.overlay.length) return;
-    // Plain tap on the map: step toward the tapped tile, or wait when tapping the hunter.
-    if (PORTRAIT && (joy.oy < P_TOP_H || joy.oy >= P_LOG_Y)) return;
-    const at = this.cameras.main.getWorldPoint(joy.ox, joy.oy);
-    const dx = Math.floor(at.x / TILE) - this.run.pos.x;
-    const dy = Math.floor(at.y / TILE) - this.run.pos.y;
-    if (dx === 0 && dy === 0) return this.perform({ type: 'wait' });
-    if (Math.abs(dx) >= Math.abs(dy)) this.perform({ type: 'move', dx: Math.sign(dx), dy: 0 });
-    else this.perform({ type: 'move', dx: 0, dy: Math.sign(dy) });
   }
 
   /**
@@ -307,13 +297,6 @@ export class TowerScene extends Phaser.Scene {
     if (PORTRAIT) return { cx: P_BTN_X / 2, cy: P_CTL_Y + 100, size: 50 };
     if (!this.sys.game.device.input.touch) return undefined;
     return { cx: 96, cy: HUD_Y - 96, size: 46 };
-  }
-
-  private inDpad(p: Phaser.Input.Pointer): boolean {
-    const d = this.dpadSpot();
-    if (!d) return false;
-    const r = d.size * 1.5 + 6;
-    return Math.abs(p.x - d.cx) <= r && Math.abs(p.y - d.cy) <= r;
   }
 
   /** Four fixed buttons in a cross. Hold one to keep walking that way. */
@@ -585,9 +568,10 @@ export class TowerScene extends Phaser.Scene {
 
     this.skillButtons(700, HUD_Y + 12, 244, 46, true).forEach(k);
     this.drawDpad().forEach(k);
-    k(button(this, 700, HUD_Y + 64, 120, 44, `가방 B`, () => this.showBag()));
+    k(button(this, 700, HUD_Y + 64, 76, 44, `공격 Z`, () => this.perform({ type: 'attack' }), { primary: true }));
+    k(button(this, 784, HUD_Y + 64, 76, 44, `가방 B`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 204, HUD_Y + 15, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, 828, HUD_Y + 64, 116, 44, `대기  Space`, () => this.perform({ type: 'wait' })));
+    k(button(this, 868, HUD_Y + 64, 76, 44, `대기 Spc`, () => this.perform({ type: 'wait' })));
   }
 
   private drawHudPortrait() {
@@ -638,9 +622,12 @@ export class TowerScene extends Phaser.Scene {
     }
     const bw = GW - 14 - P_BTN_X;
     this.skillButtons(P_BTN_X, P_CTL_Y + 18, bw, 66, false).forEach(k);
-    k(button(this, P_BTN_X, P_CTL_Y + 94, (bw - 6) / 2, 52, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
+    const tw = (bw - 12) / 3;
+    const attack = h.cls === 'archer' ? '공격\n(3칸)' : '공격\n(옆 칸)';
+    k(button(this, P_BTN_X, P_CTL_Y + 94, tw, 52, attack, () => this.perform({ type: 'attack' }), { primary: true }));
+    k(button(this, P_BTN_X + tw + 6, P_CTL_Y + 94, tw, 52, `가방\n물약 ${h.bag.hp + h.bag.mp + h.bag.guard}`, () => this.showBag()));
     if (run.guardTurns > 0) k(text(this, 14, P_TOP_H + 8, `무적 ${run.guardTurns}턴`, 12, INK.gate, true));
-    k(button(this, P_BTN_X + (bw + 6) / 2, P_CTL_Y + 94, (bw - 6) / 2, 52, '대기\n(한 턴)', () => this.perform({ type: 'wait' })));
+    k(button(this, P_BTN_X + 2 * (tw + 6), P_CTL_Y + 94, tw, 52, '대기\n(한 턴)', () => this.perform({ type: 'wait' })));
     const buffs = this.buffLine();
     if (buffs) k(text(this, 14, P_TOP_H + (run.guardTurns > 0 ? 26 : 8), buffs, 12, INK.gate, true));
   }

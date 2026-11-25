@@ -131,7 +131,7 @@ export class HQScene extends Phaser.Scene {
 
     this.departButton(488, 618, 448, 58, 24);
 
-    text(this, 480, 698, '방향키·WASD 이동/공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기   M 소리', 12, INK.faint).setOrigin(0.5, 0);
+    text(this, 480, 698, '방향키·WASD 이동/공격   Z 제자리 공격   1·2·3 스킬   E·R·F·X 물약·귀환   B 가방   Space 대기', 12, INK.faint).setOrigin(0.5, 0);
   }
 
   /**
