@@ -9,7 +9,9 @@ import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../gam
 import { drawLook, lookOf } from '../game/looks';
 import { sfx, soundOn, toggleSound } from '../game/sfx';
 import { moveControl, setMoveControl } from '../game/controls';
-import { isNewAgency, persist, rng, state } from '../game/store';
+import { persist, rng, saveSlot, skipTitleOnce, slotInfo, state, takeWelcome } from '../game/store';
+import { SAVE_SLOTS } from '../core/save';
+import { slotLabel } from '../game/slots';
 import { Rng } from '../core/rng';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -32,7 +34,6 @@ export interface HQData {
   enhance?: { result?: EnhanceResult };
 }
 
-let welcomed = false;
 
 /** Portrait only: the office is split into tabs along the bottom. */
 type Tab = 'hunter' | 'shop' | 'ranking' | 'rival' | 'log';
@@ -66,6 +67,8 @@ export class HQScene extends Phaser.Scene {
   private showingGates = false;
   private gacha?: HQData['gacha'];
   private settings = false;
+  /** Save slot waiting for a second press to be overwritten. */
+  private armSave?: number;
   private enhancing?: HQData['enhance'];
 
   constructor() {
@@ -83,14 +86,13 @@ export class HQScene extends Phaser.Scene {
     this.enhancing = data.enhance;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
-    if (!welcomed && isNewAgency && this.messages.length === 0) {
+    if (takeWelcome() && this.messages.length === 0) {
       this.messages = [
         `${state.agent.name} 설립. 첫 헌터 ${activeHunter(state)!.name}와(과) 계약했다.`,
         '훈련으로 키우고, 성장의 탑에 보내 돈을 벌어오게 하자.',
         '첫 탑에 가기 전에는 자격증의 [직업 바꾸기]로 직업을 다시 고를 수 있다.',
       ];
     }
-    welcomed = true;
   }
 
   private refresh(messages: string[] = this.messages, armRelease = false) {
@@ -102,6 +104,7 @@ export class HQScene extends Phaser.Scene {
     if (layoutStale()) {
       // The device was rotated during a run: switch layouts now that everything is saved.
       persist();
+      skipTitleOnce();
       location.reload();
       return;
     }
@@ -191,8 +194,8 @@ export class HQScene extends Phaser.Scene {
     const w = Math.min(GW - 28, 520);
     const left = (GW - w) / 2;
     const top = PORTRAIT ? 150 : 120;
-    title(this, GW / 2, top - 90, 'SSS급 헌터의 성장기', PORTRAIT ? 23 : 28, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, top - 54, '— 과연 너일까', 12, INK.rust).setOrigin(0.5, 0);
+    title(this, GW / 2, top - 90, '주인공을 찾습니다', PORTRAIT ? 23 : 28, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, top - 54, '— SSS급 헌터 에이전시', 12, INK.rust).setOrigin(0.5, 0);
     panel(this, left, top, w, 262, '에이전시 설립');
     text(this, GW / 2, top + 34, '헌터를 키워 SSS급으로 만들 에이전시입니다.\n이름을 지어 주세요.', 12, INK.quiet)
       .setOrigin(0.5, 0).setAlign('center').setLineSpacing(4);
@@ -339,8 +342,8 @@ export class HQScene extends Phaser.Scene {
     const { agent } = state;
     const x = 14;
     const w = GW - 28;
-    title(this, x, 12, 'SSS급 헌터의 성장기', 20, INK.text);
-    text(this, x + 2, 38, '— 과연 너일까', 12, INK.rust);
+    title(this, x, 12, '주인공을 찾습니다', 20, INK.text);
+    text(this, x + 2, 38, '— SSS급 헌터 에이전시', 12, INK.rust);
     text(this, GW - x, 12, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 60, w);
@@ -388,8 +391,8 @@ export class HQScene extends Phaser.Scene {
 
   private drawHeader() {
     const { agent } = state;
-    title(this, 24, 18, 'SSS급 헌터의 성장기', 30, INK.text);
-    text(this, 26, 58, '— 과연 너일까', 12, INK.rust);
+    title(this, 24, 18, '주인공을 찾습니다', 30, INK.text);
+    text(this, 26, 58, '— SSS급 헌터 에이전시', 12, INK.rust);
     text(this, 936, 22, agent.name, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, `운영 자금 ${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
@@ -425,7 +428,39 @@ export class HQScene extends Phaser.Scene {
     text(this, x + 18, my + 74, note, 12, INK.quiet).setWordWrapWidth(w - 36, true);
     text(this, x + 18, my + 116, '키보드는 어느 쪽이든 방향키·WASD로 움직인다.', 12, INK.faint);
 
-    button(this, x, my + 162, w, 44, '돌아가기', () => this.scene.restart({ messages: this.messages }));
+    // Hand-made saves, loaded from the title screen.
+    const sy = my + 160;
+    const rowH = PORTRAIT ? 52 : 44;
+    panel(this, x, sy, w, 34 + SAVE_SLOTS * (rowH + 6), '저장하기 (불러오기는 시작 화면에서)');
+    for (let i = 0; i < SAVE_SLOTS; i++) {
+      const info = slotInfo(i);
+      const armed = this.armSave === i;
+      const label = armed ? `${i + 1}번 슬롯에 덮어쓸까요? 한 번 더 누르기` : slotLabel(i, info);
+      button(this, x + 14, sy + 24 + i * (rowH + 6), w - 28, rowH, label, () => {
+        if (info && !armed) {
+          this.armSave = i;
+          return this.scene.restart({ settings: true, messages: this.messages });
+        }
+        persist();
+        saveSlot(i);
+        this.armSave = undefined;
+        sfx.gear();
+        this.scene.restart({ settings: true, messages: [`${i + 1}번 슬롯에 저장했다.`, ...this.messages] });
+      }, { size: 12, primary: armed });
+    }
+    const by = sy + 34 + SAVE_SLOTS * (rowH + 6) + 12;
+    if (this.messages[0]?.includes('슬롯에 저장')) text(this, GW / 2, by - 4, this.messages[0], 12, INK.gate).setOrigin(0.5, 0);
+    const bw = (w - 10) / 2;
+    const bty = Math.min(GH - 54, by + 18);
+    button(this, x, bty, bw, 44, '시작 화면으로', () => {
+      this.armSave = undefined;
+      persist();
+      this.scene.start('Title', {});
+    });
+    button(this, x + bw + 10, bty, bw, 44, '돌아가기', () => {
+      this.armSave = undefined;
+      this.scene.restart({ messages: this.messages.filter((m) => !m.includes('슬롯에 저장')) });
+    });
   }
 
   /** Three hunter slots, like save slots. Empty ones hire a new hunter. */

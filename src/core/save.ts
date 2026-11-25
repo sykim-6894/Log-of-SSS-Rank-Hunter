@@ -87,7 +87,69 @@ export function giveClass(h: Hunter) {
 }
 
 export function loadGame(storage: Storage): GameState | undefined {
-  const raw = storage.getItem(SAVE_KEY);
+  return parseSave(storage.getItem(SAVE_KEY));
+}
+
+// ---------- Save slots ----------
+
+/** Separate saves the player makes by hand, on top of the automatic one. */
+export const SAVE_SLOTS = 3;
+const slotKey = (slot: number) => `sss-hunter-slot-${slot + 1}`;
+
+/** What a slot shows before it is loaded. */
+export interface SlotSummary {
+  savedAt: string;
+  agency: string;
+  day: number;
+  gold: number;
+  /** The strongest hunter under contract, if any. */
+  hunter?: { name: string; level: number };
+  hunters: number;
+}
+
+interface SlotFile {
+  summary: SlotSummary;
+  data: GameState;
+}
+
+export function summarize(state: GameState, now: Date): SlotSummary {
+  const ours = state.slots.filter((h): h is Hunter => !!h);
+  const best = [...ours].sort((a, b) => b.level - a.level)[0];
+  return {
+    savedAt: now.toISOString(),
+    agency: state.agent.name,
+    day: state.day ?? 0,
+    gold: state.agent.gold,
+    hunter: best ? { name: best.name, level: best.level } : undefined,
+    hunters: ours.length,
+  };
+}
+
+export function saveToSlot(storage: Storage, slot: number, state: GameState, now = new Date()) {
+  const file: SlotFile = { summary: summarize(state, now), data: state };
+  storage.setItem(slotKey(slot), JSON.stringify(file));
+}
+
+export function slotSummary(storage: Storage, slot: number): SlotSummary | undefined {
+  try {
+    const raw = storage.getItem(slotKey(slot));
+    return raw ? (JSON.parse(raw) as SlotFile).summary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadFromSlot(storage: Storage, slot: number): GameState | undefined {
+  try {
+    const raw = storage.getItem(slotKey(slot));
+    return raw ? parseSave(JSON.stringify((JSON.parse(raw) as SlotFile).data)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads any saved game, bringing old versions up to date. */
+export function parseSave(raw: string | null): GameState | undefined {
   if (!raw) return undefined;
   try {
     const data = JSON.parse(raw) as GameState | SaveV2 | SaveV1;
