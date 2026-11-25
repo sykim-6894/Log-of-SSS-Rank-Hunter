@@ -62,3 +62,34 @@ describe('one rival per hunter', () => {
     expect(combatPower(r)).toBeGreaterThan(before * 1.3);
   });
 });
+
+describe('old colleagues at the rival agency', () => {
+  const former = (power: 'strong' | 'weak') => {
+    const h = createHunter(new Rng(5), 95, [], 'sword');
+    h.origin = 'scouted';
+    if (power === 'strong') { h.level = 30; h.maxHp = h.hp = 900; h.atk = 150; h.def = 80; }
+    return h;
+  };
+
+  it('a much stronger one never meets a new, weak hunter', () => {
+    const me = createHunter(new Rng(1), 1, [], 'sword');
+    const big = former('strong');
+    for (let seed = 1; seed <= 40; seed++) {
+      const run = new TowerRun(me, new Rng(seed), { rivals: [big], encounterChance: 1 });
+      for (let f = 2; f <= 6; f++) run.enterFloor(f);
+      expect(run.monsters.some((m) => m.hunter)).toBe(false);
+    }
+  });
+
+  it('one of about the same strength still turns up', () => {
+    const me = createHunter(new Rng(1), 1, [], 'sword');
+    const peer = former('weak');
+    let met = false;
+    for (let seed = 1; seed <= 40 && !met; seed++) {
+      const run = new TowerRun(me, new Rng(seed), { rivals: [peer], encounterChance: 1 });
+      run.enterFloor(2);
+      met = run.monsters.some((m) => m.hunter === peer);
+    }
+    expect(met).toBe(true);
+  });
+});
