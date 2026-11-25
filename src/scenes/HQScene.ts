@@ -16,6 +16,8 @@ import { Rng } from '../core/rng';
 import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 import { L, Lang, lang, LANG_KEY } from '../core/lang';
+import { GuidePage, guideIsOff, resetGuide, showGuide, tipWanted, markTip } from '../game/guide';
+import { TIPS } from '../game/tips';
 
 export interface HQData {
   messages?: string[];
@@ -117,6 +119,8 @@ export class HQScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     if (state.agent.named === false) return this.drawFounding();
     if (!state.gates) refreshGates(state, rng);
+    // Officer Yoon speaks once the screen is drawn.
+    this.time.delayedCall(30, () => this.maybeTip());
     if (this.hiring) return this.drawHiring(this.hiring);
     if (this.showingGates) return this.drawGates();
     if (this.settings) return this.drawSettings();
@@ -406,6 +410,30 @@ export class HQScene extends Phaser.Scene {
     button(this, x, y, w, 28, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }));
   }
 
+  /** One of Officer Yoon's tips, if one fits this screen. */
+  private maybeTip() {
+    const tip = (id: keyof typeof TIPS, pages: GuidePage[], keepPulse = false) => {
+      if (!tipWanted(id)) return false;
+      markTip(id);
+      showGuide(this, pages, { keepPulse });
+      return true;
+    };
+    if (this.hiring || this.settings || this.enhancing || this.pickingStart) return;
+    if (this.showingGates) return void tip('gates', TIPS.gates());
+    if (this.gacha) return void tip('gacha', TIPS.gacha());
+    const h = activeHunter(state);
+    const day = state.day ?? 0;
+    if (PORTRAIT && tab !== 'hunter') return;
+    if (day === 0 && h && h.bestFloor === 0) {
+      if (tip('hq-welcome', TIPS['hq-welcome'](), true)) return;
+      if (tip('hq-tower', TIPS['hq-tower'](), true)) return;
+      return;
+    }
+    if (day >= 1 && day <= 2 && tip('hq-return', TIPS['hq-return']())) return;
+    if (state.rift && tip('rift', TIPS.rift(), true)) return;
+    if ((state.agent.stones ?? 0) > 0) tip('stones', TIPS.stones(), true);
+  }
+
   /** Sound and how to move on a touch screen. */
   private drawSettings() {
     const w = Math.min(GW - 28, 520);
@@ -413,7 +441,7 @@ export class HQScene extends Phaser.Scene {
     title(this, GW / 2, 18, L('설정', 'Settings'), 23, INK.text).setOrigin(0.5, 0);
     const reopen = () => this.scene.restart({ settings: true, messages: this.messages });
     const oy = PORTRAIT ? 80 : 84;
-    panel(this, x, oy, w, 96, L('소리 · 언어', 'Sound · Language'));
+    panel(this, x, oy, w, 132, L('소리 · 언어 · 안내', 'Sound · Language · Tips'));
     const half = (w - 36 - 10) / 2;
     const lw = 120;
     const sw = (w - 36 - lw - 10) / 2;
@@ -431,8 +459,14 @@ export class HQScene extends Phaser.Scene {
     };
     button(this, x + 18 + lw, oy + 56, sw, 30, '한국어', () => pickLang('ko'), { primary: lang() === 'ko' });
     button(this, x + 28 + lw + sw, oy + 56, sw, 30, 'English', () => pickLang('en'), { primary: lang() === 'en' });
+    text(this, x + 18, oy + 100, L('윤 주임 안내', 'Yoon\'s tips'), 13, INK.text);
+    const tipNote = this.messages[0] === L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.');
+    button(this, x + 18 + lw, oy + 92, sw * 2 + 10, 30, tipNote ? L('다시 보기 설정됨 ✓', 'Tips reset ✓') : guideIsOff() ? L('꺼짐 · 다시 켜고 처음부터 보기', 'Off · turn on and replay') : L('처음부터 다시 보기', 'Replay from the start'), () => {
+      resetGuide();
+      this.scene.restart({ settings: true, messages: [L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.'), ...this.messages] });
+    }, { size: 12 });
 
-    const my = oy + 112;
+    const my = oy + 148;
     panel(this, x, my, w, 144, L('이동 방식 (터치 화면)', 'Movement (touch screen)'));
     const mode = moveControl();
     button(this, x + 18, my + 26, half, 34, L('조이스틱', 'Joystick'), () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });

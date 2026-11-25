@@ -119,6 +119,8 @@ export interface RunOptions {
   gate?: Gate;
   /** Fight an association ranker in the arena instead. */
   duel?: Duel;
+  /** A brand-new agency's first climb: floor 1 has only a couple of monsters and one chest. */
+  easyFirst?: boolean;
 }
 
 /** A challenge against an association ranker: one fight in a closed arena. Losing is not death. */
@@ -424,7 +426,8 @@ export class TowerRun {
 
     const danger = this.danger;
     const pool = this.pool;
-    const count = Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1));
+    const easy = n === 1 && !!this.options.easyFirst && !this.gate && !this.duel;
+    const count = easy ? 2 : Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1));
     const rooms = this.map.rooms.slice(1);
     for (let i = 0; i < count; i++) {
       const room = this.rng.pick(rooms);
@@ -433,11 +436,11 @@ export class TowerRun {
       if (this.blocked(x, y) || this.map.tiles[y][x] === Tile.Stairs) continue;
       const kind = this.rng.pick(pool);
       this.spawn(kind, x, y, danger);
-      if (kind.trait === 'pack') this.spawnPack(kind, x, y, danger);
+      if (kind.trait === 'pack' && !easy) this.spawnPack(kind, x, y, danger);
     }
 
     this.maybeSpawnRival(danger);
-    this.placeChests(danger);
+    this.placeChests(danger, easy ? 1 : undefined);
     this.maybeSpawnElite(danger);
     this.maybePlaceMerchant(danger);
 
@@ -622,9 +625,9 @@ export class TowerRun {
   }
 
   /** One or two chests per floor (one more from floor 6), in rooms other than the start. */
-  private placeChests(floor: number) {
+  private placeChests(floor: number, fixed?: number) {
     this.chests = [];
-    const count = this.rng.int(1, 2) + (floor >= 6 ? 1 : 0);
+    const count = fixed ?? this.rng.int(1, 2) + (floor >= 6 ? 1 : 0);
     const rooms = this.map.rooms.slice(1);
     for (let tries = 0; this.chests.length < count && tries < 30; tries++) {
       const room = this.rng.pick(rooms);

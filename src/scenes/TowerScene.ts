@@ -17,6 +17,8 @@ import { persist, rng, state } from '../game/store';
 import { GH, GW, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 import { L } from '../core/lang';
+import { GuidePage, showGuide, tipWanted, markTip } from '../game/guide';
+import { TIPS } from '../game/tips';
 
 const TILE = 24;
 const HUD_Y = MAP_H * TILE; // 600
@@ -71,6 +73,11 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private startFloor = 1;
+  /** A brand-new agency's first climb: Officer Yoon explains each step. */
+  private tutorial = false;
+  private killsAtStart = 0;
+  /** Officer Yoon is talking: the game waits. */
+  private guiding = false;
   /** Gate picked at the agency, if this trip goes into a gate. */
   private gateId?: number;
   /** Ranker challenge set up at the agency, if this trip is a duel. */
@@ -89,7 +96,10 @@ export class TowerScene extends Phaser.Scene {
     this.notices = [];
     this.noticeUp = undefined;
     this.clearPending = false;
+    this.guiding = false;
+    this.tutorial = (state.day ?? 0) === 0 && !this.gateId && !this.duel && !state.run?.data.gate;
     this.run = this.resumeOrStart();
+    this.killsAtStart = this.run.hunter.kills;
     this.overlay = [];
     this.dynamic = [];
     this.uiCam = null;
@@ -139,6 +149,52 @@ export class TowerScene extends Phaser.Scene {
     this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.joyEnd(p));
 
     this.redraw();
+  }
+
+  /** Shows one of Officer Yoon's tips if one fits this moment. True if it did. */
+  private maybeTip(): boolean {
+    const run = this.run;
+    if (run.status !== 'playing' && run.status !== 'onStairs') return false;
+    const h = run.hunter;
+    const seen = run.monsters.filter((m) => run.canSee(m));
+    const tip = (id: keyof typeof TIPS, pages: GuidePage[]) => {
+      if (!tipWanted(id)) return false;
+      markTip(id);
+      this.joyClear();
+      this.guiding = true;
+      showGuide(this, pages, {
+        place: (o) => this.ui(o),
+        onClose: () => {
+          this.guiding = false;
+          this.redraw();
+        },
+      });
+      return true;
+    };
+    if (run.duel) return tip('duel', TIPS.duel());
+    if (this.tutorial) {
+      const touch = this.sys.game.device.input.touch;
+      const dpad = moveControl() === 'dpad';
+      const spot = dpad ? this.dpadSpot() : undefined;
+      const area = !PORTRAIT ? undefined
+        : spot ? { x: spot.cx - spot.size * 1.5, y: spot.cy - spot.size * 1.5, w: spot.size * 3, h: spot.size * 3 }
+        : { x: 4, y: P_CTL_Y, w: P_BTN_X - 12, h: GH - P_CTL_Y - 4 };
+      if (tip('tw-move', TIPS['tw-move'](dpad, touch, area))) return true;
+      if (run.status === 'onStairs' && tip('tw-stairs', TIPS['tw-stairs']())) return true;
+      if (seen.some((m) => !m.hunter && !m.kind.stalker) && tip('tw-attack', TIPS['tw-attack'](h.cls === 'archer'))) return true;
+      const first = h.skills[0];
+      if (first && h.kills > this.killsAtStart && !seen.length && tip('tw-skill', TIPS['tw-skill'](`${PORTRAIT ? '' : '1 '}${SKILLS[first.id].name}`))) return true;
+      if (h.hp < h.maxHp * 0.6 && h.bag.hp > 0 && tip('tw-potion', TIPS['tw-potion']())) return true;
+    }
+    if (h.picks > 0 && tip('card', TIPS.card())) return true;
+    if (seen.some((m) => m.kind.boss) && tip('boss', TIPS.boss())) return true;
+    if (seen.some((m) => m.kind.elite) && tip('elite', TIPS.elite())) return true;
+    if (seen.some((m) => m.hunter) && tip('former', TIPS.former())) return true;
+    const mer = run.merchant;
+    if (mer && run.isVisible(mer.x, mer.y) && tip('merchant', TIPS.merchant())) return true;
+    if (run.chests.some((c) => run.isVisible(c.x, c.y)) && tip('chest', TIPS.chest())) return true;
+    if (!run.gate && run.stalkerIn <= 40 && tip('collapse', TIPS.collapse())) return true;
+    return false;
   }
 
   /** Tap the minimap to make it larger or smaller again. */
@@ -201,7 +257,7 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private joyStart(p: Phaser.Input.Pointer) {
-    if (this.overlay.length || this.joy) return;
+    if (this.overlay.length || this.joy || this.guiding) return;
     const mm = this.minimapRect();
     if (mm && p.x >= mm.x && p.x <= mm.x + mm.w && p.y >= mm.y && p.y <= mm.y + mm.h) {
       this.bigMinimap = !this.bigMinimap;
@@ -372,7 +428,10 @@ export class TowerScene extends Phaser.Scene {
       state.run = undefined;
     }
     const gate = this.gateId !== undefined ? enterGate(state, this.gateId) : undefined;
-    const run = new TowerRun(activeHunter(state)!, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel });
+    const hunter = activeHunter(state)!;
+    // The very first climb of a new agency starts on an easy floor.
+    const easyFirst = this.tutorial && hunter.bestFloor === 0 && this.startFloor === 1;
+    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, easyFirst });
     if (this.startFloor > 1 && !this.duel) {
       run.log.push(this.startFloor > TOP_FLOOR ? L(`이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.`, `Skipped ahead past Abyss ${this.startFloor - TOP_FLOOR - 1}F, already cleared.`) : L(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`, `Skipped ahead past ${this.startFloor - 1}F, already cleared.`));
     }
@@ -388,7 +447,7 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private perform(action: Action) {
-    if (this.overlay.length) return;
+    if (this.overlay.length || this.guiding) return;
     this.run.act(action);
     this.redraw();
     // Kinds seen while walking with keys or taps don't stop the joystick later.
@@ -469,6 +528,10 @@ export class TowerScene extends Phaser.Scene {
     if (run.hunter.level > this.shownLevel) this.showLevelUp(run.hunter.level);
     this.shownLevel = run.hunter.level;
 
+    if (!this.overlay.length && !this.guiding && this.maybeTip()) {
+      this.saveRun();
+      return;
+    }
     if (run.hunter.picks > 0 && run.status !== 'dead' && !this.overlay.length) this.showCards();
     if (this.clearPending && run.status === 'playing' && !this.overlay.length) this.showGateClear();
     if (run.status === 'onStairs' && !this.overlay.length) this.showStairs();
