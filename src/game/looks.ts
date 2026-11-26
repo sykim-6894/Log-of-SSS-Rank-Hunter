@@ -2,6 +2,8 @@ import * as Phaser from 'phaser';
 import { CLASSES } from '../core/classes';
 import type { Hunter } from '../core/hunter';
 import { L } from '../core/lang';
+import { crawlKey, hasCrawl } from './crawl';
+import { finish, Grid, gridTexture, OUTLINE, paint, parse } from './pixel';
 
 /**
  * Hunter looks: tiny 10×12 pixel figures. Each letter is a color from the look's palette;
@@ -13,7 +15,7 @@ interface Look {
   colors: Record<string, number>;
 }
 
-const SHARED = { k: 0x1a1410, s: 0xe8b98a };
+const SHARED = { k: OUTLINE, s: 0xe8b98a };
 
 export const LOOKS: Look[] = [
   {
@@ -98,27 +100,41 @@ export function lookOf(h: Hunter): number {
   return (h.look ?? h.id) % LOOKS.length;
 }
 
-/** Draws a look into a Graphics object, each pixel `scale` screen pixels wide. */
+const grids = new Map<number, Grid>();
+
+/** The look after the shared finishing pass (shading and outline), so heroes match the monsters. */
+export function lookGrid(look: number): Grid {
+  const i = look % LOOKS.length;
+  let grid = grids.get(i);
+  if (!grid) {
+    const l = LOOKS[i];
+    grid = finish(parse(l.rows, { ...SHARED, ...l.colors }));
+    grids.set(i, grid);
+  }
+  return grid;
+}
+
+/**
+ * Draws a look into a Graphics object, each pixel `scale` screen pixels wide. The outline
+ * sits one pixel outside (x, y), so callers keep their old positions.
+ */
 export function drawLook(g: Phaser.GameObjects.Graphics, look: number, x: number, y: number, scale: number) {
-  const l = LOOKS[look % LOOKS.length];
-  const colors: Record<string, number> = { ...SHARED, ...l.colors };
-  l.rows.forEach((row, ry) => {
-    for (let rx = 0; rx < Math.min(row.length, LOOK_W + 1); rx++) {
-      const c = colors[row[rx]];
-      if (c === undefined) continue;
-      g.fillStyle(c, 1).fillRect(x + rx * scale, y + ry * scale, scale, scale);
-    }
-  });
+  paint(g, lookGrid(look), x - scale, y - scale, scale);
+}
+
+/**
+ * Puts a hero where drawLook would draw it, at the same size: the crawl sprite as an image
+ * when that art is loaded, otherwise the pixel figure painted into `g`.
+ */
+export function placeLook(scene: Phaser.Scene, g: Phaser.GameObjects.Graphics, look: number, x: number, y: number, scale: number) {
+  const key = lookTexture(scene, look);
+  if (!key.startsWith('crawl-')) return void drawLook(g, look, x, y, scale);
+  const side = (LOOK_H + 2) * scale;
+  scene.add.image(x + ((LOOK_W + 1) * scale) / 2, y + (LOOK_H + 1) * scale, key).setOrigin(0.5, 1).setDisplaySize(side, side);
 }
 
 /** Makes one texture per look (2 screen pixels per pixel) the first time it is needed. */
 export function lookTexture(scene: Phaser.Scene, look: number): string {
-  const key = `hunter-look-${look % LOOKS.length}`;
-  if (!scene.textures.exists(key)) {
-    const g = scene.add.graphics();
-    drawLook(g, look, 0, 0, 2);
-    g.generateTexture(key, (LOOK_W + 1) * 2, LOOK_H * 2);
-    g.destroy();
-  }
-  return key;
+  if (hasCrawl(scene, `hero-${look % LOOKS.length}`)) return crawlKey(`hero-${look % LOOKS.length}`);
+  return gridTexture(scene, `hunter-look-${look % LOOKS.length}`, lookGrid(look), 2);
 }

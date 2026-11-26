@@ -1,4 +1,6 @@
 import * as Phaser from 'phaser';
+import { preloadCrawl } from '../game/crawl';
+import { ART, Art, ART_KEY } from '../game/art';
 import { dailyTriesLeft, startDaily, abyssRecord, activeHunter, buyPrep, PREP_IDS, PREPS, prepCost, refreshQuests, rivalAgencies, syncPerks, invest, slotOpen, canDispatch, dispatch, dispatchPay, isAway, TALENTS, TalentId, depositGear, withdrawGear, sellStashed, stashFee, stashPrice, STASH_SIZE, scoutCandidates, hireScout, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
@@ -9,7 +11,7 @@ import { monsterTexture } from '../game/monsterArt';
 import { combatPower, expToNext, Grade, gradeRank, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
 import { bagMax, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, gearLevel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
-import { drawLook, lookOf } from '../game/looks';
+import { placeLook, lookOf } from '../game/looks';
 import { Level, musicVolume, playMusic, setMusicVolume, setSfxVolume, setShake, sfx, sfxVolume, shakeOn } from '../game/sfx';
 import { confetti, shake } from '../game/fx';
 import { moveControl, setMoveControl } from '../game/controls';
@@ -145,6 +147,10 @@ export class HQScene extends Phaser.Scene {
     this.scene.restart({ messages, armRelease });
   }
 
+  preload() {
+    preloadCrawl(this);
+  }
+
   create() {
     if (layoutStale()) {
       // The device was rotated during a run: switch layouts now that everything is saved.
@@ -220,7 +226,7 @@ export class HQScene extends Phaser.Scene {
       const cy = 86 + Math.floor(i / cols) * (cardH + 10);
       panel(this, cx, cy, cw, cardH);
       const g = this.add.graphics();
-      drawLook(g, c.look, cx + 12, cy + 14, 5);
+      placeLook(this, g, c.look, cx + 12, cy + 14, 5);
       fit(title(this, cx + 82, cy + 12, `${h.name}  ·  ${c.name}`, 15, INK.gold), cw - 94);
       text(this, cx + 82, cy + 36, L(`Lv.${h.level} · 전투력 ${combatPower(h)}`, `Lv.${h.level} · Power ${combatPower(h)}`), 12, INK.text);
       const t = TALENTS[h.talent as TalentId];
@@ -257,7 +263,7 @@ export class HQScene extends Phaser.Scene {
         const cy = 82 + Math.floor(i / cols) * (cardH + 10);
         panel(this, cx, cy, cw, cardH);
         const g = this.add.graphics();
-        drawLook(g, c.look, cx + 14, cy + 14, 6);
+        placeLook(this, g, c.look, cx + 14, cy + 14, 6);
         title(this, cx + 96, cy + 12, `${c.name}  ·  ${c.role}`, 15, INK.gold);
         text(this, cx + 96, cy + 38, L(`체력 ${c.base.hp} 마나 ${c.base.mp} 공격 ${c.base.atk} 방어 ${c.base.def}`, `HP ${c.base.hp} MP ${c.base.mp} ATK ${c.base.atk} DEF ${c.base.def}`), 12, INK.text);
         const passive = text(this, cx + 96, cy + 56, `${c.passive}: ${c.passiveText}`, 12, INK.quiet);
@@ -1085,33 +1091,39 @@ export class HQScene extends Phaser.Scene {
     title(this, GW / 2, 18, L('설정', 'Settings'), 23, INK.text).setOrigin(0.5, 0);
     const reopen = () => this.scene.restart({ settings: true, messages: this.messages });
     const oy = PORTRAIT ? 80 : 84;
-    panel(this, x, oy, w, 204, L('소리 · 화면 · 언어 · 안내', 'Sound · Screen · Language · Tips'));
+    panel(this, x, oy, w, 212, L('소리 · 화면 · 언어 · 그림 · 안내', 'Sound · Screen · Language · Art · Tips'));
     const half = (w - 36 - 10) / 2;
     const lw = 120;
     const sw = (w - 36 - lw - 10) / 2;
     const qw = (w - 36 - lw - 18) / 4;
     const levels: Array<[Level, string]> = [[0, L('끔', 'Off')], [1, L('작게', 'Low')], [2, L('보통', 'Mid')], [3, L('크게', 'High')]];
-    const volumeRow = (y: number, label: string, now: Level, set: (v: Level) => void, sample: () => void) => {
-      text(this, x + 18, y + 8, label, 13, INK.text);
-      levels.forEach(([v, name], i) => {
-        button(this, x + 18 + lw + i * (qw + 6), y, qw, 30, name, () => {
+    // Six rows, 32 apart: buttons 28 tall, labels beside them.
+    const row = (k: number) => oy + 20 + k * 32;
+    const label = (k: number, t: string) => text(this, x + 18, row(k) + 6, t, 13, INK.text);
+    const pair = (k: number, a: [string, () => void, boolean], b: [string, () => void, boolean]) => {
+      button(this, x + 18 + lw, row(k), sw, 28, a[0], a[1], { primary: a[2] });
+      button(this, x + 28 + lw + sw, row(k), sw, 28, b[0], b[1], { primary: b[2] });
+    };
+    const volumeRow = (k: number, name: string, now: Level, set: (v: Level) => void, sample: () => void) => {
+      label(k, name);
+      levels.forEach(([v, lv], i) => {
+        button(this, x + 18 + lw + i * (qw + 6), row(k), qw, 28, lv, () => {
           set(v);
           sample();
           reopen();
         }, { primary: now === v });
       });
     };
-    volumeRow(oy + 20, L('효과음', 'Effects'), sfxVolume(), setSfxVolume, () => sfx.levelup());
-    volumeRow(oy + 56, L('배경음악', 'Music'), musicVolume(), setMusicVolume, () => undefined);
-    text(this, x + 18, oy + 100, L('화면 흔들림', 'Screen shake'), 13, INK.text);
+    volumeRow(0, L('효과음', 'Effects'), sfxVolume(), setSfxVolume, () => sfx.levelup());
+    volumeRow(1, L('배경음악', 'Music'), musicVolume(), setMusicVolume, () => undefined);
+    label(2, L('화면 흔들림', 'Screen shake'));
     const shaking = shakeOn();
-    button(this, x + 18 + lw, oy + 92, sw, 30, L('켬', 'On'), () => {
+    pair(2, [L('켬', 'On'), () => {
       setShake(true);
       this.cameras.main.shake(200, 0.008);
       this.time.delayedCall(220, reopen);
-    }, { primary: shaking });
-    button(this, x + 28 + lw + sw, oy + 92, sw, 30, L('끔', 'Off'), () => { setShake(false); reopen(); }, { primary: !shaking });
-    text(this, x + 18, oy + 136, L('언어', 'Language'), 13, INK.text);
+    }, shaking], [L('끔', 'Off'), () => { setShake(false); reopen(); }, !shaking]);
+    label(3, L('언어', 'Language'));
     const pickLang = (l: Lang) => {
       if (l === lang()) return;
       persist();
@@ -1119,16 +1131,24 @@ export class HQScene extends Phaser.Scene {
       skipTitleOnce();
       location.reload();
     };
-    button(this, x + 18 + lw, oy + 128, sw, 30, '한국어', () => pickLang('ko'), { primary: lang() === 'ko' });
-    button(this, x + 28 + lw + sw, oy + 128, sw, 30, 'English', () => pickLang('en'), { primary: lang() === 'en' });
-    text(this, x + 18, oy + 172, L('윤 주임 안내', 'Yoon\'s tips'), 13, INK.text);
+    pair(3, ['한국어', () => pickLang('ko'), lang() === 'ko'], ['English', () => pickLang('en'), lang() === 'en']);
+    label(4, L('그림', 'Art'));
+    const pickArt = (a: Art) => {
+      if (a === ART) return;
+      persist();
+      localStorage.setItem(ART_KEY, a);
+      skipTitleOnce();
+      location.reload();
+    };
+    pair(4, [L('던전 타일', 'Dungeon tiles'), () => pickArt('crawl'), ART === 'crawl'], [L('도트', 'Classic pixel'), () => pickArt('pixel'), ART === 'pixel']);
+    label(5, L('윤 주임 안내', 'Yoon\'s tips'));
     const tipNote = this.messages[0] === L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.');
-    button(this, x + 18 + lw, oy + 164, sw * 2 + 10, 30, tipNote ? L('다시 보기 설정됨 ✓', 'Tips reset ✓') : guideIsOff() ? L('꺼짐 · 다시 켜고 처음부터 보기', 'Off · turn on and replay') : L('처음부터 다시 보기', 'Replay from the start'), () => {
+    button(this, x + 18 + lw, row(5), sw * 2 + 10, 28, tipNote ? L('다시 보기 설정됨 ✓', 'Tips reset ✓') : guideIsOff() ? L('꺼짐 · 다시 켜고 처음부터 보기', 'Off · turn on and replay') : L('처음부터 다시 보기', 'Replay from the start'), () => {
       resetGuide();
       this.scene.restart({ settings: true, messages: [L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.'), ...this.messages] });
     }, { size: 12 });
 
-    const my = oy + 220;
+    const my = oy + 228;
     panel(this, x, my, w, 144, L('이동 방식 (터치 화면)', 'Movement (touch screen)'));
     const mode = moveControl();
     button(this, x + 18, my + 26, half, 34, L('조이스틱', 'Joystick'), () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });
@@ -1223,7 +1243,8 @@ export class HQScene extends Phaser.Scene {
     g.fillStyle(0xcfc1a3, 1).fillRect(px, py, 72, 88);
     g.lineStyle(2, PALETTE.ink, 1).strokeRect(px, py, 72, 88);
     // The hunter's figure, fixed by class.
-    drawLook(g, lookOf(h), px + 9, py + 6, 5);
+    g.fillStyle(0x000000, 0.25).fillEllipse(px + 36, py + 66, 40, 8);
+    placeLook(this, g, lookOf(h), px + 14, py + 10, 4);
     g.fillStyle(PALETTE.ink, 1).fillRect(px, py + 72, 72, 16);
     text(this, px + 36, py + 74, CLASSES[h.cls].name, 12, '#e6dac0').setOrigin(0.5, 0);
 

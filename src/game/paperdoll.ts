@@ -3,6 +3,7 @@ import type { Hunter } from '../core/hunter';
 import { describeGear, Gear, gearLabel, GEAR_SLOT_NAMES, GearSlot, gearStats, TOP_TIER } from '../core/items';
 import { INK, PALETTE, text } from './ui';
 import { L } from '../core/lang';
+import { paintGear } from './icons';
 
 /** Height of the paper doll drawn by drawPaperDoll. */
 export const DOLL_H = 236;
@@ -103,22 +104,10 @@ export function drawPaperDoll(scene: Phaser.Scene, x: number, y: number, w: numb
   return objs;
 }
 
-/** A gear piece in a box colored by its tier. */
+/** A gear piece in a box colored by its tier, drawn in the shared sprite style. */
 export function drawGearIcon(gear: Gear) {
   return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
-    const c = Phaser.Display.Color.HexStringToColor(tierColor(gear.tier)).color;
-    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
-    g.lineStyle(2, c, 1).strokeRect(x + 1, y + 1, 38, 42);
-    g.fillStyle(c, 1);
-    switch (gear.slot) {
-      case 'weapon': g.fillRect(x + 18, y + 6, 4, 24).fillRect(x + 12, y + 30, 16, 3).fillRect(x + 18, y + 33, 4, 6); break;
-      case 'shield': g.fillRect(x + 10, y + 8, 20, 20).fillRect(x + 13, y + 28, 14, 5).fillRect(x + 17, y + 33, 6, 4); break;
-      case 'helmet': g.fillRect(x + 10, y + 12, 20, 16).fillRect(x + 8, y + 26, 24, 4); break;
-      case 'armor': g.fillRect(x + 10, y + 10, 20, 26).fillRect(x + 5, y + 10, 5, 12).fillRect(x + 30, y + 10, 5, 12); break;
-      case 'boots': g.fillRect(x + 9, y + 12, 8, 20).fillRect(x + 9, y + 30, 12, 6).fillRect(x + 23, y + 12, 8, 20).fillRect(x + 23, y + 30, 12, 6); break;
-      case 'ring': g.lineStyle(4, c, 1).strokeCircle(x + 20, y + 24, 9).fillRect(x + 17, y + 10, 6, 5); break;
-      case 'earring': g.fillRect(x + 18, y + 8, 4, 10).fillRect(x + 15, y + 18, 10, 10).fillRect(x + 18, y + 28, 4, 6); break;
-    }
+    paintGear(g, gear.slot, Phaser.Display.Color.HexStringToColor(tierColor(gear.tier)).color, x, y);
   };
 }
 
