@@ -4,7 +4,7 @@ import { HQScene } from './scenes/HQScene';
 import { TitleScene } from './scenes/TitleScene';
 import { skipTitleOnce } from './game/store';
 import { TowerScene } from './scenes/TowerScene';
-import { GH, GW, layoutStale } from './game/layout';
+import { GH, GW, layoutStale, RES } from './game/layout';
 import { unlockAudio } from './game/sfx';
 import { englishOf, lang } from './core/lang';
 
@@ -31,8 +31,8 @@ async function start() {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game',
-    width: GW,
-    height: GH,
+    width: GW * RES,
+    height: GH * RES,
     backgroundColor: '#14110f',
     pixelArt: true,
     roundPixels: true,

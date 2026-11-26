@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { RES } from './layout';
 
 /** Warm ink-and-rust palette: a hunter agency office lit by gate light. */
 export const PALETTE = {
@@ -40,11 +41,11 @@ export const FONT_TITLE = 'Galmuri14, Galmuri11, monospace';
 export function text(scene: Phaser.Scene, x: number, y: number, value: string, size = 12, color = INK.text, bold = false) {
   return scene.add
     .text(x, y, value, { fontFamily: FONT, fontSize: `${size}px`, color, fontStyle: bold ? 'bold' : 'normal', lineSpacing: 4 })
-    .setResolution(1);
+    .setResolution(RES);
 }
 
 export function title(scene: Phaser.Scene, x: number, y: number, value: string, size = 15, color = INK.text) {
-  return scene.add.text(x, y, value, { fontFamily: FONT_TITLE, fontSize: `${size}px`, color }).setResolution(1);
+  return scene.add.text(x, y, value, { fontFamily: FONT_TITLE, fontSize: `${size}px`, color }).setResolution(RES);
 }
 
 /** Square panel with a double border and a hard drop shadow. Optional tab label on the top edge. */
@@ -93,6 +94,9 @@ export function button(
     g.fillStyle(0xffffff, enabled ? 0.12 : 0.04).fillRect(2, sink + 2, w - 4, 2);
     label_.y = (h - 4) / 2 + sink;
   };
+  // Long labels (often English) shrink to fit instead of spilling over the edges.
+  let size = opts.size ?? 12;
+  while (label_.width > w - 8 && size > 9) label_.setFontSize(--size);
   draw('up');
   container.add([g, label_]);
   container.setSize(w, h);

@@ -16,7 +16,7 @@ import { levelUpMessage, unlocked } from '../core/agencyLevel';
 import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
-import { GH, GW, PORTRAIT } from '../game/layout';
+import { fitCamera, GH, GW, pointerAt, PORTRAIT } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 import { L } from '../core/lang';
 import { GuidePage, showGuide, tipWanted, markTip } from '../game/guide';
@@ -35,7 +35,9 @@ const P_MAP_H = GH - P_TOP_H - P_LOG_H - P_CTL_H;
 const P_LOG_Y = P_TOP_H + P_MAP_H;
 const P_CTL_Y = P_LOG_Y + P_LOG_H;
 const P_BTN_X = GW - 252; // action buttons start here
-const P_ZOOM = 1.25;
+const P_ZOOM = 1.7;
+/** Landscape: the map camera follows the hunter at this zoom, above the bottom HUD. */
+const L_ZOOM = 1.5;
 const JOY_RADIUS = 44;
 const JOY_DEADZONE = 14;
 const JOY_REPEAT_MS = 170;
@@ -110,9 +112,11 @@ export class TowerScene extends Phaser.Scene {
     this.dynamic = [];
     this.uiCam = null;
     if (PORTRAIT) {
-      const cam = this.cameras.main;
-      cam.setViewport(0, P_TOP_H, GW, P_MAP_H).setZoom(P_ZOOM);
-      this.uiCam = this.cameras.add(0, 0, GW, GH);
+      fitCamera(this.cameras.main, 0, P_TOP_H, GW, P_MAP_H, P_ZOOM);
+      this.uiCam = fitCamera(this.cameras.add(0, 0, GW, GH));
+    } else {
+      fitCamera(this.cameras.main, 0, 0, GW, HUD_Y, L_ZOOM);
+      this.uiCam = fitCamera(this.cameras.add(0, 0, GW, GH));
     }
     this.mapLayer = this.world(this.add.graphics());
     this.shownLevel = this.run.hunter.level;
@@ -209,11 +213,11 @@ export class TowerScene extends Phaser.Scene {
 
   /** Where the minimap sits: top right corner of the map view, upright layout only. */
   private minimapRect() {
-    if (!PORTRAIT || !this.run) return undefined;
+    if (!this.run) return undefined;
     const px = this.bigMinimap ? 6 : 3;
     const w = mapWidth(this.run.map) * px + 8;
     const h = mapHeight(this.run.map) * px + 8;
-    return { x: GW - w - 8, y: P_TOP_H + 8, w, h, px };
+    return { x: GW - w - 8, y: PORTRAIT ? P_TOP_H + 8 : 8, w, h, px };
   }
 
   /** The explored part of the floor in small: walls, stairs, enemies in sight, the hunter. */
@@ -255,7 +259,7 @@ export class TowerScene extends Phaser.Scene {
   }
 
   /** Where a touch may start the joystick: the map, or (portrait) the left of the thumb area. */
-  private joyArea(p: Phaser.Input.Pointer) {
+  private joyArea(p: { x: number; y: number }) {
     // Fixed cross buttons: touching the map does nothing.
     if (moveControl() === 'dpad') return false;
     if (!PORTRAIT) return p.y < HUD_Y;
@@ -263,7 +267,8 @@ export class TowerScene extends Phaser.Scene {
     return p.y >= P_CTL_Y && p.x < P_BTN_X - 6;
   }
 
-  private joyStart(p: Phaser.Input.Pointer) {
+  private joyStart(pointer: Phaser.Input.Pointer) {
+    const p = { id: pointer.id, ...pointerAt(pointer) };
     if (this.overlay.length || this.joy || this.guiding) return;
     const mm = this.minimapRect();
     if (mm && p.x >= mm.x && p.x <= mm.x + mm.w && p.y >= mm.y && p.y <= mm.y + mm.h) {
@@ -276,7 +281,8 @@ export class TowerScene extends Phaser.Scene {
     this.drawJoy(p.x, p.y);
   }
 
-  private joyMove(p: Phaser.Input.Pointer) {
+  private joyMove(pointer: Phaser.Input.Pointer) {
+    const p = { id: pointer.id, ...pointerAt(pointer) };
     const joy = this.joy;
     if (!joy || p.id !== joy.id || joy.fixed) return;
     let vx = p.x - joy.ox;
@@ -400,7 +406,8 @@ export class TowerScene extends Phaser.Scene {
     if (this.overlay.length) return;
     this.joyClear();
     const gfx = this.ui(this.add.graphics());
-    this.joy = { id: p.id, ox: p.x, oy: p.y, dir: { dx, dy }, used: true, fixed: true, pauseUntil: 0, gfx, timer: null };
+    const at = pointerAt(p);
+    this.joy = { id: p.id, ox: at.x, oy: at.y, dir: { dx, dy }, used: true, fixed: true, pauseUntil: 0, gfx, timer: null };
     this.joyStep();
     if (this.joy && !this.joy.timer) {
       this.joy.timer = this.time.addEvent({ delay: JOY_REPEAT_MS, loop: true, callback: () => this.joyStep() });
@@ -525,12 +532,11 @@ export class TowerScene extends Phaser.Scene {
       }
     }
     this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
-    if (PORTRAIT) {
-      // Bounds follow the floor, since a run saved sideways keeps its wide floor.
-      this.cameras.main.setBounds(0, 0, mw * TILE, mh * TILE);
-      this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
-      this.drawMinimap();
-    }
+    // The map camera follows the hunter. Bounds follow the floor, since a run saved
+    // in the other layout keeps its floor shape.
+    this.cameras.main.setBounds(0, 0, mw * TILE, mh * TILE);
+    this.cameras.main.centerOn(run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE / 2);
+    this.drawMinimap();
     this.drawStalkerClock();
 
     if (PORTRAIT) this.drawHudPortrait();
@@ -562,16 +568,16 @@ export class TowerScene extends Phaser.Scene {
     const py = y * TILE;
     const hash = (x * 73856093) ^ (y * 19349663);
     if (tile === Tile.Wall) {
-      g.fillStyle(visible ? 0x5a4a3c : 0x2a221c, 1).fillRect(px, py, TILE, TILE);
-      g.fillStyle(visible ? 0x3a2f26 : 0x1c1713, 1);
+      g.fillStyle(visible ? 0x66543f : 0x342a22, 1).fillRect(px, py, TILE, TILE);
+      g.fillStyle(visible ? 0x3e3228 : 0x231c17, 1);
       g.fillRect(px, py + 11, TILE, 2).fillRect(px, py + 23, TILE, 1);
       const off = y % 2 === 0 ? 6 : 18;
       g.fillRect(px + off, py, 2, 11).fillRect(px + ((off + 12) % 24), py + 13, 2, 10);
-      g.fillStyle(visible ? 0x6e5b49 : 0x2f2620, 1).fillRect(px, py, TILE, 1);
+      g.fillStyle(visible ? 0x7d684f : 0x3a2f26, 1).fillRect(px, py, TILE, 1);
       return;
     }
-    g.fillStyle(visible ? ((x + y) % 2 ? 0x37302a : 0x3a332c) : 0x1b1712, 1).fillRect(px, py, TILE, TILE);
-    if (visible && (hash & 7) === 0) g.fillStyle(0x3a322b, 1).fillRect(px + (hash & 15) + 3, py + ((hash >> 4) & 15) + 3, 2, 2);
+    g.fillStyle(visible ? ((x + y) % 2 ? 0x3d352e : 0x413830) : 0x221d18, 1).fillRect(px, py, TILE, TILE);
+    if (visible && (hash & 7) === 0) g.fillStyle(0x4a4037, 1).fillRect(px + (hash & 15) + 3, py + ((hash >> 4) & 15) + 3, 2, 2);
     if (tile === Tile.Stairs) {
       const c = this.run.bossAlive ? 0x6b5330 : PALETTE.gold;
       g.fillStyle(c, visible ? 1 : 0.4);
@@ -618,7 +624,10 @@ export class TowerScene extends Phaser.Scene {
   private drawHud() {
     const run = this.run;
     const h = run.hunter;
-    const k = <T extends Phaser.GameObjects.GameObject>(o: T) => this.keep(o);
+    const k = <T extends Phaser.GameObjects.GameObject>(o: T) => {
+      this.dynamic.push(o);
+      return this.ui(o);
+    };
     const g = k(this.add.graphics());
     g.fillStyle(PALETTE.panel, 1).fillRect(0, HUD_Y, 960, 120);
     g.fillStyle(PALETTE.line, 1).fillRect(0, HUD_Y, 960, 2);
@@ -637,9 +646,11 @@ export class TowerScene extends Phaser.Scene {
 
     const lg = k(this.add.graphics());
     lg.fillStyle(PALETTE.panelDark, 1).fillRect(284, HUD_Y + 12, 400, 96);
-    run.log.slice(-4).forEach((line, i, arr) =>
-      k(text(this, 296, HUD_Y + 20 + i * 21, line, 12, i === arr.length - 1 ? INK.text : INK.faint)),
-    );
+    run.log.slice(-4).forEach((line, i, arr) => {
+      const t = k(text(this, 296, HUD_Y + 20 + i * 21, line, 12, i === arr.length - 1 ? INK.text : INK.faint));
+      let v = line;
+      while (t.width > 376 && v.length > 1) t.setText(`${(v = v.slice(0, -1))}…`);
+    });
 
     this.skillButtons(700, HUD_Y + 12, 244, 46, true).forEach(k);
     this.drawDpad().forEach(k);

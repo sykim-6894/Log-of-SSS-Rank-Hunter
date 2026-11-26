@@ -536,7 +536,8 @@ export interface RankRow {
 }
 
 /** Live top 10 by combat power over every named hunter: ours, the rival agency's, the fallen, the rankers. */
-export function ranking(state: GameState): RankRow[] {
+/** The top of the ranking: the first `limit` rows (10, the board shown at the agency). */
+export function ranking(state: GameState, limit = 10): RankRow[] {
   const rows: Array<RankRow & { order: number }> = [];
   for (const h of state.slots) {
     if (h) {
@@ -559,7 +560,7 @@ export function ranking(state: GameState): RankRow[] {
   }
   return rows
     .sort((a, b) => b.order - a.order || a.id - b.id)
-    .slice(0, 10)
+    .slice(0, limit)
     .map(({ order: _order, ...r }) => r);
 }
 
@@ -580,8 +581,9 @@ export function nextChallenge(state: GameState, h: Hunter): { ranker: WorldRanke
   const floor = Math.max(0, ...state.world.filter((w) => beaten.has(w.id)).map((w) => w.score + 1));
   const ranker = state.world.filter((w) => !beaten.has(w.id) && w.score > floor).sort((a, b) => a.score - b.score)[0];
   if (!ranker) return undefined;
-  const rank = ranking(state).findIndex((r) => r.id === ranker.id) + 1;
-  return { ranker, rank: rank || 10 };
+  // The real place on the whole ladder: the next ranker may still be below the top 10 shown.
+  const rank = ranking(state, Infinity).findIndex((r) => r.id === ranker.id) + 1;
+  return { ranker, rank: rank || 11 };
 }
 
 /** One challenge a day: a day passes each time a hunter comes back. */
