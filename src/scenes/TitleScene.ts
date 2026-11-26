@@ -1,10 +1,11 @@
 import * as Phaser from 'phaser';
+import { preloadCrawl } from '../game/crawl';
 import { SAVE_SLOTS } from '../core/save';
 import { fitCamera, GH, GW, PORTRAIT } from '../game/layout';
 import { slotLabel } from '../game/slots';
 import { hadGame, loadSlot, resetGame, slotInfo, takeSkipTitle } from '../game/store';
 import { button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
-import { drawLook, LOOKS } from '../game/looks';
+import { placeLook, LOOKS } from '../game/looks';
 import { L, Lang, lang, LANG_KEY } from '../core/lang';
 
 interface TitleData {
@@ -25,6 +26,10 @@ export class TitleScene extends Phaser.Scene {
 
   init(data: TitleData) {
     this.data_ = data ?? {};
+  }
+
+  preload() {
+    preloadCrawl(this);
   }
 
   create() {
@@ -98,7 +103,7 @@ export class TitleScene extends Phaser.Scene {
       const hx = cx - (step * (LOOKS.length - 1)) / 2 + i * step - 25;
       const hy = top + 182 - 12 * scale;
       g.fillStyle(0x000000, 0.45).fillEllipse(hx + 25, top + 182, 44, 8);
-      drawLook(g, i, hx, hy, scale);
+      placeLook(this, g, i, hx, hy, scale);
     });
   }
 

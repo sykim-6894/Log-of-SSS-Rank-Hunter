@@ -1,4 +1,6 @@
-import * as Phaser from 'phaser';
+import type * as Phaser from 'phaser';
+import { crawlKey, hasCrawl } from './crawl';
+import { finish, gridTexture, parse } from './pixel';
 
 /**
  * Pixel sprites for monsters: 12×12 for ordinary ones, 16×16 for bosses.
@@ -10,7 +12,6 @@ interface Sprite {
   colors: Record<string, number>;
 }
 
-const K = 0x1a1410;
 
 const SPRITES: Record<string, Sprite> = {
   goblin: {
@@ -265,22 +266,10 @@ export function hasMonsterArt(kindId: string): boolean {
   return baseId(kindId) in SPRITES;
 }
 
-/** Makes the texture the first time it is needed (2 screen pixels per sprite pixel). */
+/** Makes the texture the first time it is needed (2 screen pixels per sprite pixel), after the shared finishing pass. */
 export function monsterTexture(scene: Phaser.Scene, kindId: string): string {
   const id = baseId(kindId);
-  const key = `monster-${id}`;
-  if (!scene.textures.exists(key)) {
-    const s = SPRITES[id];
-    const g = scene.add.graphics();
-    const colors: Record<string, number> = { k: K, ...s.colors };
-    s.rows.forEach((row, y) => {
-      for (let x = 0; x < row.length; x++) {
-        const c = colors[row[x]];
-        if (c !== undefined) g.fillStyle(c, 1).fillRect(x * 2, y * 2, 2, 2);
-      }
-    });
-    g.generateTexture(key, s.rows[0].length * 2, s.rows.length * 2);
-    g.destroy();
-  }
-  return key;
+  if (hasCrawl(scene, id)) return crawlKey(id);
+  const s = SPRITES[id];
+  return gridTexture(scene, `monster-${id}`, finish(parse(s.rows, s.colors)), 2);
 }
