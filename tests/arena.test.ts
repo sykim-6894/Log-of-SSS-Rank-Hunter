@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { activeHunter, arenaRecord, canEnterArena, newGame, startSurvival } from '../src/core/agency';
 import { botAction } from '../src/core/bot';
 import { Rng } from '../src/core/rng';
-import { TowerRun, waveCount, waveReward } from '../src/core/run';
+import { TowerRun, waveCount, waveHeal, waveReward } from '../src/core/run';
 
 function arena(seed: number, beef = 0) {
   const state = newGame(new Rng(seed));
@@ -60,6 +60,21 @@ describe('survival arena', () => {
     expect(waveReward(4).stones).toBe(0);
     expect(waveReward(10).tier).toBe(6);
     expect(waveReward(9).tier).toBe(0);
+  });
+
+  it('only champion waves give health and mana back', () => {
+    expect(waveHeal(1)).toBe(0);
+    expect(waveHeal(4)).toBe(0);
+    expect(waveHeal(5)).toBe(0.3);
+    expect(waveHeal(10)).toBe(0.3);
+    const { h, run } = arena(6, 60);
+    h.hp = Math.floor(h.maxHp / 2);
+    h.mp = 0;
+    run.monsters.length = 0;
+    run.act(botAction(run));
+    expect(run.status).toBe('onStairs');
+    expect(h.hp).toBeLessThanOrEqual(Math.floor(h.maxHp / 2));
+    expect(h.mp).toBeLessThan(Math.ceil(h.maxMp * 0.3));
   });
 
   it('a strong hunter clears waves, banks the gold and keeps the record', () => {

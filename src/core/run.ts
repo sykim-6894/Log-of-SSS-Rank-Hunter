@@ -155,10 +155,18 @@ export interface Survival {
 
 /** Waves are as dangerous as the tower floor of the same number. */
 export const ARENA_MAX_MONSTERS = 12;
-/** Health and mana given back after each wave, as a share of the maximum. */
-export const ARENA_WAVE_HEAL = 0.2;
 /** Every 5th wave brings a boss and mana stones; every 10th a strong piece of gear. */
 export const ARENA_BOSS_EVERY = 5;
+/**
+ * Waves give nothing back in between: health and mana carry over.
+ * Only beating a champion (every 5th wave) restores this share of the maximum.
+ */
+export const ARENA_CHAMPION_HEAL = 0.3;
+
+/** Share of max health and mana restored after clearing `wave`. */
+export function waveHeal(wave: number): number {
+  return wave % ARENA_BOSS_EVERY === 0 ? ARENA_CHAMPION_HEAL : 0;
+}
 export const ARENA_GEAR_EVERY = 10;
 
 export function waveCount(wave: number): number {
@@ -742,11 +750,16 @@ export class TowerRun {
       this.say(L(`${sv.wave}웨이브 기념 장비!`, `Wave ${sv.wave} prize gear!`));
       this.takeGear(makeGear(this.rng, r.tier));
     }
-    const hp = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * ARENA_WAVE_HEAL));
-    const mp = Math.min(h.maxMp - h.mp, Math.ceil(h.maxMp * ARENA_WAVE_HEAL));
-    h.hp += hp;
-    h.mp += mp;
-    if (hp > 0) this.events.push({ type: 'heal', amount: hp });
+    const heal = waveHeal(sv.wave);
+    if (heal > 0) {
+      const hp = Math.min(h.maxHp - h.hp, Math.ceil(h.maxHp * heal));
+      const mp = Math.min(h.maxMp - h.mp, Math.ceil(h.maxMp * heal));
+      h.hp += hp;
+      h.mp += mp;
+      const pct = Math.round(heal * 100);
+      this.say(L(`챔피언을 쓰러뜨렸다! 체력·마나 ${pct}% 회복.`, `Champion down! ${pct}% HP and MP restored.`));
+      if (hp > 0) this.events.push({ type: 'heal', amount: hp });
+    }
     if (sv.wave > (h.arenaBest ?? 0)) h.arenaBest = sv.wave;
     sv.banked = this.runGold;
     sv.bankedStones = this.stones;
