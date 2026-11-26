@@ -24,8 +24,8 @@ export const PALETTE = {
 
 export const INK = {
   text: '#efe5cf',
-  quiet: '#9a8b76',
-  faint: '#6b5e4f',
+  quiet: '#b0a18a',
+  faint: '#8c7d69',
   gold: '#e5ae46',
   rust: '#e07a45',
   red: '#e0574f',
