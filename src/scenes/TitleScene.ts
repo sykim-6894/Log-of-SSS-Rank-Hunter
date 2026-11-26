@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import { SAVE_SLOTS } from '../core/save';
-import { GH, GW, PORTRAIT } from '../game/layout';
+import { fitCamera, GH, GW, PORTRAIT } from '../game/layout';
 import { slotLabel } from '../game/slots';
 import { hadGame, loadSlot, resetGame, slotInfo, takeSkipTitle } from '../game/store';
 import { button, dots, INK, PALETTE, panel, text, title } from '../game/ui';
@@ -29,7 +29,7 @@ export class TitleScene extends Phaser.Scene {
   create() {
     // Reloaded only to switch layouts after a rotation: go straight back to the office.
     if (takeSkipTitle()) return this.scene.start('HQ');
-    this.cameras.main.setBackgroundColor(PALETTE.bg);
+    fitCamera(this.cameras.main).setBackgroundColor(PALETTE.bg);
     const w = Math.min(GW - 40, 420);
     const x = (GW - w) / 2;
     const top = PORTRAIT ? 150 : 90;

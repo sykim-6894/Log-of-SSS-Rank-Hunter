@@ -13,7 +13,7 @@ import { persist, rng, saveSlot, skipTitleOnce, slotInfo, state, takeWelcome } f
 import { SAVE_SLOTS } from '../core/save';
 import { slotLabel } from '../game/slots';
 import { Rng } from '../core/rng';
-import { GH, GW, layoutStale, PORTRAIT } from '../game/layout';
+import { fitCamera, GH, GW, layoutStale, PORTRAIT } from '../game/layout';
 import { bar, button, dots, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 import { L, Lang, lang, LANG_KEY } from '../core/lang';
 import { daysLeft, Quest, QUEST_DAYS, questReward, questText } from '../core/quests';
@@ -147,7 +147,7 @@ export class HQScene extends Phaser.Scene {
       this.scene.start('Tower');
       return;
     }
-    this.cameras.main.setBackgroundColor(PALETTE.bg);
+    fitCamera(this.cameras.main).setBackgroundColor(PALETTE.bg);
     if (state.agent.named === false) return this.drawFounding();
     if (!state.gates) refreshGates(state, rng);
     syncPerks(state);
@@ -424,7 +424,7 @@ export class HQScene extends Phaser.Scene {
     const bw = (w - cancelW - gap * floors.length) / floors.length;
     floors.forEach((f, i) => {
       const name = f > TOP_FLOOR ? L(`심연 ${f - TOP_FLOOR}`, `Abyss ${f - TOP_FLOOR}`) : L(`${f}층`, `${f}F`);
-      button(this, x + i * (bw + gap), y, bw, hgt, floors.length > 4 ? name : L(`▶ ${name}부터`, `▶ From ${name}`), () => go(f), { primary: true, size: Math.min(size, floors.length > 4 ? 14 : 16) });
+      button(this, x + i * (bw + gap), y, bw, hgt, floors.length > 4 ? name : L(`▶ ${name}부터`, `From ${name}`), () => go(f), { primary: true, size: Math.min(size, floors.length > 4 ? 14 : 16) });
     });
     button(this, x + w - cancelW, y, cancelW, hgt, L('취소', 'Cancel'), () => this.scene.restart({ messages: this.messages }), { size: 12 });
   }
@@ -1329,7 +1329,7 @@ export class HQScene extends Phaser.Scene {
   /** Live association ranking: ours, the rival agency's, the fallen, and established rankers. */
   private drawRanking(x: number, y: number, w = 448) {
     panel(this, x, y, w, 326, L('헌터 순위 · 명예의 전당', 'Hunter Ranking · Hall of Fame'));
-    const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 170, score: x + 212, note: x + w - 18 };
+    const cols = { rank: x + 18, grade: x + 50, name: x + 92, lv: x + 188, score: x + 222, note: x + w - 18 };
     const hy = y + 20;
     text(this, cols.rank, hy, '#', 12, INK.faint);
     text(this, cols.grade, hy, L('등급', 'Rank'), 12, INK.faint);
@@ -1352,8 +1352,9 @@ export class HQScene extends Phaser.Scene {
       fit(text(this, cols.note, ry, note, 12, r.status === 'gone' ? INK.faint : c), cols.note - cols.score - 50).setOrigin(1, 0);
     });
     const gone = state.hallOfFame.length;
-    if (gone > 0) text(this, x + w - 18, y + 304, L(`기록으로 남은 헌터 ${gone}명`, `${gone} hunters on record`), 12, INK.faint).setOrigin(1, 0);
-    this.challengeButton(x + 14, y + 300, Math.min(260, w - 150));
+    // The challenge button takes what the hall-of-fame count leaves, so the two never overlap.
+    const count = gone > 0 ? text(this, x + w - 18, y + 304, L(`기록 ${gone}명`, `${gone} on record`), 12, INK.faint).setOrigin(1, 0) : undefined;
+    this.challengeButton(x + 14, y + 300, Math.min(300, w - 32 - (count ? count.width + 12 : 0)));
   }
 
   /** Challenge the next association ranker. Only a win moves our hunter past them. */
