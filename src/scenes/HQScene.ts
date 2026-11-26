@@ -1154,7 +1154,8 @@ export class HQScene extends Phaser.Scene {
     g.fillStyle(0xcfc1a3, 1).fillRect(px, py, 72, 88);
     g.lineStyle(2, PALETTE.ink, 1).strokeRect(px, py, 72, 88);
     // The hunter's figure, fixed by class.
-    drawLook(g, lookOf(h), px + 9, py + 6, 5);
+    g.fillStyle(0x000000, 0.25).fillEllipse(px + 36, py + 66, 40, 8);
+    drawLook(g, lookOf(h), px + 14, py + 10, 4);
     g.fillStyle(PALETTE.ink, 1).fillRect(px, py + 72, 72, 16);
     text(this, px + 36, py + 74, CLASSES[h.cls].name, 12, '#e6dac0').setOrigin(0.5, 0);
 

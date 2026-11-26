@@ -12,6 +12,9 @@ import { lookOf, lookTexture } from '../game/looks';
 import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
+import { footShadow } from '../game/pixel';
+import { paintConsumable } from '../game/icons';
+import { chestTexture, merchantTexture, TileFrame, tileset } from '../game/tiles';
 import { sfx, toggleSound } from '../game/sfx';
 import { abyssDepth, MONSTERS, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { levelUpMessage, unlocked } from '../core/agencyLevel';
@@ -26,6 +29,8 @@ import { TIPS } from '../game/tips';
 import { ABYSS_GOLD_PER_RULE, ABYSS_RULE_EVERY, rulesLine } from '../core/abyss';
 
 const TILE = 24;
+/** Tint for tiles and props the hunter remembers but cannot see right now. */
+const REMEMBERED = 0x4a4038;
 const HUD_Y = MAP_H * TILE; // 600
 
 // Portrait layout: status bar on top, a camera that follows the hunter, the log,
@@ -50,6 +55,7 @@ const JOY_SIGHT_PAUSE_MS = 600;
 export class TowerScene extends Phaser.Scene {
   private run!: TowerRun;
   private mapLayer!: Phaser.GameObjects.Graphics;
+  private tileLayer!: Phaser.GameObjects.Blitter;
   private dynamic: Phaser.GameObjects.GameObject[] = [];
   private overlay: Phaser.GameObjects.GameObject[] = [];
   private joy: {
@@ -124,6 +130,7 @@ export class TowerScene extends Phaser.Scene {
       fitCamera(this.cameras.main, 0, 0, GW, HUD_Y, L_ZOOM);
       this.uiCam = fitCamera(this.cameras.add(0, 0, GW, GH));
     }
+    this.tileLayer = this.world(this.add.blitter(0, 0, tileset(this)));
     this.mapLayer = this.world(this.add.graphics());
     this.shownLevel = this.run.hunter.level;
 
@@ -494,6 +501,7 @@ export class TowerScene extends Phaser.Scene {
     this.playEvents(run.drainEvents());
     const g = this.mapLayer;
     g.clear();
+    this.tileLayer.clear();
     this.clearDynamic();
 
     const mw = mapWidth(run.map);
@@ -503,26 +511,30 @@ export class TowerScene extends Phaser.Scene {
         if (!run.seen[y][x]) continue;
         const tile = run.map.tiles[y][x];
         if (tile === Tile.Wall && !this.touchesFloor(x, y)) continue;
-        this.drawTile(g, x, y, tile, run.isVisible(x, y));
+        this.drawTile(x, y, tile, run.isVisible(x, y));
       }
     }
-    for (const c of run.chests) if (run.seen[c.y][c.x]) this.drawChest(g, c.x, c.y, run.isVisible(c.x, c.y));
+    // Shadows under everything standing on the floor, drawn before the figures.
+    const shadows = this.keep(this.add.graphics());
+    for (const c of run.chests) if (run.seen[c.y][c.x]) this.drawChest(c.x, c.y, run.isVisible(c.x, c.y));
 
     const mer = run.merchant;
     if (mer && run.seen[mer.y][mer.x]) {
-      const mg = this.keep(this.add.graphics());
-      mg.fillStyle(0x3d5a3a, run.isVisible(mer.x, mer.y) ? 1 : 0.45).fillRect(mer.x * TILE + 3, mer.y * TILE + 3, TILE - 6, TILE - 6);
-      this.keep(this.glyph(mer.x, mer.y, '$', INK.gold, 16));
+      const vis = run.isVisible(mer.x, mer.y);
+      if (vis) footShadow(shadows, mer.x * TILE + TILE / 2, mer.y * TILE + TILE - 2, 18);
+      const img = this.keep(this.add.image(mer.x * TILE + TILE / 2, mer.y * TILE + TILE + 1, merchantTexture(this)).setOrigin(0.5, 1));
+      if (!vis) img.setTint(REMEMBERED);
     }
 
     for (const m of run.monsters) {
       if (!run.canSee(m)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
+      footShadow(shadows, m.x * TILE + TILE / 2, m.y * TILE + TILE - 2, m.kind.boss || m.kind.stalker ? 26 : 18);
       if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
       else if (m.kind.ranker) this.keep(this.figure(m.x, m.y, CLASSES[run.duel?.cls ?? 'sword'].look, 0xffd27a));
       else if (hasMonsterArt(m.kind.id)) {
         // Mid-bosses: the same creature, bigger and gold. Sleeping monsters are a little dim.
-        const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE - 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
+        const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE + 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
         if (m.kind.elite) img.setScale(1.3).setTint(0xffd27a);
         if (m.kind.boss) img.setScale(1.35);
         if (m.kind.stalker) img.setScale(1.45);
@@ -538,6 +550,7 @@ export class TowerScene extends Phaser.Scene {
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, (TILE - 5) * hpRatio, 3);
       }
     }
+    footShadow(shadows, run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE - 2, 18);
     this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
     // The map camera follows the hunter. Bounds follow the floor, since a run saved
     // in the other layout keeps its floor shape.
@@ -570,39 +583,44 @@ export class TowerScene extends Phaser.Scene {
     }
   }
 
-  /** Stone floor with a little speckle; bricked walls. Remembered tiles are drawn dark. */
-  private drawTile(g: Phaser.GameObjects.Graphics, x: number, y: number, tile: Tile, visible: boolean) {
+  /**
+   * Tiles from the shared tileset. Walls with floor below show their brick face, the rest
+   * their dark top; floor next to a wall gets a soft shade. Remembered tiles are drawn dark.
+   */
+  private drawTile(x: number, y: number, tile: Tile, visible: boolean) {
     const px = x * TILE;
     const py = y * TILE;
-    const hash = (x * 73856093) ^ (y * 19349663);
+    const tiles = this.run.map.tiles;
+    const put = (frame: TileFrame, alpha = 1) => {
+      const bob = this.tileLayer.create(px, py, frame);
+      if (!visible) bob.tint = REMEMBERED;
+      if (alpha < 1) bob.setAlpha(alpha);
+    };
     if (tile === Tile.Wall) {
-      g.fillStyle(visible ? 0x66543f : 0x342a22, 1).fillRect(px, py, TILE, TILE);
-      g.fillStyle(visible ? 0x3e3228 : 0x231c17, 1);
-      g.fillRect(px, py + 11, TILE, 2).fillRect(px, py + 23, TILE, 1);
-      const off = y % 2 === 0 ? 6 : 18;
-      g.fillRect(px + off, py, 2, 11).fillRect(px + ((off + 12) % 24), py + 13, 2, 10);
-      g.fillStyle(visible ? 0x7d684f : 0x3a2f26, 1).fillRect(px, py, TILE, 1);
+      const below = tiles[y + 1]?.[x];
+      if (below !== undefined && below !== Tile.Wall) {
+        put(y % 2 ? 'wallFront2' : 'wallFront');
+        return;
+      }
+      put('wallTop');
+      const open = (t: Tile | undefined) => t !== undefined && t !== Tile.Wall;
+      // Where a wall top meets the floor above or beside it, a lit edge marks the room's border.
+      if (open(tiles[y - 1]?.[x])) put('rimN');
+      if (open(tiles[y]?.[x + 1])) put('rimE');
+      if (open(tiles[y]?.[x - 1])) put('rimW');
       return;
     }
-    g.fillStyle(visible ? ((x + y) % 2 ? 0x3d352e : 0x413830) : 0x221d18, 1).fillRect(px, py, TILE, TILE);
-    if (visible && (hash & 7) === 0) g.fillStyle(0x4a4037, 1).fillRect(px + (hash & 15) + 3, py + ((hash >> 4) & 15) + 3, 2, 2);
-    if (tile === Tile.Stairs) {
-      const c = this.run.bossAlive ? 0x6b5330 : PALETTE.gold;
-      g.fillStyle(c, visible ? 1 : 0.4);
-      for (let i = 0; i < 4; i++) g.fillRect(px + 4 + i * 4, py + 18 - i * 4, 16 - i * 4, 3);
-    }
+    const hash = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+    if (tile === Tile.Stairs) put(this.run.bossAlive ? 'stairsShut' : 'stairsOpen');
+    else put((['floor0', 'floor0', 'floor1', 'floor2', 'floor0', 'floor1', 'floor2', 'floor3'] as const)[hash & 7]);
+    if (tiles[y - 1]?.[x] === Tile.Wall) put('shadowN');
+    if (tiles[y]?.[x - 1] === Tile.Wall) put('shadowW', 0.7);
   }
 
-  /** A small wooden chest with a gold band. Cursed ones look the same. */
-  private drawChest(g: Phaser.GameObjects.Graphics, x: number, y: number, visible: boolean) {
-    const px = x * TILE;
-    const py = y * TILE;
-    const a = visible ? 1 : 0.45;
-    g.fillStyle(0x000000, 0.4 * a).fillRect(px + 5, py + 18, 16, 3);
-    g.fillStyle(0x8a5a2b, a).fillRect(px + 4, py + 8, 16, 11);
-    g.fillStyle(0x5e3b1c, a).fillRect(px + 4, py + 12, 16, 2);
-    g.fillStyle(0xa8703a, a).fillRect(px + 5, py + 8, 14, 3);
-    g.fillStyle(PALETTE.gold, a).fillRect(px + 11, py + 8, 2, 11).fillRect(px + 10, py + 13, 4, 3);
+  /** A wooden chest with a gold band, outlined like the sprites. Cursed ones look the same. */
+  private drawChest(x: number, y: number, visible: boolean) {
+    const img = this.keep(this.add.image(x * TILE + TILE / 2, y * TILE + TILE + 1, chestTexture(this)).setOrigin(0.5, 1));
+    if (!visible) img.setTint(REMEMBERED);
   }
 
   private touchesFloor(x: number, y: number): boolean {
@@ -617,7 +635,7 @@ export class TowerScene extends Phaser.Scene {
 
   /** A hunter's pixel figure standing on a tile. Rival hunters get a purple tint. */
   private figure(x: number, y: number, look: number, tint?: number) {
-    const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE - 1, lookTexture(this, look)).setOrigin(0.5, 1);
+    const img = this.add.image(x * TILE + TILE / 2, y * TILE + TILE + 1, lookTexture(this, look)).setOrigin(0.5, 1);
     if (tint !== undefined) img.setTint(tint);
     return img;
   }
@@ -1456,24 +1474,9 @@ interface Notice {
   ms?: number;
 }
 
-const POTION_COLORS: Record<ConsumableKind, number> = { hp: 0xc9403a, mp: 0x3d9fb3, guard: 0xe5ae46, escape: 0xe6dac0 };
-
 /** A 40×44 pixel potion bottle, or a rolled scroll for the return scroll. */
 function drawItemIcon(kind: ConsumableKind) {
-  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => {
-    g.fillStyle(0x2a211a, 1).fillRect(x, y, 40, 44);
-    if (kind === 'escape') {
-      g.fillStyle(0xe6dac0, 1).fillRect(x + 8, y + 10, 24, 24);
-      g.fillStyle(0xb9a98a, 1).fillRect(x + 6, y + 8, 28, 4).fillRect(x + 6, y + 32, 28, 4);
-      g.fillStyle(0xc4562a, 1).fillRect(x + 12, y + 16, 16, 2).fillRect(x + 12, y + 22, 12, 2);
-      return;
-    }
-    g.fillStyle(0x7a5a3a, 1).fillRect(x + 16, y + 6, 8, 5); // cork
-    g.fillStyle(0xcfcfcf, 1).fillRect(x + 15, y + 11, 10, 6); // neck
-    g.fillStyle(0xcfcfcf, 1).fillRect(x + 9, y + 17, 22, 22); // glass
-    g.fillStyle(POTION_COLORS[kind], 1).fillRect(x + 11, y + 23, 18, 14); // liquid
-    g.fillStyle(0xffffff, 0.7).fillRect(x + 12, y + 19, 3, 6); // shine
-  };
+  return (g: Phaser.GameObjects.Graphics, x: number, y: number) => paintConsumable(g, kind, x, y);
 }
 
 function gearNotice(gear: Gear, equipped: boolean, old?: Gear): Notice {
