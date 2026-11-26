@@ -12,14 +12,14 @@ export interface AgencyProgress {
   allOpen?: boolean;
 }
 
-export type Feature = 'gates' | 'quests' | 'gacha' | 'shop' | 'enhance' | 'duel' | 'arena' | 'bag' | 'stash' | 'dispatch' | 'prep' | 'scout' | 'rival2';
+export type Feature = 'gates' | 'quests' | 'gacha' | 'shop' | 'enhance' | 'duel' | 'arena' | 'bag' | 'stash' | 'dispatch' | 'prep' | 'scout' | 'rival2' | 'daily';
 
 /** Experience needed to reach each level (index 0 is level 1). */
 export const AGENCY_LEVEL_EXP = [0, 150, 1500, 5000, 10000, 20000, 35000, 60000];
 export const MAX_AGENCY_LEVEL = AGENCY_LEVEL_EXP.length;
 
 export const FEATURE_LEVEL: Record<Feature, number> = {
-  gates: 2, quests: 2, gacha: 3, shop: 3, enhance: 4, stash: 4, duel: 5, arena: 5, bag: 5, dispatch: 6, prep: 6, scout: 7, rival2: 8,
+  gates: 2, quests: 2, gacha: 3, shop: 3, daily: 3, enhance: 4, stash: 4, duel: 5, arena: 5, bag: 5, dispatch: 6, prep: 6, scout: 7, rival2: 8,
 };
 
 export function featureName(f: Feature): string {
@@ -31,6 +31,7 @@ export function featureName(f: Feature): string {
     prep: L('출정 준비', 'Departure prep'),
     rival2: L('두 번째 경쟁사', 'Second rival agency'),
     gacha: L('장비 뽑기', 'Gear draws'),
+    daily: L('오늘의 균열', "Today's Rift"),
     enhance: L('장비 강화', 'Gear enhancing'),
     duel: L('랭커 도전', 'Ranker challenges'),
     arena: L('생존 아레나', 'Survival Arena'),

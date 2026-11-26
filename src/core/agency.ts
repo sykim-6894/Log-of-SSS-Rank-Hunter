@@ -2,6 +2,8 @@ import {
   combatPower, createHunter, gainExp, Grade, GRADE_A_POWER, gradeRank, hallOfFameScore, Hunter, levelUp, powerGrade, rankGradeOf,
   PrepId, TrainingKind,
 } from './hunter';
+import { DailyRecord, DailyResult, DailyRun, dailyScore, dailyToday, makeDailyRun, settleDailyRecord, todayKey, triesLeft } from './daily';
+import type { Achievements, CodexEntry } from './codex';
 import { autoPick, ClassId, CLASS_IDS, classSkills, COUNTER_CLASS, SkillId, slotCount } from './classes';
 import { bagMax, BIG_BAG, CONSUMABLES, ConsumableKind, equipIfBetter, Gear, GACHA_PRICE, GearSlot, MAX_PLUS, setPlus, unequip, GACHA_REFUND, GEAR_SLOTS, makeGear, MAX_TIER, rollGacha, rollGear, startingBag, gearLevel } from './items';
 import { Gate, GATE_GRADES, GATE_SLOTS, gateLevel, gateName, raidSuccess, RIFT, rollGate, rollGateGrade, rollRift } from './gates';
@@ -124,6 +126,12 @@ export interface GameState {
   scouts?: { day: number; list: Hunter[] };
   /** The association's quest board, once the agency can take quests. */
   quests?: QuestBoard;
+  /** Today's rift: tries and records. */
+  daily?: DailyRecord;
+  /** Monster codex: kinds our hunters have killed, by monster id. */
+  codex?: Record<string, CodexEntry>;
+  /** Achievements reached, and the title worn. */
+  achievements?: Achievements;
 }
 
 /** Every rival agency in business: the first one, and the second once it has come. */
@@ -512,6 +520,31 @@ export function startSurvival(state: GameState): Survival | undefined {
   if (!h || !canEnterArena(state, h)) return undefined;
   h.arenaDay = state.day ?? 0;
   return { wave: 0, banked: 0, bankedStones: 0 };
+}
+
+// ---------- Today's rift ----------
+
+/** Tries left today for the agency, or 0 while the feature is locked. */
+export function dailyTriesLeft(state: GameState, now = new Date()): number {
+  return unlocked(state.agent, 'daily') ? triesLeft(state.daily, todayKey(now)) : 0;
+}
+
+/** Books one of today's tries for the active hunter and sets up the rift. */
+export function startDaily(state: GameState, now = new Date()): DailyRun | undefined {
+  const h = activeHunter(state);
+  const date = todayKey(now);
+  if (!h || isAway(h) || dailyTriesLeft(state, now) <= 0) return undefined;
+  const rec = dailyToday(state.daily, date);
+  state.daily = { ...rec, tries: rec.tries + 1, played: (rec.played ?? 0) + 1 };
+  return makeDailyRun(date, h.bestFloor);
+}
+
+/** A try is over (came back or was cast out): record the score and pay stones for a better one. */
+export function settleDaily(state: GameState, run: DailyRun, turns: number, by: string): DailyResult {
+  const { record, result } = settleDailyRecord(state.daily, run.date, dailyScore(run, turns), by);
+  state.daily = record;
+  state.agent.stones = (state.agent.stones ?? 0) + result.stones;
+  return result;
 }
 
 function pickActiveSlot(state: GameState) {

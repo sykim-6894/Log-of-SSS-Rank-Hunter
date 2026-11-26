@@ -33,6 +33,7 @@ import {
   ClassId, OwnedSkill, SkillId, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
 } from './classes';
 import { L } from './lang';
+import { BOUNTY_MULT, dailyScore as dailyScoreOf, DAILY_FLOORS, DAILY_RULE_POWER, DAILY_RULES, DailyRule, DailyRun, floorSeed } from './daily';
 import { ABYSS_GOLD_PER_RULE, ABYSS_MILESTONE, ABYSS_RULE_IDS, ABYSS_RULES, abyssRuleCount, AbyssRule, milestoneReward, stacks } from './abyss';
 
 export interface Monster {
@@ -127,6 +128,8 @@ export interface RunOptions {
   duel?: Duel;
   /** Survive waves in the closed arena instead. */
   survival?: Survival;
+  /** Today's rift: the date's seeded floors with two special rules. */
+  daily?: DailyRun;
   /** The agency has a gear storage: gear swapped out or not needed is kept for it, not thrown away. */
   keepSpare?: boolean;
   /** A brand-new agency's first climb: floor 1 has only a couple of monsters and one chest. */
@@ -273,6 +276,7 @@ export interface RunSnapshot {
   gate?: Gate;
   duel?: Duel;
   survival?: Survival;
+  daily?: DailyRun;
   spare?: Gear[];
   prep?: PrepId;
   tally?: Record<string, number>;
@@ -331,6 +335,8 @@ export class TowerRun {
   duel?: Duel;
   /** Set when this run is the survival arena. */
   survival?: Survival;
+  /** Set when this run is today's rift. */
+  daily?: DailyRun;
   /** Gear kept for the agency's storage. Lost if the hunter dies. */
   spare: Gear[] = [];
   /** Departure prep in force this run. */
@@ -348,6 +354,7 @@ export class TowerRun {
     this.duel = options.duel;
     this.prep = options.prep;
     this.survival = options.survival;
+    this.daily = options.daily;
     if (start && this.duel) this.enterArena();
     else if (start && this.survival) this.enterSurvival();
     else if (start) this.enterFloor(this.gate ? 1 : Math.max(1, options.startFloor ?? 1));
@@ -393,6 +400,7 @@ export class TowerRun {
       gate: this.gate,
       duel: this.duel,
       survival: this.survival,
+      daily: this.daily,
       spare: this.spare,
       prep: this.prep,
       tally: this.tally,
@@ -436,6 +444,7 @@ export class TowerRun {
     run.gate = s.gate;
     run.duel = s.duel;
     run.survival = s.survival;
+    run.daily = s.daily;
     run.spare = s.spare ?? [];
     run.prep = s.prep;
     run.tally = s.tally ?? {};
@@ -449,16 +458,18 @@ export class TowerRun {
   /** Last floor of a gate. The tower has none: above floor 20 the abyss goes on. */
   get isTopFloor(): boolean {
     if (this.survival) return false;
+    if (this.daily) return this.floor >= DAILY_FLOORS;
     return this.duel ? true : this.gate ? this.floor >= gateFloors(this.gate) : false;
   }
 
   /** In the abyss above the tower's last floor. */
   get inAbyss(): boolean {
-    return !this.gate && !this.duel && !this.survival && this.floor > TOP_FLOOR;
+    return !this.gate && !this.duel && !this.survival && !this.daily && this.floor > TOP_FLOOR;
   }
 
   /** The tower floor this floor is as dangerous as. In the tower that is the floor itself. */
   get danger(): number {
+    if (this.daily) return this.daily.base + this.floor - 1;
     return this.gate ? gateDanger(this.gate, this.floor) : this.floor;
   }
 
@@ -467,6 +478,7 @@ export class TowerRun {
     // The arena is lit: both fighters see each other from the start.
     if (this.duel || this.survival) return 20;
     if (this.inAbyss) return Math.max(3, SIGHT - stacks(this.abyssRules, 'dim'));
+    if (this.hasDaily('dim')) return SIGHT - DAILY_RULE_POWER.dim;
     return this.gate?.rule === 'dark' ? DARK_SIGHT : SIGHT;
   }
 
@@ -474,6 +486,7 @@ export class TowerRun {
   get placeName(): string {
     if (this.duel) return L('결투장', 'Arena');
     if (this.survival) return L(`생존 아레나 ${this.survival.wave}웨이브`, `Survival Arena wave ${this.survival.wave}`);
+    if (this.daily) return L(`오늘의 균열 ${this.floor}/${DAILY_FLOORS}층`, `Today's Rift ${this.floor}/${DAILY_FLOORS}F`);
     if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
     return this.gate ? L(`${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}층`, `${gateName(this.gate)} ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
@@ -482,12 +495,23 @@ export class TowerRun {
   get placeShort(): string {
     if (this.duel) return L('결투장', 'Arena');
     if (this.survival) return L(`아레나 ${this.survival.wave}웨이브`, `Arena W${this.survival.wave}`);
+    if (this.daily) return L(`균열 ${this.floor}/${DAILY_FLOORS}층`, `Rift ${this.floor}/${DAILY_FLOORS}F`);
     if (this.inAbyss) return L(`심연 ${abyssDepth(this.floor)}층`, `Abyss ${abyssDepth(this.floor)}F`);
     return this.gate ? L(`게이트 ${this.floor}/${gateFloors(this.gate)}층`, `Gate ${this.floor}/${gateFloors(this.gate)}F`) : L(`${this.floor}층`, `${this.floor}F`);
   }
 
   private get pool(): MonsterKind[] {
     return this.gate ? gatePool(this.gate, this.danger) : monsterPool(this.floor);
+  }
+
+  /** A rule of today's rift is in force. */
+  hasDaily(rule: DailyRule): boolean {
+    return !!this.daily?.rules.includes(rule);
+  }
+
+  /** Score of today's rift so far. */
+  get dailyScore(): number {
+    return this.daily ? dailyScoreOf(this.daily, this.turn) : 0;
   }
 
   private say(msg: string) {
@@ -497,6 +521,8 @@ export class TowerRun {
 
   enterFloor(n: number) {
     this.floor = n;
+    // Today's rift: each floor is laid out from the date, the same for every try that day.
+    if (this.daily) this.rng = new Rng(floorSeed(this.daily.seed, n));
     this.map = generateFloor(this.rng, this.options.mapSize?.w ?? MAP_W, this.options.mapSize?.h ?? MAP_H);
     this.pos = { ...this.map.start };
     this.monsters = [];
@@ -505,7 +531,7 @@ export class TowerRun {
     this.traps = [];
     this.floorTurn = 0;
     this.stalkers = 0;
-    if (!this.gate) {
+    if (!this.gate && !this.daily) {
       this.hunter.bestFloor = Math.max(this.hunter.bestFloor, Math.min(TOP_FLOOR, n));
       if (n > TOP_FLOOR) {
         const depth = abyssDepth(n);
@@ -525,7 +551,7 @@ export class TowerRun {
     const danger = this.danger;
     const pool = this.pool;
     const easy = n === 1 && !!this.options.easyFirst && !this.gate && !this.duel;
-    const horde = this.inAbyss ? 1.25 ** stacks(this.abyssRules, 'horde') : 1;
+    const horde = this.inAbyss ? 1.25 ** stacks(this.abyssRules, 'horde') : this.hasDaily('horde') ? DAILY_RULE_POWER.horde : 1;
     const count = easy ? 2 : Math.round((4 + danger) * (this.gate?.rule === 'swarm' ? 1.5 : 1) * horde);
     const rooms = this.map.rooms.slice(1);
     for (let i = 0; i < count; i++) {
@@ -540,10 +566,12 @@ export class TowerRun {
 
     this.maybeSpawnRival(danger);
     this.placeChests(danger, easy ? 1 : undefined);
+    if (this.hasDaily('treasure')) this.placeChests(danger, this.chests.length + 2, true);
     this.maybeSpawnElite(danger);
     this.maybePlaceMerchant(danger);
 
-    let boss = this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
+    let boss = this.daily ? (this.isTopFloor ? this.riftGuardian() : undefined)
+      : this.gate ? (this.isTopFloor ? gateBoss(this.gate, danger) : undefined) : bossFor(n);
     if (boss && n > TOP_FLOOR) boss = { ...boss, name: L(`심연의 군주 (${abyssDepth(n)}층)`, `Abyss Lord (${abyssDepth(n)}F)`) };
     if (boss) {
       const c = center(this.map.rooms[this.map.rooms.length - 1]);
@@ -555,10 +583,13 @@ export class TowerRun {
       ].find((p) => isWalkable(this.map, p.x, p.y) && !this.blocked(p.x, p.y));
       if (spot) {
         this.spawn(boss, spot.x, spot.y, danger);
-        this.say(L(`${this.gate ? '마지막 층' : this.placeName}에 ${boss.name}의 기척이 느껴진다.`, `You sense ${boss.name} on ${this.gate ? 'the last floor' : this.placeName}.`));
+        this.say(L(`${this.gate || this.daily ? '마지막 층' : this.placeName}에 ${boss.name}의 기척이 느껴진다.`, `You sense ${boss.name} on ${this.gate || this.daily ? 'the last floor' : this.placeName}.`));
       }
     }
-    if (this.gate) {
+    if (this.daily) {
+      this.say(L(`${this.placeName}에 들어섰다.`, `Entered ${this.placeName}.`));
+      if (n === 1) this.say(L(`오늘의 규칙: ${this.daily.rules.map((r) => `[${DAILY_RULES[r].name}] ${DAILY_RULES[r].text}`).join(' · ')}`, `Today's rules: ${this.daily.rules.map((r) => `[${DAILY_RULES[r].name}] ${DAILY_RULES[r].text}`).join(' · ')}`));
+    } else if (this.gate) {
       this.say(L(`${this.placeName}에 들어섰다.`, `Entered ${this.placeName}.`));
       if (n === 1 && this.gate.rule === 'sealed') this.say(L('봉인의 기운이 가득하다. 체력 물약이 듣지 않는다.', 'A sealing aura fills the air. Health potions will not work.'));
       if (n === 1 && this.gate.rule === 'dark') this.say(L('짙은 어둠 때문에 앞이 잘 보이지 않는다.', 'Thick darkness makes it hard to see.'));
@@ -569,6 +600,13 @@ export class TowerRun {
     this.events.push({ type: 'floor' });
     this.updateSight();
     if (this.milestone) this.claimMilestone(this.milestone);
+  }
+
+  /** The rift's last floor: a mid-boss of the floor's monsters, made its guardian. */
+  private riftGuardian(): MonsterKind {
+    const e = eliteOf(this.rng.pick(this.pool));
+    const base = e.name.replace(/^\[[^\]]*\]\s*/, '');
+    return { ...e, name: L(`[균열의 핵] ${base}`, `[Rift Core] ${base}`), hp: Math.round(e.hp * 1.3), score: e.score * 2, elite: false, boss: true };
   }
 
   /** Abyss depth whose milestone this floor gives, or 0. */
@@ -722,7 +760,7 @@ export class TowerRun {
     const cap = combatPower(this.hunter) * FORMER_POWER_CAP;
     const pool = (this.options.rivals ?? []).filter((h) => !this.met.has(h.id) &&
       h.origin !== 'crew' && (h.origin === 'rival' ? h.rivalOf === this.hunter.id : combatPower(h) <= cap));
-    if (floor < 2 || pool.length === 0) return;
+    if (floor < 2 || pool.length === 0 || this.daily) return;
     if (!this.rng.chance(this.options.encounterChance ?? 0.25)) return;
     // The hunter's own rival shows up more often than the others.
     const mine = pool.find((h) => h.rivalOf === this.hunter.id);
@@ -767,7 +805,10 @@ export class TowerRun {
     if (this.gate) {
       if (this.isTopFloor) return;
       if (this.gate.rule !== 'elite' && (floor < 3 || !this.rng.chance(this.options.eliteChance ?? 0.35))) return;
-    } else if (floor < 3 || bossFor(floor) || !this.rng.chance(this.options.eliteChance ?? 0.35)) return;
+    } else if (this.hasDaily('elite')) {
+      if (this.isTopFloor) return;
+    } else if (this.daily ? this.isTopFloor || floor < 3 : floor < 3 || bossFor(floor)) return;
+    else if (!this.rng.chance(this.options.eliteChance ?? 0.35)) return;
     const spot = this.randomFreeSpot();
     if (!spot) return;
     const kind = eliteOf(this.rng.pick(this.pool));
@@ -826,8 +867,8 @@ export class TowerRun {
   }
 
   /** One or two chests per floor (one more from floor 6), in rooms other than the start. */
-  private placeChests(floor: number, fixed?: number) {
-    this.chests = [];
+  private placeChests(floor: number, fixed?: number, keep = false) {
+    if (!keep) this.chests = [];
     const count = fixed ?? this.rng.int(1, 2) + (floor >= 6 ? 1 : 0);
     const rooms = this.map.rooms.slice(1);
     for (let tries = 0; this.chests.length < count && tries < 30; tries++) {
@@ -926,7 +967,9 @@ export class TowerRun {
   private spawn(kind: MonsterKind, x: number, y: number, floor: number) {
     const s = floorScale(floor);
     const abyss = this.inAbyss && !kind.stalker;
-    const hp = Math.round(kind.hp * s * (abyss ? 1.2 ** stacks(this.abyssRules, 'iron') : 1));
+    const daily = !!this.daily && !kind.stalker;
+    if (daily && this.hasDaily('haste') && !kind.boss) kind = { ...kind, trait: 'swift' };
+    const hp = Math.round(kind.hp * s * (abyss ? 1.2 ** stacks(this.abyssRules, 'iron') : daily && this.hasDaily('iron') ? DAILY_RULE_POWER.iron : 1));
     this.monsters.push({
       id: this.nextId++,
       kind,
@@ -934,7 +977,7 @@ export class TowerRun {
       y,
       hp,
       maxHp: hp,
-      atk: Math.round(kind.atk * s * (abyss ? 1.15 ** stacks(this.abyssRules, 'fury') : 1)),
+      atk: Math.round(kind.atk * s * (abyss ? 1.15 ** stacks(this.abyssRules, 'fury') : daily && this.hasDaily('fury') ? DAILY_RULE_POWER.fury : 1)),
       def: Math.round(kind.def * s),
       awake: false,
     });
@@ -1131,7 +1174,7 @@ export class TowerRun {
     const h = this.hunter;
     if (h.hp <= 0) return;
     const acc = this.regenAcc;
-    const drain = this.inAbyss ? 0.5 ** stacks(this.abyssRules, 'drain') : 1;
+    const drain = this.inAbyss ? 0.5 ** stacks(this.abyssRules, 'drain') : this.hasDaily('drain') ? DAILY_RULE_POWER.drain : 1;
     acc.hp += (h.hpRegen ?? 0) * drain;
     acc.mp += (h.mpRegen ?? 0) * drain;
     const hp = Math.floor(acc.hp);
@@ -1593,7 +1636,7 @@ export class TowerRun {
       return false;
     }
     if (kind === 'hp') {
-      if (this.gate?.rule === 'sealed') {
+      if (this.gate?.rule === 'sealed' || this.hasDaily('sealed')) {
         this.say(L('봉인 때문에 체력 물약이 듣지 않는다.', 'The seal stops health potions from working.'));
         return false;
       }
@@ -1669,6 +1712,10 @@ export class TowerRun {
     if (m.kind.elite) t.elite = (t.elite ?? 0) + 1;
     this.hunter.kills += 1;
     this.hunter.killScore += m.kind.score;
+    if (this.daily) {
+      this.daily.kills += 1;
+      this.daily.points += m.kind.score * (this.hasDaily('bounty') ? BOUNTY_MULT : 1);
+    }
     this.say(L(`${m.kind.name} 처치! +${gold}G`, `${m.kind.name} defeated! +${gold}G`));
     if (m.kind.boss && this.gateCleared) {
       this.events.push({ type: 'gateClear' });
@@ -1845,6 +1892,17 @@ export class TowerRun {
       this.events.push({ type: 'wave', wave: sv.wave, cleared: false });
       return;
     }
+    if (h.hp <= 0 && this.daily) {
+      h.hp = 1;
+      this.daily.fell = true;
+      this.runGold = 0;
+      this.stones = 0;
+      this.spare = [];
+      this.status = 'returned';
+      this.say(L(`${m.kind.name}에게 쓰러졌다... 균열이 헌터를 밖으로 밀어냈다. 점수는 남지만 이번 수입은 잃었다.`, `Fell to ${m.kind.name}... the rift cast you out. The score stands, but this run's income is lost.`));
+      this.events.push({ type: 'death' });
+      return;
+    }
     if (h.hp <= 0 && h.rescues > 0 && !this.duel) {
       h.rescues -= 1;
       h.hp = Math.ceil(h.maxHp * 0.3);
@@ -1919,6 +1977,7 @@ export class TowerRun {
       return true;
     }
     if (this.status !== 'onStairs' || this.isTopFloor) return false;
+    if (this.daily) this.daily.cleared = Math.max(this.daily.cleared, this.floor);
     const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
     this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
@@ -1934,6 +1993,7 @@ export class TowerRun {
       this.status = 'returned';
       return true;
     }
+    if (this.daily) this.daily.cleared = Math.max(this.daily.cleared, this.floor);
     const bonus = Math.round(10 * this.danger * this.abyssGold);
     this.runGold += bonus;
     this.say(L(`${this.floor}층 돌파 보상 +${bonus}G`, `${this.floor}F clear bonus +${bonus}G`));
