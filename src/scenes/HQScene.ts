@@ -1,8 +1,11 @@
 import * as Phaser from 'phaser';
-import { abyssRecord, activeHunter, buyPrep, PREP_IDS, PREPS, prepCost, refreshQuests, rivalAgencies, syncPerks, invest, slotOpen, canDispatch, dispatch, dispatchPay, isAway, TALENTS, TalentId, depositGear, withdrawGear, sellStashed, stashFee, stashPrice, STASH_SIZE, scoutCandidates, hireScout, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
+import { dailyTriesLeft, startDaily, abyssRecord, activeHunter, buyPrep, PREP_IDS, PREPS, prepCost, refreshQuests, rivalAgencies, syncPerks, invest, slotOpen, canDispatch, dispatch, dispatchPay, isAway, TALENTS, TalentId, depositGear, withdrawGear, sellStashed, stashFee, stashPrice, STASH_SIZE, scoutCandidates, hireScout, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
-import { MONSTERS, TOP_FLOOR } from '../core/monsters';
+import { elementNote, MONSTERS, TOP_FLOOR, TRAITS } from '../core/monsters';
+import { DAILY_FLOORS, DAILY_POINTS_PER_STONE, DAILY_RECORD_STONES, DAILY_RULES, DAILY_SPEED_BONUS, DAILY_TRIES, dailyBase, dailyRules, dailyToday, dateLabel, todayKey } from '../core/daily';
+import { ACHIEVEMENTS, checkAchievements, CODEX_IDS, codexCount, codexWhere, isDone, rewardText, wearTitle, wornTitle } from '../core/codex';
+import { monsterTexture } from '../game/monsterArt';
 import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
 import { bagMax, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, gearLevel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
@@ -52,6 +55,10 @@ export interface HQData {
   prep?: boolean;
   /** Show the agency level table. */
   levels?: boolean;
+  /** Show the challenges: today's rift and the survival arena. */
+  challenges?: boolean;
+  /** Show the monster codex or the achievements, with a monster picked or a page of achievements. */
+  codex?: { view: 'monsters' | 'achievements'; pick?: string; page?: number };
 }
 
 
@@ -96,6 +103,8 @@ export class HQScene extends Phaser.Scene {
   private showingQuests = false;
   private showingPrep = false;
   private showingLevels = false;
+  private showingChallenges = false;
+  private codex?: HQData['codex'];
 
   constructor() {
     super('HQ');
@@ -117,6 +126,8 @@ export class HQScene extends Phaser.Scene {
     this.showingQuests = !!data.quests;
     this.showingPrep = !!data.prep;
     this.showingLevels = !!data.levels;
+    this.showingChallenges = !!data.challenges;
+    this.codex = data.codex;
     // The welcome waits until the agency has a name.
     if (state.agent.named === false) return;
     if (takeWelcome() && this.messages.length === 0) {
@@ -151,6 +162,12 @@ export class HQScene extends Phaser.Scene {
     if (!state.gates) refreshGates(state, rng);
     syncPerks(state);
     if (!state.quests) refreshQuests(state, rng);
+    // Achievements reached since the office was last open: pay them and say so.
+    const reached = checkAchievements(state);
+    if (reached.length) {
+      this.messages = [...reached.map((a) => L(`업적 달성: ${a.name}! 칭호 「${a.title}」 · 보상 ${rewardText(a)}`, `Achievement: ${a.name}! Title "${a.title}" · Reward ${rewardText(a)}`)), ...this.messages];
+      persist();
+    }
     // Officer Yoon speaks once the screen is drawn.
     this.time.delayedCall(30, () => this.maybeTip());
     if (this.hiring) return this.drawHiring(this.hiring);
@@ -164,6 +181,8 @@ export class HQScene extends Phaser.Scene {
     if (this.showingQuests) return this.drawQuests();
     if (this.showingPrep) return this.drawPrep();
     if (this.showingLevels) return this.drawLevels();
+    if (this.showingChallenges) return this.drawChallenges();
+    if (this.codex) return this.drawCodex(this.codex);
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -407,9 +426,10 @@ export class HQScene extends Phaser.Scene {
         else go(1);
       }, { primary: !away, size: away ? 14 : size, enabled: !!h && !away });
       const arenaOk = !!h && unlocked(state.agent, 'arena') && canEnterArena(state, h);
-      this.featureButton('arena', x + tw + 8, y, gw, hgt, L('아레나', 'Arena'), () =>
-        this.scene.restart({ messages: this.messages, arena: true }), { size: Math.min(size, 18), enabled: !!h, primary: false });
-      if (arenaOk) {
+      const dailyOk = !!h && dailyTriesLeft(state) > 0;
+      this.featureButton('daily', x + tw + 8, y, gw, hgt, L('도전', 'Challenge'), () =>
+        this.scene.restart({ messages: this.messages, challenges: true }), { size: Math.min(size, 18), enabled: !!h, primary: false });
+      if (arenaOk || dailyOk) {
         const dot = this.add.graphics();
         dot.fillStyle(0xe0574f, 1).fillCircle(x + tw + 8 + gw - 10, y + 10, 5);
       }
@@ -436,7 +456,10 @@ export class HQScene extends Phaser.Scene {
     // Settings and legacy share one row under the title.
     this.soundButton(x, 38, 76, 22);
     this.legacyButton(x + 84, 38, 76, 22);
+    this.codexButton(x + 168, 38, 76, 22);
+    const worn = wornTitle(state);
     fit(text(this, GW - x, 12, `${agent.name} Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0), 180);
+    if (worn) fit(text(this, x + 250, 42, L(`「${worn}」`, worn), 12, INK.gold).setOrigin(0, 0), GW - x - 250 - 84);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
     dots(this, x, 64, w);
     this.drawSlots(x, 70, w);
@@ -485,10 +508,12 @@ export class HQScene extends Phaser.Scene {
   private drawHeader() {
     const { agent } = state;
     title(this, 24, 18, L('주인공을 찾습니다', 'Wanted: The Protagonist'), 30, INK.text);
-    text(this, 26, 58, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
+    const worn = wornTitle(state);
+    text(this, 26, 58, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency') + (worn ? `  「${worn}」` : ''), 12, INK.rust);
     text(this, 936, 22, `${agent.name} · Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0);
     title(this, 936, 42, L(`운영 자금 ${agent.gold}G`, `Funds ${agent.gold}G`), 15, INK.gold).setOrigin(1, 0);
     dots(this, 24, 82, 912);
+    this.codexButton(364, 20, 96, 28);
     this.questButton(468, 20, 96, 28);
     this.legacyButton(572, 20, 96, 28);
     this.soundButton(676, 20, 96);
@@ -501,6 +526,10 @@ export class HQScene extends Phaser.Scene {
 
   private soundButton(x: number, y: number, w: number, h = 28) {
     button(this, x, y, w, h, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }), { size: 12 });
+  }
+
+  private codexButton(x: number, y: number, w: number, h: number) {
+    button(this, x, y, w, h, L('도감', 'Codex'), () => this.scene.restart({ codex: { view: 'monsters' }, messages: this.messages }), { size: 12 });
   }
 
   private legacyButton(x: number, y: number, w: number, h: number) {
@@ -738,7 +767,187 @@ export class HQScene extends Phaser.Scene {
       persist();
       this.scene.start('Tower', { survival });
     }, { primary: ok, enabled: ok });
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages, challenges: true }));
+  }
+
+  /** Challenges: today's rift on top, the survival arena under it. */
+  private drawChallenges() {
+    const w = Math.min(GW - 28, 600);
+    const x = (GW - w) / 2;
+    const h = activeHunter(state);
+    const date = todayKey();
+    const rec = dailyToday(state.daily, date);
+    const left = dailyTriesLeft(state);
+    title(this, GW / 2, 16, L('도전', 'Challenges'), 23, INK.text).setOrigin(0.5, 0);
+    text(this, GW / 2, 48, L('날마다 바뀌는 균열과 끝없는 아레나. 쓰러져도 목숨은 잃지 않는다.', 'A rift that changes daily and an endless arena. Falling here will not kill you.'), 12, INK.quiet)
+      .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
+
+    // Today's rift.
+    let y = PORTRAIT ? 96 : 84;
+    const lines: Array<[string, string]> = [
+      [L(`${DAILY_FLOORS}층 · 오늘은 누가 몇 번 들어가도 같은 맵과 몬스터 · 하루 ${DAILY_TRIES}번`, `${DAILY_FLOORS} floors · same map and monsters for every try today · ${DAILY_TRIES} tries a day`), INK.quiet],
+      ...dailyRules(date).map((r): [string, string] => [`[${DAILY_RULES[r].name}] ${DAILY_RULES[r].text}`, DAILY_RULES[r].good ? INK.gate : INK.rust]),
+      [L(`점수: 처치 점수 + 층마다 100 + ${DAILY_FLOORS}층 모두 넘기면 속도 보너스 (${DAILY_SPEED_BONUS} − 턴)`, `Score: kill points + 100 a floor + speed bonus for all ${DAILY_FLOORS} (${DAILY_SPEED_BONUS} − turns)`), INK.quiet],
+      [L(`오늘 최고 점수를 넘기면 ${DAILY_POINTS_PER_STONE}점마다 마력석 1개 · 에이전시 신기록 +${DAILY_RECORD_STONES}`, `Beat today's best: 1 mana stone per ${DAILY_POINTS_PER_STONE} points · agency record +${DAILY_RECORD_STONES}`), INK.quiet],
+      [rec.best ? L(`오늘 최고 ${rec.best}점 · ${rec.bestBy}`, `Today's best ${rec.best} · ${rec.bestBy}`) : L('오늘 최고: 아직 없음', "Today's best: none yet"), INK.gold],
+      [rec.ever ? L(`에이전시 신기록 ${rec.ever}점 · ${rec.everBy} (${dateLabel(rec.everDate ?? date)})`, `Agency record ${rec.ever} · ${rec.everBy} (${dateLabel(rec.everDate ?? date)})`) : L('에이전시 신기록: 아직 없음', 'Agency record: none yet'), INK.gate],
+    ];
+    if (h) lines.push([L(`${h.name}에게는 탑 ${dailyBase(h.bestFloor)}~${dailyBase(h.bestFloor) + DAILY_FLOORS - 1}층 수준 (최고 층에 맞춰짐)`, `For ${h.name}: like Tower ${dailyBase(h.bestFloor)}-${dailyBase(h.bestFloor) + DAILY_FLOORS - 1}F (follows their best floor)`), INK.text]);
+    // Lines wrap (English runs long); the panel is drawn behind them once their height is known.
+    let ty = y + 20;
+    for (const [t, c] of lines) {
+      const o = text(this, x + 14, ty, t, 12, c).setWordWrapWidth(w - 28, true).setDepth(1);
+      ty += o.height + 3;
+    }
+    const ph = ty - y + 62;
+    const lh = 21;
+    panel(this, x, y, w, ph, L(`오늘의 균열 · ${dateLabel(date)}`, `Today's Rift · ${dateLabel(date)}`));
+    const by = y + ph - 50;
+    const away = isAway(h);
+    const label = left > 0 ? L(`▶  균열 입장 (남은 도전 ${left}/${DAILY_TRIES})`, `▶  Enter the rift (${left}/${DAILY_TRIES} left)`) : L('오늘은 모두 도전했다. 내일 새 균열이 열린다.', 'No tries left. A new rift opens tomorrow.');
+    this.featureButton('daily', x + 14, by, w - 28, 40, label, () => {
+      const daily = startDaily(state);
+      if (!daily) return;
+      persist();
+      this.scene.start('Tower', { daily });
+    }, { primary: left > 0 && !away, enabled: !!h && left > 0 && !away, size: 14 });
+
+    // The survival arena.
+    y += ph + 22;
+    const arena = arenaRecord(state);
+    const aLines = [
+      arena ? L(`에이전시 최고 기록: ${arena.wave}웨이브 · ${arena.name}`, `Agency record: ${arena.wave} waves · ${arena.name}`) : L('에이전시 최고 기록: 아직 없음', 'Agency record: none yet'),
+      !h ? '' : !arenaUnlocked(h) ? L(`${h.name}: 성장의 탑 ${ARENA_UNLOCK_FLOOR}층을 돌파하면 열린다.`, `${h.name}: opens after clearing Tower ${ARENA_UNLOCK_FLOOR}F.`)
+        : canEnterArena(state, h) ? L(`${h.name}: 오늘 도전 가능 · 최고 ${h.arenaBest ?? 0}웨이브`, `${h.name}: can enter today · best ${h.arenaBest ?? 0} waves`)
+        : L(`${h.name}: 오늘은 이미 도전했다 · 최고 ${h.arenaBest ?? 0}웨이브`, `${h.name}: already in today · best ${h.arenaBest ?? 0} waves`),
+    ].filter((t) => t);
+    const ah = 30 + aLines.length * lh + 58;
+    if (y + ah < GH - 70) {
+      panel(this, x, y, w, ah, L('생존 아레나', 'Survival Arena'));
+      aLines.forEach((t, i) => fit(text(this, x + 14, y + 20 + i * lh, t, 12, i === 0 ? INK.gate : INK.text), w - 28));
+      const ok = !!h && unlocked(state.agent, 'arena') && canEnterArena(state, h);
+      this.featureButton('arena', x + 14, y + ah - 50, w - 28, 40, L('아레나 안내 · 입장 ▸', 'Arena rules · Enter ▸'), () =>
+        this.scene.restart({ messages: this.messages, arena: true }), { primary: ok, size: 14 });
+    }
     this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
+  }
+
+  /** The monster codex and the achievements, on two tabs. */
+  private drawCodex(view: NonNullable<HQData['codex']>) {
+    const w = Math.min(GW - 28, 900);
+    const x = (GW - w) / 2;
+    const done = ACHIEVEMENTS.filter((a) => isDone(state, a.id)).length;
+    title(this, GW / 2, 14, view.view === 'monsters' ? L('몬스터 도감', 'Monster Codex') : L('업적', 'Achievements'), 23, INK.text).setOrigin(0.5, 0);
+    const tw = (w - 8) / 2;
+    const open = (v: NonNullable<HQData['codex']>) => () => this.scene.restart({ codex: v, messages: this.messages });
+    button(this, x, 46, tw, 32, L(`도감 ${codexCount(state)}/${CODEX_IDS.length}`, `Codex ${codexCount(state)}/${CODEX_IDS.length}`), open({ view: 'monsters' }), { primary: view.view === 'monsters', size: 13 });
+    button(this, x + tw + 8, 46, tw, 32, L(`업적 ${done}/${ACHIEVEMENTS.length}`, `Achievements ${done}/${ACHIEVEMENTS.length}`), open({ view: 'achievements' }), { primary: view.view === 'achievements', size: 13 });
+    if (view.view === 'monsters') this.drawMonsterCodex(x, 92, w, view.pick);
+    else this.drawAchievements(x, 92, w, view.page ?? 0);
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
+  }
+
+  private drawMonsterCodex(x: number, top: number, w: number, pick?: string) {
+    const cols = PORTRAIT ? 2 : 4;
+    const gap = 8;
+    const cw = (w - gap * (cols - 1)) / cols;
+    const ch = PORTRAIT ? 70 : 74;
+    const codex = state.codex ?? {};
+    CODEX_IDS.forEach((id, i) => {
+      const cx = x + (i % cols) * (cw + gap);
+      const cy = top + Math.floor(i / cols) * (ch + 6);
+      const e = codex[id];
+      const k = MONSTERS[id];
+      const g = this.add.graphics();
+      const on = pick === id;
+      g.fillStyle(on ? 0x3a2a1c : PALETTE.panelDark, 1).fillRect(cx, cy, cw, ch);
+      g.lineStyle(on ? 2 : 1, on ? PALETTE.rustLight : PALETTE.line, 1).strokeRect(cx + 0.5, cy + 0.5, cw - 1, ch - 1);
+      const img = this.add.image(cx + 28, cy + ch / 2, monsterTexture(this, id));
+      img.setScale(Math.min(44 / img.width, 44 / img.height));
+      if (!e) img.setTint(0x000000).setAlpha(0.7);
+      const tx = cx + 56;
+      const tw = cw - 62;
+      if (!e) {
+        title(this, tx, cy + 10, '???', 14, INK.faint);
+        fit(text(this, tx, cy + 34, L(`미발견 · ${codexWhere(id)}`, `Not found · ${codexWhere(id)}`), 12, INK.faint), tw);
+      } else {
+        fit(title(this, tx, cy + 8, k.name, 13, k.boss ? INK.gold : INK.text), tw);
+        fit(text(this, tx, cy + 28, elementNote(k) || L('약점 없음', 'No weakness'), 12, INK.gate), tw);
+        fit(text(this, tx, cy + 47, `${k.trait ? `${TRAITS[k.trait].name} · ` : ''}${L(`처치 ${e.kills}`, `${e.kills} defeated`)}`, 12, INK.quiet), tw);
+      }
+      this.add.zone(cx, cy, cw, ch).setOrigin(0).setInteractive({ useHandCursor: true })
+        .on('pointerup', () => this.scene.restart({ codex: { view: 'monsters', pick: on ? undefined : id }, messages: this.messages }));
+    });
+    const rows = Math.ceil(CODEX_IDS.length / cols);
+    const dy = top + rows * (ch + 6) + 8;
+    const room = GH - 70 - dy;
+    if (room < 60) return;
+    const k = pick ? MONSTERS[pick] : undefined;
+    const e = pick ? codex[pick] : undefined;
+    const lines: Array<[string, string]> = [];
+    if (!k) {
+      lines.push([L('카드를 누르면 자세히 볼 수 있다.', 'Tap a card for details.'), INK.quiet]);
+      lines.push([L('처음 쓰러뜨린 몬스터가 도감에 등록된다. 중간보스는 그 몬스터로 친다.', 'A monster is entered the first time one falls. Mid-bosses count as their kind.'), INK.quiet]);
+      lines.push([L(`도감을 채우면 업적 보상을 받는다 (6종 · ${CODEX_IDS.length}종).`, `Filling the codex earns achievements (6 and ${CODEX_IDS.length}).`), INK.quiet]);
+    } else if (!e) {
+      lines.push([L(`아직 쓰러뜨린 적이 없는 몬스터. 나오는 곳: ${codexWhere(pick!)}`, `Not defeated yet. Found at: ${codexWhere(pick!)}`), INK.quiet]);
+    } else {
+      lines.push([`${k.name} · ${codexWhere(pick!)}`, k.boss ? INK.gold : INK.text]);
+      lines.push([L(`기본 체력 ${k.hp} · 공격 ${k.atk} · 방어 ${k.def}${k.range ? ` · 사거리 ${k.range}` : ''} (층이 오를수록 강해진다)`, `Base HP ${k.hp} · ATK ${k.atk} · DEF ${k.def}${k.range ? ` · Range ${k.range}` : ''} (stronger on higher floors)`), INK.text]);
+      lines.push([elementNote(k) || L('약점·저항 없음', 'No weakness or resistance'), INK.gate]);
+      if (k.trait) lines.push([`[${TRAITS[k.trait].name}] ${TRAITS[k.trait].text}`, INK.quiet]);
+      lines.push([L(`처치 ${e.kills}마리 · ${e.day + 1}일째에 처음 쓰러뜨림`, `${e.kills} defeated · first on day ${e.day + 1}`), INK.gold]);
+    }
+    const ph = Math.min(room, 24 + lines.length * 20);
+    panel(this, x, dy, w, ph, L('자세히', 'Details'));
+    lines.slice(0, Math.floor((ph - 20) / 20)).forEach(([t, c], i) => fit(text(this, x + 14, dy + 16 + i * 20, t, 12, c), w - 28));
+  }
+
+  private drawAchievements(x: number, top: number, w: number, page: number) {
+    const worn = wornTitle(state);
+    text(this, x + 4, top + 4, worn ? L(`지금 칭호: 「${worn}」`, `Title: "${worn}"`) : L('칭호 없음 · 달성한 업적의 칭호를 달 수 있다', 'No title · wear one from an achievement you reached'), 12, worn ? INK.gold : INK.quiet);
+    if (worn) button(this, x + w - 90, top, 90, 24, L('칭호 떼기', 'Remove'), () => {
+      wearTitle(state, undefined);
+      persist();
+      this.scene.restart({ codex: { view: 'achievements', page }, messages: this.messages });
+    }, { size: 12 });
+    const y0 = top + 32;
+    const rowH = 66;
+    const per = Math.max(1, Math.floor((GH - 110 - y0) / rowH));
+    const pages = Math.ceil(ACHIEVEMENTS.length / per);
+    const p = Math.min(page, pages - 1);
+    ACHIEVEMENTS.slice(p * per, p * per + per).forEach((a, i) => {
+      const y = y0 + i * rowH;
+      const ok = isDone(state, a.id);
+      const [have, need] = a.progress(state);
+      const g = this.add.graphics();
+      g.fillStyle(ok ? 0x3a2a1c : PALETTE.panelDark, 1).fillRect(x, y, w, rowH - 6);
+      if (ok) g.fillStyle(PALETTE.rustLight, 1).fillRect(x, y, 4, rowH - 6);
+      const bw = 84;
+      fit(title(this, x + 12, y + 5, `${ok ? '★ ' : ''}${a.name}`, 13, ok ? INK.gold : INK.text), w - bw - 90);
+      fit(text(this, x + 12, y + 24, `${a.text} · ${rewardText(a)}`, 12, ok ? INK.text : INK.quiet), w - bw - 28);
+      fit(text(this, x + 12, y + 42, `${L('칭호', 'Title')} 「${a.title}」`, 12, ok ? INK.gold : INK.faint), w - bw - 28);
+      if (ok) {
+        const on = state.achievements?.title === a.id;
+        button(this, x + w - bw - 8, y + 14, bw, 32, on ? L('착용 중', 'Worn') : L('칭호 달기', 'Wear'), () => {
+          wearTitle(state, a.id);
+          persist();
+          this.scene.restart({ codex: { view: 'achievements', page: p }, messages: [L(`칭호 「${a.title}」을(를) 달았다.`, `Now wearing "${a.title}".`), ...this.messages] });
+        }, { enabled: !on, primary: false, size: 12 });
+      } else {
+        text(this, x + w - 12, y + 14, `${Math.min(have, need)}/${need}`, 12, INK.quiet).setOrigin(1, 0);
+        const bwid = 70;
+        const gg = this.add.graphics();
+        gg.fillStyle(0x2a221c, 1).fillRect(x + w - 12 - bwid, y + 36, bwid, 5);
+        gg.fillStyle(0xd9a441, 1).fillRect(x + w - 12 - bwid, y + 36, Math.round((bwid * Math.min(have, need)) / need), 5);
+      }
+    });
+    if (pages > 1) {
+      const py = y0 + per * rowH + 2;
+      button(this, x, py, 70, 30, '◀', () => this.scene.restart({ codex: { view: 'achievements', page: p - 1 }, messages: this.messages }), { enabled: p > 0, size: 13 });
+      text(this, GW / 2, py + 7, `${p + 1} / ${pages}`, 13, INK.quiet).setOrigin(0.5, 0);
+      button(this, x + w - 70, py, 70, 30, '▶', () => this.scene.restart({ codex: { view: 'achievements', page: p + 1 }, messages: this.messages }), { enabled: p < pages - 1, size: 13 });
+    }
   }
 
   /** Legacy: perks bought with points from retired hunters, the legends, the abyss record. */
@@ -803,6 +1012,8 @@ export class HQScene extends Phaser.Scene {
     if (this.showingGates) return void tip('gates', TIPS.gates());
     if (this.gacha) return void tip('gacha', TIPS.gacha());
     if (this.showingQuests) return void tip('quests', TIPS.quests());
+    if (this.codex) return void tip('codex', TIPS.codex());
+    if (this.showingChallenges) return;
     const h = activeHunter(state);
     const day = state.day ?? 0;
     if (PORTRAIT && tab !== 'hunter') return;

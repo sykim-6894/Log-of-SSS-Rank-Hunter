@@ -1,5 +1,7 @@
 import * as Phaser from 'phaser';
-import { activeHunter, AfterRunNews, agencyOf, enterGate, gradeIn, PREPS, rivalAgencyNames, rivalHunters, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
+import { activeHunter, AfterRunNews, agencyOf, enterGate, gradeIn, PREPS, rivalAgencyNames, rivalHunters, settleDaily, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
+import { DAILY_RULES, DailyRun, dateLabel } from '../core/daily';
+import { CODEX_IDS, recordKills } from '../core/codex';
 import { questReward, questText } from '../core/quests';
 import { gateClearGold, gateName } from '../core/gates';
 import { MAP_H, mapHeight, mapWidth, TALL_MAP_H, TALL_MAP_W, Tile } from '../core/dungeon';
@@ -11,7 +13,7 @@ import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
 import { sfx, toggleSound } from '../game/sfx';
-import { abyssDepth, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
+import { abyssDepth, MONSTERS, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { levelUpMessage, unlocked } from '../core/agencyLevel';
 import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
@@ -89,12 +91,15 @@ export class TowerScene extends Phaser.Scene {
   private duel?: Duel;
   /** Survival arena set up at the agency, if this trip is one. */
   private survival?: Survival;
+  /** Today's rift set up at the agency, if this trip is one. */
+  private daily?: DailyRun;
 
-  init(data: { startFloor?: number; gateId?: number; duel?: Duel; survival?: Survival }) {
+  init(data: { startFloor?: number; gateId?: number; duel?: Duel; survival?: Survival; daily?: DailyRun }) {
     this.startFloor = data?.startFloor ?? 1;
     this.gateId = data?.gateId;
     this.duel = data?.duel;
     this.survival = data?.survival;
+    this.daily = data?.daily;
   }
 
   create() {
@@ -104,8 +109,9 @@ export class TowerScene extends Phaser.Scene {
     this.notices = [];
     this.noticeUp = undefined;
     this.clearPending = false;
+    this.codexDone = false;
     this.guiding = false;
-    this.tutorial = (state.day ?? 0) === 0 && !this.gateId && !this.duel && !this.survival && !state.run?.data.gate && !state.run?.data.survival;
+    this.tutorial = (state.day ?? 0) === 0 && !this.gateId && !this.duel && !this.survival && !this.daily && !state.run?.data.gate && !state.run?.data.survival && !state.run?.data.daily;
     this.run = this.resumeOrStart();
     this.killsAtStart = this.run.hunter.kills;
     this.overlay = [];
@@ -183,6 +189,7 @@ export class TowerScene extends Phaser.Scene {
     };
     if (run.duel) return tip('duel', TIPS.duel());
     if (run.survival) return tip('arena', TIPS.arena());
+    if (run.daily && tip('daily', TIPS.daily())) return true;
     if (this.tutorial) {
       const touch = this.sys.game.device.input.touch;
       const dpad = moveControl() === 'dpad';
@@ -447,9 +454,9 @@ export class TowerScene extends Phaser.Scene {
     const hunter = activeHunter(state)!;
     // The very first climb of a new agency starts on an easy floor.
     const easyFirst = this.tutorial && hunter.bestFloor === 0 && this.startFloor === 1;
-    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, survival: this.survival, easyFirst, prep: hunter.prep });
+    const run = new TowerRun(hunter, rng, { ...options, startFloor: this.startFloor, gate, duel: this.duel, survival: this.survival, daily: this.daily, easyFirst, prep: hunter.prep });
     if (hunter.prep) run.log.push(L(`출정 준비: ${PREPS[hunter.prep].name} (${PREPS[hunter.prep].describe})`, `Prep: ${PREPS[hunter.prep].name} (${PREPS[hunter.prep].describe})`));
-    if (this.startFloor > 1 && !this.duel && !this.survival) {
+    if (this.startFloor > 1 && !this.duel && !this.survival && !this.daily) {
       run.log.push(this.startFloor > TOP_FLOOR ? L(`이미 돌파한 심연 ${this.startFloor - TOP_FLOOR - 1}층까지 건너뛰었다.`, `Skipped ahead past Abyss ${this.startFloor - TOP_FLOOR - 1}F, already cleared.`) : L(`이미 돌파한 ${this.startFloor - 1}층까지 건너뛰었다.`, `Skipped ahead past ${this.startFloor - 1}F, already cleared.`));
     }
     return run;
@@ -558,6 +565,7 @@ export class TowerScene extends Phaser.Scene {
     if (run.status === 'returned' && !this.overlay.length) {
       if (run.duel) this.showDuelEnd();
       else if (run.survival?.fell) this.showArenaFall();
+      else if (run.daily?.fell) this.showDailyFall();
       else this.finishReturn();
     }
   }
@@ -1079,6 +1087,7 @@ export class TowerScene extends Phaser.Scene {
   private drawStalkerClock() {
     if (this.run.survival) return this.drawWaveCount();
     if (this.run.duel) return;
+    if (this.run.daily) this.drawDailyScore();
     const run = this.run;
     const r = this.minimapRect();
     const x = r ? r.x + r.w : GW - 10;
@@ -1105,6 +1114,30 @@ export class TowerScene extends Phaser.Scene {
     const t = this.ui(text(this, x, y, label, 13, left <= 2 ? INK.gold : INK.text, true).setOrigin(1, 0).setDepth(30));
     t.setBackgroundColor('#000000aa').setPadding(5, 3, 5, 3);
     this.dynamic.push(t);
+  }
+
+  /** Today's rift: the score so far, under the collapse clock. */
+  private drawDailyScore() {
+    const run = this.run;
+    const r = this.minimapRect();
+    const x = r ? r.x + r.w : GW - 10;
+    const y = (r ? r.y + r.h + 4 : 8) + 24;
+    const label = L(`균열 점수 ${run.dailyScore} · 처치 ${run.daily!.kills}`, `Rift score ${run.dailyScore} · ${run.daily!.kills} kills`);
+    const t = this.ui(text(this, x, y, label, 12, INK.gold).setOrigin(1, 0).setDepth(30));
+    t.setBackgroundColor('#000000aa').setPadding(4, 2, 4, 2);
+    this.dynamic.push(t);
+  }
+
+  /** Cast out of today's rift: alive, score kept, income lost. */
+  private showDailyFall() {
+    const run = this.run;
+    const d = run.daily!;
+    this.joyClear();
+    this.dialog(L('균열에서 쓰러졌다', 'Fell in the rift'), [
+      L(`${run.placeName}에서 쓰러져 균열 밖으로 밀려났다. 목숨은 건졌다.`, `Fell on ${run.placeName} and was cast out of the rift. You survived.`),
+      L(`점수 ${run.dailyScore}점 (처치 ${d.kills} · 돌파 ${d.cleared}층)은 기록된다.`, `Score ${run.dailyScore} (${d.kills} kills · ${d.cleared} floors) still counts.`),
+      L('이번 탐험의 수입과 마력석은 잃었다.', "This run's income and mana stones are lost."),
+    ], [[L('본부로 돌아가기', 'Back to HQ'), () => { this.closeOverlay(); this.finishReturn(); }, true]], INK.red);
   }
 
   /** Health / mana / guard potion counts. */
@@ -1270,13 +1303,18 @@ export class TowerScene extends Phaser.Scene {
     }
     const buttons: Array<[string, () => void, boolean?]> = [];
     if (run.gate) lines.push(L('지금 나가면 이 게이트는 닫힙니다.', 'Leaving now closes this gate.'));
+    if (run.daily) {
+      lines.splice(2, 1, L(`균열 점수 ${run.dailyScore} · 이 층을 넘기면 +100 · ${run.turn}턴`, `Rift score ${run.dailyScore} · +100 for leaving this floor · ${run.turn} turns`));
+      lines.push(L(`오늘의 규칙: ${run.daily.rules.map((r) => DAILY_RULES[r].name).join(' · ')} · 쓰러져도 점수는 남는다.`, `Rules: ${run.daily.rules.map((r) => DAILY_RULES[r].name).join(' · ')} · Falling keeps the score.`));
+      if (run.isTopFloor) lines.push(L(`마지막 층! 지금 나가면 ${run.turn}턴 만에 5층 돌파: 빠를수록 보너스 점수.`, `Last floor! Leave now to clear all 5 in ${run.turn} turns: faster means more bonus.`));
+    }
     if (!run.isTopFloor) {
       const next = run.floor + 1;
       const label = run.gate ? L(`더 들어가기 (${next}층)`, `Go deeper (${next}F)`)
         : next > TOP_FLOOR ? L(`${next === TOP_FLOOR + 1 ? '심연으로' : '더 올라가기'} (심연 ${next - TOP_FLOOR}층)`, `${next === TOP_FLOOR + 1 ? 'Into the abyss' : 'Climb on'} (Abyss ${next - TOP_FLOOR}F)`)
         : L(`더 올라가기 (${next}층)`, `Climb on (${next}F)`);
       buttons.push([label, () => { this.closeOverlay(); run.climb(); this.redraw(); }, true]);
-    } else {
+    } else if (!run.daily) {
       lines.push(L('지금 갈 수 있는 탑의 꼭대기입니다.', 'This is the top of the tower for now.'));
     }
     buttons.push([L('귀환하기', 'Return'), () => { this.closeOverlay(); run.retreat(); this.finishReturn(); }]);
@@ -1315,16 +1353,30 @@ export class TowerScene extends Phaser.Scene {
     return msgs;
   }
 
+  /** Writes this run's kills into the monster codex, once. Returns kinds seen for the first time. */
+  private recordCodex(): string[] {
+    if (this.codexDone) return [];
+    this.codexDone = true;
+    return recordKills(state, this.run.tally).filter((id) => CODEX_IDS.includes(id));
+  }
+
+  private codexDone = false;
+
   private finishReturn(cleared = false) {
     const run = this.run;
     const duelWon = run.duel ? settleDuel(state, run.duel) : false;
     const waves = run.survival ? (run.survival.fell ? run.survival.wave - 1 : run.survival.wave) : 0;
-    const inTower = !run.gate && !run.duel && !run.survival;
+    const inTower = !run.gate && !run.duel && !run.survival && !run.daily;
+    const fresh = this.recordCodex();
+    // Today's rift: the score first, since a better one pays stones on top of the run's.
+    const daily = run.daily ? settleDaily(state, run.daily, run.turn, run.hunter.name) : undefined;
     const r = settleReturn(state, rng, run.runGold, run.encounters, cleared, run.stones, {
       kills: run.tally, floor: inTower ? run.floor : 0, gate: cleared && !!run.gate, waves, gold: run.runGold,
     });
     const stolen = cleared && run.gate?.rival ? L(` ${run.gate.rival.agency}보다 먼저 해냈다!`, ` Beat ${run.gate.rival.agency} to it!`) : '';
-    const where = run.survival
+    const where = daily && run.daily
+      ? L(`오늘의 균열(${dateLabel(run.daily.date)}) ${daily.score}점 · 처치 ${run.daily.kills} · 돌파 ${run.daily.cleared}층.`, `Today's Rift (${dateLabel(run.daily.date)}): ${daily.score} points · ${run.daily.kills} kills · ${run.daily.cleared} floors.`)
+      : run.survival
       ? L(`생존 아레나 ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave}웨이브 돌파 (최고 ${run.hunter.arenaBest ?? 0}).`, `Survival Arena: ${run.survival.fell ? run.survival.wave - 1 : run.survival.wave} waves (best ${run.hunter.arenaBest ?? 0}).`)
       : run.duel
       ? (duelWon ? L(`${run.duel.rank}위 ${run.duel.name}에게 도전해 이겼다! 지금 ${gradeIn(state, run.hunter)}급.`, `Challenged #${run.duel.rank} ${run.duel.name} and won! Now ${gradeIn(state, run.hunter)}-Rank.`) : L(`${run.duel.rank}위 ${run.duel.name}에게 도전했지만 졌다.`, `Challenged #${run.duel.rank} ${run.duel.name} and lost.`))
@@ -1332,6 +1384,14 @@ export class TowerScene extends Phaser.Scene {
     const msgs = [
       L(`${where} 수입 ${r.earned}G 중 ${r.tribute}G(${Math.round(r.rate * 100)}%) 상납.`, `${where} Paid ${r.tribute}G (${Math.round(r.rate * 100)}%) of ${r.earned}G to the agency.`),
     ];
+    if (daily) {
+      msgs.unshift(daily.dayBest && daily.previousBest === 0
+        ? L(`오늘의 균열 첫 기록 ${daily.score}점${daily.record ? ' (에이전시 신기록!)' : ''}. 마력석 +${daily.stones}`, `First score in today's rift: ${daily.score}${daily.record ? ' (agency record!)' : ''}. Mana stones +${daily.stones}`)
+        : daily.dayBest
+        ? L(`오늘의 균열 최고 점수 갱신! ${daily.previousBest} → ${daily.score}점${daily.record ? ' (에이전시 신기록!)' : ''}. 마력석 +${daily.stones}`, `New best for today's rift! ${daily.previousBest} → ${daily.score}${daily.record ? ' (agency record!)' : ''}. Mana stones +${daily.stones}`)
+        : L(`오늘의 균열 ${daily.score}점. 오늘 최고 ${daily.previousBest}점은 못 넘었다.`, `Today's rift: ${daily.score}. Did not beat today's best of ${daily.previousBest}.`));
+    }
+    for (const id of fresh) msgs.push(L(`도감 등록: ${MONSTERS[id].name}`, `New in the codex: ${MONSTERS[id].name}`));
     for (const q of r.quests ?? []) msgs.unshift(L(`의뢰 완료: ${questText(q)}! 보상 ${questReward(q)}.`, `Quest done: ${questText(q)}! Reward ${questReward(q)}.`));
     if (r.agencyUp) msgs.unshift(levelUpMessage(r.agencyUp));
     if (run.spare.length) {
@@ -1359,6 +1419,7 @@ export class TowerScene extends Phaser.Scene {
     const score = hallOfFameScore(h);
     const grade = gradeIn(state, h);
     const killer = run.killer ?? L('알 수 없는 적', 'an unknown enemy');
+    const fresh = this.recordCodex();
     const d = settleDeath(state, rng, killer, run.encounters);
     state.run = undefined;
     persist();
@@ -1370,6 +1431,7 @@ export class TowerScene extends Phaser.Scene {
       d.scouted ? L(`${h.name}은(는) ${d.agency}에 스카웃됐다. 언젠가 적으로 만날지도.`, `${h.name} was scouted by ${d.agency}. You may meet as enemies one day.`) : L(`${h.name}의 기록이 남았다.`, `${h.name}'s record remains.`),
       ...(d.newGear?.length ? [L(`${d.agency}이(가) ${h.name}에게 새 장비를 맞춰 줬다: ${d.newGear.map((g) => g.name).join(', ')}.`, `${d.agency} geared up ${h.name}: ${d.newGear.map((g) => g.name).join(', ')}.`)] : []),
       ...this.newsLines(d),
+      ...fresh.map((id) => L(`도감 등록: ${MONSTERS[id].name}`, `New in the codex: ${MONSTERS[id].name}`)),
     ];
     this.dialog(
       legend ? L('그래, 너였구나.', 'So it was you.') : L('넌 주인공이 아니었네...', "You weren't the protagonist..."),
