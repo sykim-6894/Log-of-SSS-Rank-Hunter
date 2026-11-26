@@ -741,10 +741,10 @@ export class HQScene extends Phaser.Scene {
       .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
     const rules = [
       L('· 하루에 한 번, 헌터마다 도전할 수 있다.', '· Once a day per hunter.'),
-      L('· 웨이브를 넘기면 골드를 받고 체력·마나가 20% 회복된다.', '· Each wave cleared pays gold and restores 20% HP and MP.'),
+      L('· 웨이브를 넘기면 골드를 받는다. 체력·마나는 회복되지 않는다.', '· Each wave cleared pays gold. HP and MP do not recover.'),
       L('· 웨이브 사이에 귀환하면 번 것을 모두 가져간다.', '· Go home between waves and keep everything.'),
       L('· 쓰러져도 죽지 않는다. 진행 중인 웨이브 수입만 잃는다.', '· Falling will not kill you; you lose only the current wave’s income.'),
-      L('· 5웨이브마다 챔피언이 나오고 마력석을 준다.', '· Every 5th wave brings a champion and mana stones.'),
+      L('· 5웨이브마다 챔피언이 나온다. 쓰러뜨리면 마력석과 체력·마나 30% 회복.', '· Every 5th wave brings a champion: beat it for mana stones and 30% HP and MP.'),
       L('· 10웨이브마다 기념 장비를 준다 (6단계부터).', '· Every 10th wave gives prize gear (tier 6 and up).'),
     ];
     const top = PORTRAIT ? 96 : 84;
