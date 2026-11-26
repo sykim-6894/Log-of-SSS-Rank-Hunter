@@ -146,6 +146,8 @@ export interface Survival {
   bankedStones: number;
   /** Set when the hunter fell and was pulled out. */
   fell?: boolean;
+  /** How many foes the current wave brought in, to show what is left. */
+  foes?: number;
 }
 
 /** Waves are as dangerous as the tower floor of the same number. */
@@ -685,6 +687,7 @@ export class TowerRun {
     const bp = boss && spot();
     if (boss && bp) this.spawn({ ...boss, name: L(`아레나 챔피언 ${boss.name}`, `Arena Champion ${boss.name}`) }, bp.x, bp.y, wave);
     for (const m of this.monsters) m.awake = true;
+    sv.foes = this.monsters.length;
     this.say(boss ? L(`${wave}웨이브! ${boss.name}이(가) 이끄는 무리가 들어온다.`, `Wave ${wave}! A horde led by ${boss.name} comes in.`) : L(`${wave}웨이브! 적 ${this.monsters.length}마리가 들어온다.`, `Wave ${wave}! ${this.monsters.length} foes come in.`));
     this.events.push({ type: 'wave', wave, cleared: false });
   }
