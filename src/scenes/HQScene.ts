@@ -56,13 +56,12 @@ export interface HQData {
 
 
 /** Portrait only: the office is split into tabs along the bottom. */
-type Tab = 'hunter' | 'shop' | 'ranking' | 'rival' | 'log';
+type Tab = 'hunter' | 'shop' | 'ranking' | 'news';
 const TABS: Array<[Tab, string]> = [
   ['hunter', L('헌터', 'Hunter')],
   ['shop', L('가방', 'Bag')],
   ['ranking', L('순위', 'Ranks')],
-  ['rival', L('라이벌', 'Rival')],
-  ['log', L('일지', 'Log')],
+  ['news', L('소식', 'News')],
 ];
 let tab: Tab = 'hunter';
 /** Landscape only: show the gear doll where the ranking usually is. */
@@ -385,7 +384,7 @@ export class HQScene extends Phaser.Scene {
       }, { primary: true, size: 12, enabled: !!h });
     });
     if (h) text(this, GW / 2, GH - 96, L(`보낼 헌터: ${h.name} · Lv.${h.level}`, `Sending: ${h.name} · Lv.${h.level}`), 12, INK.text).setOrigin(0.5, 0);
-    button(this, x, GH - 70, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   /**
@@ -433,13 +432,13 @@ export class HQScene extends Phaser.Scene {
     const { agent } = state;
     const x = 14;
     const w = GW - 28;
-    title(this, x, 12, L('주인공을 찾습니다', 'Wanted: The Protagonist'), lang() === 'en' ? 15 : 20, INK.text);
-    text(this, x + 2, 38, L('— SSS급 헌터 에이전시', '— SSS-Rank Hunter Agency'), 12, INK.rust);
-    fit(text(this, GW - x, 12, `${agent.name} Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0), 120);
+    title(this, x, 10, L('주인공을 찾습니다', 'Wanted: The Protagonist'), lang() === 'en' ? 15 : 20, INK.text);
+    // Settings and legacy share one row under the title.
+    this.soundButton(x, 38, 76, 22);
+    this.legacyButton(x + 84, 38, 76, 22);
+    fit(text(this, GW - x, 12, `${agent.name} Lv.${agencyLevel(agent)}`, 12, INK.quiet).setOrigin(1, 0), 180);
     title(this, GW - x, 32, `${agent.gold}G`, 15, INK.gold).setOrigin(1, 0);
-    dots(this, x, 60, w);
-    this.soundButton(236, 4, 70, 26);
-    this.legacyButton(236, 33, 70, 24);
+    dots(this, x, 64, w);
     this.drawSlots(x, 70, w);
 
     const top = 132;
@@ -453,14 +452,15 @@ export class HQScene extends Phaser.Scene {
       this.drawBag(x, top + 8, w);
     } else if (tab === 'ranking') {
       this.drawRanking(x, top + 8, w);
-    } else if (tab === 'rival') {
-      this.drawRival(x, top + 8, w);
     } else {
-      this.drawLog(x, top + 8, w, Math.min(12, Math.floor((departY - top - 70) / 40)), true);
+      // News: the rival agencies on top, the office log below.
+      this.drawRival(x, top + 8, w);
+      const logY = top + 100;
+      this.drawLog(x, logY, w, Math.min(12, Math.floor((departY - logY - 70) / 40)), true);
     }
 
     // Latest news above the depart button, unless the log tab already shows it.
-    if (this.messages.length && tab !== 'log') {
+    if (this.messages.length && tab !== 'news') {
       fit(text(this, x, departY - 26, `· ${this.messages[0]}`, 12, INK.text), w);
     }
     this.departButton(x, departY, w, 56, 20);
@@ -494,8 +494,13 @@ export class HQScene extends Phaser.Scene {
     this.soundButton(676, 20, 96);
   }
 
+  /** The same back button at the bottom of every sub-screen (lower if the content needs it). */
+  private backButton(x: number, w: number, onClick: () => void, minY = 0) {
+    return button(this, x, Math.max(minY, GH - 62), w, 48, L('돌아가기', 'Back'), onClick, { size: 14 });
+  }
+
   private soundButton(x: number, y: number, w: number, h = 28) {
-    button(this, x, y, w, h, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }));
+    button(this, x, y, w, h, L('설정', 'Settings'), () => this.scene.restart({ settings: true, messages: this.messages }), { size: 12 });
   }
 
   private legacyButton(x: number, y: number, w: number, h: number) {
@@ -553,7 +558,7 @@ export class HQScene extends Phaser.Scene {
       }, { size: 12 });
     });
     if (this.messages[0]) fit(text(this, GW / 2, GH - 84, this.messages[0], 12, INK.gold).setOrigin(0.5, 0), w);
-    button(this, x, GH - 60, w, 46, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   /** The survival arena's entrance: the rules, the prizes, the records, and the way in. */
@@ -592,11 +597,20 @@ export class HQScene extends Phaser.Scene {
     this.prepButton(x + w - 140, y + 6, 126, 24);
     if (!unlocked(state.agent, 'quests')) {
       text(this, x + 16, y + 40, L(`에이전시 Lv.${FEATURE_LEVEL.quests}이 되면 협회 의뢰를 받을 수 있다.`, `Quests open at agency Lv.${FEATURE_LEVEL.quests}.`), 12, INK.faint);
+      // Until then the space shows the latest office news.
+      dots(this, x + 16, y + 66, w - 32);
+      text(this, x + 16, y + 76, L('최근 소식', 'Latest news'), 12, INK.gold, true);
+      const lines = this.messages.slice(0, Math.max(0, Math.floor((hgt - 104) / 20)));
+      if (!lines.length) text(this, x + 16, y + 98, L('특이사항 없음.', 'Nothing to report.'), 12, INK.faint);
+      lines.forEach((m, i) => fit(text(this, x + 16, y + 98 + i * 20, `· ${m}`, 12, i === 0 ? INK.text : INK.quiet), w - 32));
       return;
     }
     const list = state.quests?.list ?? [];
-    const rows = Math.min(list.length, Math.floor((hgt - 40) / 34));
-    list.slice(0, rows).forEach((q, i) => this.questLine(q, x + 16, y + 36 + i * 34, w - 32));
+    // Rewards fit under each quest when the panel is tall enough.
+    const big = list.length > 0 && hgt - 40 >= list.length * 58;
+    const rowH = big ? 58 : 34;
+    const rows = Math.min(list.length, Math.floor((hgt - 40) / rowH));
+    list.slice(0, rows).forEach((q, i) => this.questLine(q, x + 16, y + 36 + i * rowH, w - 32, big));
     const zone = this.add.zone(x, y + 30, w, hgt - 30).setOrigin(0).setInteractive({ useHandCursor: true });
     zone.on('pointerup', () => this.scene.restart({ messages: this.messages, quests: true }));
   }
@@ -624,7 +638,7 @@ export class HQScene extends Phaser.Scene {
       const opens = l === 1 ? first : opensAt(l);
       text(this, x + 86, y + 8, opens.join(' · '), 12, reached ? INK.text : INK.quiet).setWordWrapWidth(w - 100, true);
     }
-    button(this, x, GH - 52, w, 40, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   /** The Hunter Association's quest board: three quests, each open a few days. */
@@ -653,7 +667,7 @@ export class HQScene extends Phaser.Scene {
       y += 20;
     });
     text(this, x + 6, y + 6, L(`지금까지 완료한 의뢰 ${state.quests?.done ?? 0}건`, `Quests done so far: ${state.quests?.done ?? 0}`), 13, INK.gold);
-    button(this, x, GH - 52, w, 40, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   /** Departure prep: one paid boost for the next run, bought with agency funds. */
@@ -686,7 +700,7 @@ export class HQScene extends Phaser.Scene {
     text(this, x + 6, y, L(`보낼 헌터: ${h.name} · Lv.${h.level} · 운영 자금 ${state.agent.gold}G`, `Hunter: ${h.name} · Lv.${h.level} · Funds ${state.agent.gold}G`), 12, INK.text);
     y += 22;
     if (h.prep) text(this, x + 6, y, L('다른 준비로 바꾸면 이미 낸 돈은 돌려받지 못한다.', 'Switching to another prep does not refund the first.'), 12, INK.faint);
-    button(this, x, GH - 52, w, 40, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   private drawArena() {
@@ -724,7 +738,7 @@ export class HQScene extends Phaser.Scene {
       persist();
       this.scene.start('Tower', { survival });
     }, { primary: ok, enabled: ok });
-    button(this, x, GH - 52, w, 40, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   /** Legacy: perks bought with points from retired hunters, the legends, the abyss record. */
@@ -733,9 +747,10 @@ export class HQScene extends Phaser.Scene {
     const x = (GW - w) / 2;
     const legacy = (state.agent.legacy ??= { points: 0, perks: {} });
     title(this, GW / 2, 16, L('전승', 'Legacy'), 23, INK.text).setOrigin(0.5, 0);
-    text(this, GW / 2, 48, L('S급 이상 헌터가 은퇴하면 전승 포인트를 남긴다.\n(S 1 · SS 3 · SSS 10) 보너스는 영원히 남는다.', 'S-Rank or better hunters can retire for legacy points (S 1 · SS 3 · SSS 10).\nBonuses bought with them last forever, for every hunter after.'), 12, INK.quiet)
+    const intro = text(this, GW / 2, 48, L('S급 이상 헌터가 은퇴하면 전승 포인트를 남긴다.\n(S 1 · SS 3 · SSS 10) 보너스는 영원히 남는다.', 'S-Rank or better hunters can retire for legacy points (S 1 · SS 3 · SSS 10).\nBonuses bought with them last forever, for every hunter after.'), 12, INK.quiet)
       .setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w, true);
-    const py = PORTRAIT ? 100 : 92;
+    // Below the intro however many lines it wraps to (English runs longer).
+    const py = Math.max(PORTRAIT ? 100 : 92, intro.y + intro.height + 10);
     title(this, GW / 2, py, L(`전승 포인트 ${legacy.points}`, `Legacy points ${legacy.points}`), 17, INK.gold).setOrigin(0.5, 0);
     const rowH = PORTRAIT ? 62 : 54;
     const top = py + 34;
@@ -773,7 +788,7 @@ export class HQScene extends Phaser.Scene {
       y += 20;
     });
     if (this.messages[0]?.includes(L('단계!', 'level '))) text(this, GW / 2, Math.min(GH - 92, y + 4), this.messages[0], 12, INK.gold).setOrigin(0.5, 0);
-    button(this, x, GH - 64, w, 48, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages.filter((m) => !m.includes(L('단계!', 'level '))) }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages.filter((m) => !m.includes(L('단계!', 'level '))) }));
   }
 
   /** One of Officer Yoon's tips, if one fits this screen. */
@@ -1204,7 +1219,7 @@ export class HQScene extends Phaser.Scene {
     const by = y + GEAR_SLOTS.length * rowH + 6;
     text(this, GW / 2, by, L('마력석은 몬스터, 중간보스, 층 보스, 게이트 클리어에서 얻는다.', 'Mana stones come from monsters, mid-bosses, floor bosses and gate clears.'), 12, INK.faint)
       .setOrigin(0.5, 0).setWordWrapWidth(w, true).setAlign('center');
-    button(this, x, GH - 70, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }));
   }
 
   private openGacha() {
@@ -1283,7 +1298,7 @@ export class HQScene extends Phaser.Scene {
       this.messages = [msg, ...this.messages];
       this.scene.restart({ messages: this.messages, gacha: { result: r } });
     }, { primary: true, size: 18, enabled: can });
-    button(this, x, by + 92, w, 50, L('돌아가기', 'Back'), () => this.scene.restart({ messages: this.messages }));
+    this.backButton(x, w, () => this.scene.restart({ messages: this.messages }), by + 92);
   }
 
   /** The gear doll in a panel. */
