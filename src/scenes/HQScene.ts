@@ -6,11 +6,12 @@ import { elementNote, MONSTERS, TOP_FLOOR, TRAITS } from '../core/monsters';
 import { DAILY_FLOORS, DAILY_POINTS_PER_STONE, DAILY_RECORD_STONES, DAILY_RULES, DAILY_SPEED_BONUS, DAILY_TRIES, dailyBase, dailyRules, dailyToday, dateLabel, todayKey } from '../core/daily';
 import { ACHIEVEMENTS, checkAchievements, CODEX_IDS, codexCount, codexWhere, isDone, rewardText, wearTitle, wornTitle } from '../core/codex';
 import { monsterTexture } from '../game/monsterArt';
-import { combatPower, expToNext, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
+import { combatPower, expToNext, Grade, gradeRank, Hunter, GRADE_THRESHOLDS, rankGradeOf, TrainingKind } from '../core/hunter';
 import { bagMax, CONSUMABLE_KINDS, CONSUMABLES, ConsumableKind, describeGear, GACHA_ODDS, GACHA_PRICE, GACHA_REFUND, gachaLabel, gearLabel, gearLevel, GEAR_SLOT_NAMES, GEAR_SLOTS, makeGear, MAX_PLUS } from '../core/items';
 import { DOLL_H, drawGearIcon, drawPaperDoll, gearDiff, tierColor } from '../game/paperdoll';
 import { drawLook, lookOf } from '../game/looks';
-import { sfx, soundOn, toggleSound } from '../game/sfx';
+import { Level, musicVolume, playMusic, setMusicVolume, setSfxVolume, setShake, sfx, sfxVolume, shakeOn } from '../game/sfx';
+import { confetti, shake } from '../game/fx';
 import { moveControl, setMoveControl } from '../game/controls';
 import { persist, rng, saveSlot, skipTitleOnce, slotInfo, state, takeWelcome } from '../game/store';
 import { SAVE_SLOTS } from '../core/save';
@@ -158,6 +159,7 @@ export class HQScene extends Phaser.Scene {
       return;
     }
     fitCamera(this.cameras.main).setBackgroundColor(PALETTE.bg);
+    playMusic('hq');
     if (state.agent.named === false) return this.drawFounding();
     if (!state.gates) refreshGates(state, rng);
     syncPerks(state);
@@ -183,6 +185,7 @@ export class HQScene extends Phaser.Scene {
     if (this.showingLevels) return this.drawLevels();
     if (this.showingChallenges) return this.drawChallenges();
     if (this.codex) return this.drawCodex(this.codex);
+    this.time.delayedCall(60, () => this.celebrateGrades());
     if (PORTRAIT) return this.createPortrait();
     this.drawHeader();
     this.drawSlots(24, 94);
@@ -1027,6 +1030,54 @@ export class HQScene extends Phaser.Scene {
     if ((state.agent.stones ?? 0) > 0 && unlocked(state.agent, 'enhance')) tip('stones', TIPS.stones(), true);
   }
 
+  /**
+   * A hunter of ours moved up a grade since the office last looked: a fanfare and confetti.
+   * Grades last seen are kept on this device only, so nothing changes in the save.
+   */
+  private celebrateGrades() {
+    const KEY = 'sss-hunter-grades';
+    let seen: Record<string, Grade> = {};
+    try {
+      seen = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+    } catch {
+      seen = {};
+    }
+    let best: { h: Hunter; from: Grade; to: Grade } | undefined;
+    for (const h of state.slots) {
+      if (!h) continue;
+      const g = gradeIn(state, h);
+      const was = seen[`${state.agent.name}:${h.id}`];
+      if (was && gradeRank(g) > gradeRank(was) && (!best || gradeRank(g) > gradeRank(best.to))) best = { h, from: was, to: g };
+      seen[`${state.agent.name}:${h.id}`] = g;
+    }
+    try {
+      localStorage.setItem(KEY, JSON.stringify(seen));
+    } catch {
+      // Private mode: celebrations may repeat next visit.
+    }
+    if (!best) return;
+    const { h, from, to } = best;
+    sfx.gradeUp();
+    this.cameras.main.flash(300, 229, 174, 70);
+    confetti(this, GW, GH, undefined, 60);
+    const box = this.add.container(GW / 2, GH * 0.4).setDepth(90);
+    const g = this.add.graphics();
+    g.fillStyle(PALETTE.shadow, 0.92).fillRect(-170, -58, 340, 116);
+    g.lineStyle(3, PALETTE.gold, 1).strokeRect(-170, -58, 340, 116);
+    box.add(g);
+    box.add(title(this, 0, -46, L('등급 상승!', 'Rank up!'), 26, INK.gold).setOrigin(0.5, 0));
+    box.add(title(this, 0, -8, L(`${from}급  ▶  ${to}급`, `${from}  ▶  ${to}`), 22, INK.text).setOrigin(0.5, 0));
+    box.add(text(this, 0, 26, to === 'SSS' ? L(`${h.name} · 그래, 너였구나.`, `${h.name} · So it was you.`) : h.name, 13, INK.quiet, true).setOrigin(0.5, 0));
+    box.setScale(0.5);
+    this.tweens.add({ targets: box, scale: 1, duration: 220, ease: 'Back.Out' });
+    const close = () => {
+      if (!box.active) return;
+      this.tweens.add({ targets: box, alpha: 0, duration: 250, onComplete: () => box.destroy() });
+    };
+    this.time.delayedCall(2800, close);
+    this.input.once('pointerdown', close);
+  }
+
   /** Sound and how to move on a touch screen. */
   private drawSettings() {
     const w = Math.min(GW - 28, 520);
@@ -1034,15 +1085,33 @@ export class HQScene extends Phaser.Scene {
     title(this, GW / 2, 18, L('설정', 'Settings'), 23, INK.text).setOrigin(0.5, 0);
     const reopen = () => this.scene.restart({ settings: true, messages: this.messages });
     const oy = PORTRAIT ? 80 : 84;
-    panel(this, x, oy, w, 132, L('소리 · 언어 · 안내', 'Sound · Language · Tips'));
+    panel(this, x, oy, w, 204, L('소리 · 화면 · 언어 · 안내', 'Sound · Screen · Language · Tips'));
     const half = (w - 36 - 10) / 2;
     const lw = 120;
     const sw = (w - 36 - lw - 10) / 2;
-    text(this, x + 18, oy + 28, L('효과음', 'Sound'), 13, INK.text);
-    const on = soundOn();
-    button(this, x + 18 + lw, oy + 20, sw, 30, L('켬', 'On'), () => { if (!soundOn()) toggleSound(); reopen(); }, { primary: on });
-    button(this, x + 28 + lw + sw, oy + 20, sw, 30, L('끔', 'Off'), () => { if (soundOn()) toggleSound(); reopen(); }, { primary: !on });
-    text(this, x + 18, oy + 64, L('언어', 'Language'), 13, INK.text);
+    const qw = (w - 36 - lw - 18) / 4;
+    const levels: Array<[Level, string]> = [[0, L('끔', 'Off')], [1, L('작게', 'Low')], [2, L('보통', 'Mid')], [3, L('크게', 'High')]];
+    const volumeRow = (y: number, label: string, now: Level, set: (v: Level) => void, sample: () => void) => {
+      text(this, x + 18, y + 8, label, 13, INK.text);
+      levels.forEach(([v, name], i) => {
+        button(this, x + 18 + lw + i * (qw + 6), y, qw, 30, name, () => {
+          set(v);
+          sample();
+          reopen();
+        }, { primary: now === v });
+      });
+    };
+    volumeRow(oy + 20, L('효과음', 'Effects'), sfxVolume(), setSfxVolume, () => sfx.levelup());
+    volumeRow(oy + 56, L('배경음악', 'Music'), musicVolume(), setMusicVolume, () => undefined);
+    text(this, x + 18, oy + 100, L('화면 흔들림', 'Screen shake'), 13, INK.text);
+    const shaking = shakeOn();
+    button(this, x + 18 + lw, oy + 92, sw, 30, L('켬', 'On'), () => {
+      setShake(true);
+      this.cameras.main.shake(200, 0.008);
+      this.time.delayedCall(220, reopen);
+    }, { primary: shaking });
+    button(this, x + 28 + lw + sw, oy + 92, sw, 30, L('끔', 'Off'), () => { setShake(false); reopen(); }, { primary: !shaking });
+    text(this, x + 18, oy + 136, L('언어', 'Language'), 13, INK.text);
     const pickLang = (l: Lang) => {
       if (l === lang()) return;
       persist();
@@ -1050,16 +1119,16 @@ export class HQScene extends Phaser.Scene {
       skipTitleOnce();
       location.reload();
     };
-    button(this, x + 18 + lw, oy + 56, sw, 30, '한국어', () => pickLang('ko'), { primary: lang() === 'ko' });
-    button(this, x + 28 + lw + sw, oy + 56, sw, 30, 'English', () => pickLang('en'), { primary: lang() === 'en' });
-    text(this, x + 18, oy + 100, L('윤 주임 안내', 'Yoon\'s tips'), 13, INK.text);
+    button(this, x + 18 + lw, oy + 128, sw, 30, '한국어', () => pickLang('ko'), { primary: lang() === 'ko' });
+    button(this, x + 28 + lw + sw, oy + 128, sw, 30, 'English', () => pickLang('en'), { primary: lang() === 'en' });
+    text(this, x + 18, oy + 172, L('윤 주임 안내', 'Yoon\'s tips'), 13, INK.text);
     const tipNote = this.messages[0] === L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.');
-    button(this, x + 18 + lw, oy + 92, sw * 2 + 10, 30, tipNote ? L('다시 보기 설정됨 ✓', 'Tips reset ✓') : guideIsOff() ? L('꺼짐 · 다시 켜고 처음부터 보기', 'Off · turn on and replay') : L('처음부터 다시 보기', 'Replay from the start'), () => {
+    button(this, x + 18 + lw, oy + 164, sw * 2 + 10, 30, tipNote ? L('다시 보기 설정됨 ✓', 'Tips reset ✓') : guideIsOff() ? L('꺼짐 · 다시 켜고 처음부터 보기', 'Off · turn on and replay') : L('처음부터 다시 보기', 'Replay from the start'), () => {
       resetGuide();
       this.scene.restart({ settings: true, messages: [L('안내를 처음부터 다시 보여 준다.', 'Tips will show again from the start.'), ...this.messages] });
     }, { size: 12 });
 
-    const my = oy + 148;
+    const my = oy + 220;
     panel(this, x, my, w, 144, L('이동 방식 (터치 화면)', 'Movement (touch screen)'));
     const mode = moveControl();
     button(this, x + 18, my + 26, half, 34, L('조이스틱', 'Joystick'), () => { setMoveControl('joystick'); reopen(); }, { primary: mode === 'joystick' });
@@ -1347,6 +1416,11 @@ export class HQScene extends Phaser.Scene {
 
   /** Enhance worn gear with the agency's 마력석 and gold. Higher levels can drop or break. */
   private drawEnhance(result?: EnhanceResult) {
+    // Big results get a little show: confetti for +7 and up, a jolt when gear breaks.
+    if (result?.success && result.to >= 7) {
+      this.cameras.main.flash(250, 229, 174, 70);
+      confetti(this, GW, GH, undefined, 24);
+    } else if (result?.broken) shake(this.cameras.main, 260, 0.01);
     const h = activeHunter(state);
     const w = PORTRAIT ? GW - 28 : 720;
     const x = (GW - w) / 2;
@@ -1416,8 +1490,9 @@ export class HQScene extends Phaser.Scene {
         const r = enhanceGear(state, rng, slot);
         if (!r) return;
         persist();
-        if (r.success) (r.to >= 7 ? sfx.levelup : sfx.gear)();
-        else if (r.broken) sfx.death();
+        if (r.success) {
+          (r.to >= 7 ? sfx.levelup : sfx.gear)();
+        } else if (r.broken) sfx.shatter();
         else sfx.curse();
         const msg = r.success
           ? L(`강화 성공: ${r.gear.name} +${r.to}`, `Enhanced: ${r.gear.name} +${r.to}`)
@@ -1442,6 +1517,10 @@ export class HQScene extends Phaser.Scene {
    * Tiers 8 and 9 can only be found here.
    */
   private drawGacha(result?: GachaResult) {
+    if (result && result.gear.tier >= 8) {
+      this.cameras.main.flash(250, 229, 174, 70);
+      confetti(this, GW, GH);
+    }
     const h = activeHunter(state);
     const w = Math.min(GW - 28, 520);
     const x = (GW - w) / 2;
@@ -1502,7 +1581,7 @@ export class HQScene extends Phaser.Scene {
       const r = drawGear(state, rng);
       if (!r) return;
       persist();
-      if (r.gear.tier >= 8) sfx.levelup();
+      if (r.gear.tier >= 8) sfx.gradeUp();
       else if (r.equipped) sfx.gear();
       else sfx.buy();
       const msg = r.equipped ? L(`장비 뽑기: ${r.gear.name}(${r.gear.tier}단계) 착용!`, `Gear draw: equipped ${r.gear.name} (tier ${r.gear.tier})!`) : L(`장비 뽑기: ${r.gear.name}. ${r.refund}G에 되팔았다.`, `Gear draw: ${r.gear.name}. Sold for ${r.refund}G.`);

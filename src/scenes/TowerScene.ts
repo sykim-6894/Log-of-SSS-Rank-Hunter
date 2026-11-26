@@ -12,10 +12,11 @@ import { lookOf, lookTexture } from '../game/looks';
 import { moveControl } from '../game/controls';
 import { CLASSES } from '../core/classes';
 import { hasMonsterArt, monsterTexture } from '../game/monsterArt';
-import { sfx, toggleSound } from '../game/sfx';
+import { playMusic, sfx, toggleSound } from '../game/sfx';
+import { confetti, debris, shake, sparkle } from '../game/fx';
 import { abyssDepth, MONSTERS, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { levelUpMessage, unlocked } from '../core/agencyLevel';
-import { Action, Duel, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
+import { Action, Duel, Monster, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
 import { fitCamera, GH, GW, pointerAt, PORTRAIT } from '../game/layout';
@@ -67,6 +68,14 @@ export class TowerScene extends Phaser.Scene {
   } | null = null;
   /** Level when the screen was last drawn, to notice level ups. */
   private shownLevel = 0;
+  /** Tiles hit this turn: their monsters blink and flinch once drawn. */
+  private hitFx: Array<{ x: number; y: number }> = [];
+  /** Where the hunter swung this turn, for a short lunge. */
+  private lungeTo?: { x: number; y: number };
+  /** The hunter took damage this turn: they blink red. */
+  private hurtFx = false;
+  /** Bosses already announced with a banner. */
+  private bossSeen = new WeakSet<Monster>();
   /** The gate master just fell: offer to leave with the reward at the next quiet moment. */
   private clearPending = false;
   /** Center pop-ups for finds and curses, shown one after another. */
@@ -479,7 +488,10 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private clearDynamic() {
-    this.dynamic.forEach((o) => o.destroy());
+    this.dynamic.forEach((o) => {
+      this.tweens.killTweensOf(o);
+      o.destroy();
+    });
     this.dynamic = [];
   }
 
@@ -515,11 +527,13 @@ export class TowerScene extends Phaser.Scene {
       this.keep(this.glyph(mer.x, mer.y, '$', INK.gold, 16));
     }
 
+    const spriteAt = new Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Text>();
     for (const m of run.monsters) {
       if (!run.canSee(m)) continue;
       const color = m.hunter ? '#d79bff' : m.kind.boss ? INK.red : m.kind.elite ? INK.gold : m.kind.range ? (m.awake ? '#7fd6c9' : '#5f9c93') : m.awake ? INK.rust : '#c9a46a';
-      if (m.hunter) this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff));
-      else if (m.kind.ranker) this.keep(this.figure(m.x, m.y, CLASSES[run.duel?.cls ?? 'sword'].look, 0xffd27a));
+      const key = `${m.x},${m.y}`;
+      if (m.hunter) spriteAt.set(key, this.keep(this.figure(m.x, m.y, lookOf(m.hunter), 0xd79bff)));
+      else if (m.kind.ranker) spriteAt.set(key, this.keep(this.figure(m.x, m.y, CLASSES[run.duel?.cls ?? 'sword'].look, 0xffd27a)));
       else if (hasMonsterArt(m.kind.id)) {
         // Mid-bosses: the same creature, bigger and gold. Sleeping monsters are a little dim.
         const img = this.keep(this.add.image(m.x * TILE + TILE / 2, m.y * TILE + TILE - 1, monsterTexture(this, m.kind.id)).setOrigin(0.5, 1));
@@ -528,7 +542,8 @@ export class TowerScene extends Phaser.Scene {
         if (m.kind.stalker) img.setScale(1.45);
         if (!m.awake) img.setAlpha(0.75);
         if (m.stun) img.setTint(0x9fd8ff);
-      } else this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15));
+        spriteAt.set(key, img);
+      } else spriteAt.set(key, this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15)));
       const hpRatio = m.hp / m.maxHp;
       if (hpRatio < 1 && !m.kind.stalker) {
         const hb = this.keep(this.add.graphics());
@@ -538,7 +553,9 @@ export class TowerScene extends Phaser.Scene {
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, (TILE - 5) * hpRatio, 3);
       }
     }
-    this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
+    const me = this.keep(this.figure(run.pos.x, run.pos.y, lookOf(run.hunter)));
+    this.playFeel(me, spriteAt);
+    this.pickMusic();
     // The map camera follows the hunter. Bounds follow the floor, since a run saved
     // in the other layout keeps its floor shape.
     this.cameras.main.setBounds(0, 0, mw * TILE, mh * TILE);
@@ -826,40 +843,61 @@ export class TowerScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const at = this.run.pos;
     let hurt = 0;
+    let hits = 0;
+    let weakHit = false;
+    let shot = false;
+    const weak = new Set<string>();
+    this.hitFx = [];
+    this.lungeTo = undefined;
     for (const e of events) {
       switch (e.type) {
         case 'element':
           this.floatText(e.x, e.y - 1, e.weak ? L('약점!', 'Weak!') : L('저항', 'Resist'), e.weak ? INK.gold : '#9a8f84');
+          if (e.weak) weak.add(`${e.x},${e.y}`);
           break;
-        case 'hit':
-          this.floatText(e.x, e.y, `${e.amount}`, '#fff4e2');
+        case 'hit': {
+          const isWeak = weak.has(`${e.x},${e.y}`);
+          this.floatText(e.x, e.y, `${e.amount}`, isWeak ? '#ffd27a' : '#fff4e2', isWeak ? 18 : 14, true);
           this.tileFlash(e.x, e.y);
-          sfx.hit();
+          this.hitFx.push({ x: e.x, y: e.y });
+          // A blow on a neighbouring tile: the hunter lunges at it.
+          if (!this.lungeTo && Math.abs(e.x - at.x) + Math.abs(e.y - at.y) === 1) this.lungeTo = { x: e.x, y: e.y };
+          hits++;
+          weakHit ||= isWeak;
           break;
+        }
         case 'kill':
           this.burst(e.x, e.y, e.big);
+          debris(this, e.x * TILE + TILE / 2, e.y * TILE + TILE / 2, e.big ? PALETTE.gold : 0xc9774a, (o) => this.world(o), e.big ? 14 : 7, e.big ? 36 : 22);
           if (e.big) {
-            cam.shake(220, 0.008);
+            shake(cam, 260, 0.01);
             sfx.bigKill();
           } else sfx.kill();
           break;
         case 'shot':
           this.shot(e.x, e.y, e.fromHunter);
+          if (e.fromHunter) shot = true;
           break;
         case 'miss':
           this.floatText(e.x, e.y, L('빗나감', 'Miss'), INK.faint);
+          sfx.miss();
           break;
         case 'dodge':
           this.floatText(at.x, at.y, L('회피', 'Dodge'), INK.gate);
           sfx.block();
           break;
         case 'skill':
-          this.floatText(at.x, at.y, e.name, INK.gold);
-          sfx.skill();
+          this.floatText(at.x, at.y, e.name, INK.gold, e.ultimate ? 17 : 14, true);
+          sfx.skill(e.element, e.ultimate);
+          if (e.ultimate) {
+            shake(cam, 320, 0.012);
+            const c = e.element === 'ice' ? [120, 190, 255] : e.element === 'lightning' ? [230, 230, 140] : [255, 150, 60];
+            cam.flash(260, c[0], c[1], c[2]);
+          }
           break;
         case 'hurt':
           hurt += e.amount;
-          this.floatText(at.x, at.y, `-${e.amount}`, INK.red);
+          this.floatText(at.x, at.y, `-${e.amount}`, INK.red, 15, true);
           break;
         case 'block':
           this.floatText(at.x, at.y, L('막음', 'Block'), INK.gate);
@@ -900,13 +938,17 @@ export class TowerScene extends Phaser.Scene {
           break;
         case 'levelup':
           sfx.levelup();
+          sparkle(this, at.x * TILE + TILE / 2, at.y * TILE + TILE / 2, PALETTE.gold, (o) => this.world(o));
           break;
         case 'rescue':
           this.floatText(at.x, at.y, L('긴급 지원!', 'Rescue!'), INK.gold);
           sfx.rescue();
           break;
         case 'death':
-          cam.shake(400, 0.012);
+          shake(cam, 400, 0.012);
+          // The map sinks into dark red behind the result.
+          cam.fade(1200, 40, 0, 0, true);
+          playMusic(null);
           sfx.death();
           break;
         case 'floor':
@@ -920,7 +962,7 @@ export class TowerScene extends Phaser.Scene {
           sfx.block();
           break;
         case 'stalker':
-          cam.shake(500, 0.01);
+          shake(cam, 500, 0.01);
           cam.flash(400, 90, 30, 140);
           sfx.curse();
           this.notice({
@@ -940,30 +982,39 @@ export class TowerScene extends Phaser.Scene {
             this.notice({ heading: L(`${e.wave}웨이브`, `Wave ${e.wave}`), color: INK.red, lines: [[L(`적 ${this.run.monsters.length}마리`, `${this.run.monsters.length} foes`), INK.text, 15]], ms: 1400 });
           } else if (e.cleared) {
             cam.flash(250, 229, 174, 70);
-            sfx.levelup();
+            sfx.fanfare();
+            confetti(this, GW, GH, (o) => this.ui(o), 30);
           }
           break;
         case 'gateClear':
           this.clearPending = true;
           cam.flash(300, 229, 174, 70);
-          sfx.levelup();
+          sfx.fanfare();
+          confetti(this, GW, GH, (o) => this.ui(o));
           break;
       }
     }
+    if (hits > 0) {
+      if (shot) sfx.shoot();
+      sfx.hit(this.run.hunter.cls, hits, weakHit);
+      if (weakHit || hits >= 3) shake(cam, 90, 0.004);
+    } else if (shot) sfx.shoot();
+    this.hurtFx = hurt > 0;
     if (hurt > 0) {
-      cam.flash(140, 150, 25, 20);
-      if (hurt >= this.run.hunter.maxHp * 0.2) cam.shake(160, 0.006);
+      // Scratches only make the hunter blink; a real wound reddens the whole screen.
+      if (hurt >= this.run.hunter.maxHp * 0.05) cam.flash(140, 150, 25, 20);
+      shake(cam, hurt >= this.run.hunter.maxHp * 0.2 ? 180 : 80, hurt >= this.run.hunter.maxHp * 0.2 ? 0.008 : 0.003);
       sfx.hurt();
     }
   }
 
   /** A number that rises from a tile and fades. Several on one tile spread a little. */
-  private floatText(x: number, y: number, value: string, color: string) {
+  private floatText(x: number, y: number, value: string, color: string, size = 13, pop = false) {
     const t = this.world(
       this.add
         .text(x * TILE + TILE / 2 + Phaser.Math.Between(-4, 4), y * TILE - 2, value, {
           fontFamily: FONT,
-          fontSize: '13px',
+          fontSize: `${size}px`,
           color,
           fontStyle: 'bold',
           stroke: '#000000',
@@ -972,7 +1023,61 @@ export class TowerScene extends Phaser.Scene {
         .setOrigin(0.5, 1)
         .setDepth(30),
     );
+    if (pop) {
+      // Numbers jump out big, then settle, so a hit reads at a glance.
+      t.setScale(1.7);
+      this.tweens.add({ targets: t, scale: 1, duration: 140, ease: 'Back.Out' });
+    }
     this.tweens.add({ targets: t, y: t.y - 20, alpha: 0, delay: 250, duration: 550, onComplete: () => t.destroy() });
+  }
+
+  /** After drawing: monsters that were hit blink white and flinch; the hunter lunges at its target. */
+  private playFeel(me: Phaser.GameObjects.Image, spriteAt: Map<string, Phaser.GameObjects.Image | Phaser.GameObjects.Text>) {
+    const at = this.run.pos;
+    for (const p of this.hitFx) {
+      const o = spriteAt.get(`${p.x},${p.y}`);
+      if (!o) continue;
+      const dx = Math.sign(p.x - at.x) * 3;
+      const dy = Math.sign(p.y - at.y) * 3;
+      this.tweens.add({ targets: o, x: o.x + dx, y: o.y + dy, duration: 50, yoyo: true, delay: 40 });
+      if (o instanceof Phaser.GameObjects.Image) {
+        const tint = o.tintTopLeft;
+        o.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
+        this.time.delayedCall(90, () => {
+          if (!o.active) return;
+          o.setTintMode(Phaser.TintModes.MULTIPLY).setTint(tint);
+        });
+      }
+    }
+    const to = this.lungeTo;
+    if (to) {
+      this.tweens.add({ targets: me, x: me.x + (to.x - at.x) * 7, y: me.y + (to.y - at.y) * 7, duration: 55, yoyo: true, ease: 'Quad.Out' });
+    }
+    if (this.hurtFx) {
+      me.setTint(0xff5040).setTintMode(Phaser.TintModes.FILL);
+      this.time.delayedCall(110, () => {
+        if (me.active) me.setTintMode(Phaser.TintModes.MULTIPLY).clearTint();
+      });
+    }
+    this.hitFx = [];
+    this.lungeTo = undefined;
+    this.hurtFx = false;
+  }
+
+  /** Music follows the danger: boss music when a boss, ranker or stalker is in sight. */
+  private pickMusic() {
+    const run = this.run;
+    if (run.status === 'dead') return playMusic(null);
+    const boss = run.monsters.filter((m) => (m.kind.boss || m.kind.stalker || m.kind.ranker) && run.canSee(m));
+    playMusic(run.duel || boss.length ? 'boss' : 'tower');
+    for (const m of boss) {
+      if (this.bossSeen.has(m)) continue;
+      this.bossSeen.add(m);
+      if (m.kind.stalker || m.kind.ranker) continue;
+      sfx.boss();
+      shake(this.cameras.main, 600, 0.006);
+      this.showBanner(L('보스 출현', 'Boss!'), m.kind.name, INK.red, PALETTE.hp);
+    }
   }
 
   /** A white blink over a tile that was hit. */
@@ -1007,15 +1112,19 @@ export class TowerScene extends Phaser.Scene {
 
   /** A banner over the map that rises and fades: new level, full health and mana. */
   private showLevelUp(level: number) {
+    this.showBanner(L(`레벨 업!  Lv.${level}`, `Level up!  Lv.${level}`), L('체력·마나 모두 회복', 'HP and MP restored'), INK.gold, PALETTE.gold, INK.gate);
+  }
+
+  private showBanner(head: string, sub: string, color: string, edge: number, subColor: string = INK.text) {
     const cx = GW / 2;
     const cy = PORTRAIT ? P_TOP_H + P_MAP_H * 0.18 : HUD_Y * 0.2; // above the hunter, who sits mid-map in portrait
     const banner = this.ui(this.add.container(cx, cy).setDepth(40));
     const g = this.add.graphics();
     g.fillStyle(PALETTE.shadow, 0.85).fillRect(-150, -34, 300, 70);
-    g.lineStyle(2, PALETTE.gold, 1).strokeRect(-150, -34, 300, 70);
+    g.lineStyle(2, edge, 1).strokeRect(-150, -34, 300, 70);
     banner.add(g);
-    banner.add(title(this, 0, -24, L(`레벨 업!  Lv.${level}`, `Level up!  Lv.${level}`), 23, INK.gold).setOrigin(0.5, 0));
-    banner.add(text(this, 0, 10, L('체력·마나 모두 회복', 'HP and MP restored'), 12, INK.gate, true).setOrigin(0.5, 0));
+    banner.add(title(this, 0, -24, head, 23, color).setOrigin(0.5, 0));
+    banner.add(text(this, 0, 10, sub, 12, subColor, true).setOrigin(0.5, 0));
     banner.setScale(0.6);
     this.tweens.add({ targets: banner, scale: 1, duration: 160, ease: 'Back.Out' });
     this.tweens.add({ targets: banner, y: cy - 30, alpha: 0, delay: 1200, duration: 500, onComplete: () => banner.destroy() });

@@ -5,7 +5,7 @@ import { TitleScene } from './scenes/TitleScene';
 import { skipTitleOnce } from './game/store';
 import { TowerScene } from './scenes/TowerScene';
 import { GH, GW, layoutStale, RES } from './game/layout';
-import { unlockAudio } from './game/sfx';
+import { playMusic, sfx, unlockAudio } from './game/sfx';
 import { englishOf, lang } from './core/lang';
 
 // Playing in English: Korean left in saved data (names, old news) is translated or spelled out.
@@ -55,7 +55,7 @@ async function start() {
   });
 
   // Handy for debugging in the browser console.
-  (window as unknown as { sss: unknown }).sss = { game };
+  (window as unknown as { sss: unknown }).sss = { game, music: playMusic, sfx };
 }
 
 start();

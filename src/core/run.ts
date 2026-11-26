@@ -220,7 +220,7 @@ export type RunEvent =
   | { type: 'shot'; x: number; y: number; fromHunter?: boolean }
   | { type: 'miss'; x: number; y: number }
   | { type: 'dodge' }
-  | { type: 'skill'; name: string }
+  | { type: 'skill'; name: string; element?: Element; ultimate?: boolean }
   | { type: 'block' }
   | { type: 'kill'; x: number; y: number; big: boolean }
   | { type: 'heal'; amount: number }
@@ -1413,7 +1413,7 @@ export class TowerRun {
     }
     this.refund = 0;
     h.mp -= cost;
-    this.events.push({ type: 'skill', name: info.name });
+    this.events.push({ type: 'skill', name: info.name, element: info.element, ultimate: !!info.ultimate });
     this.say(`${info.name}!`);
     this.element = info.element;
     const cast = this.castSkill(s);

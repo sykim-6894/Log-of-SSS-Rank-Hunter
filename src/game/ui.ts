@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { sfx } from './sfx';
 import { RES } from './layout';
 
 /** Warm ink-and-rust palette: a hunter agency office lit by gate light. */
@@ -107,6 +108,7 @@ export function button(
     zone.on('pointerdown', () => draw('down'));
     zone.on('pointerup', () => {
       draw('hover');
+      sfx.click();
       onClick();
     });
     container.add(zone);
