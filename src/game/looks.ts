@@ -2,6 +2,7 @@ import * as Phaser from 'phaser';
 import { CLASSES } from '../core/classes';
 import type { Hunter } from '../core/hunter';
 import { L } from '../core/lang';
+import { crawlKey, hasCrawl } from './crawl';
 import { finish, Grid, gridTexture, OUTLINE, paint, parse } from './pixel';
 
 /**
@@ -121,7 +122,19 @@ export function drawLook(g: Phaser.GameObjects.Graphics, look: number, x: number
   paint(g, lookGrid(look), x - scale, y - scale, scale);
 }
 
+/**
+ * Puts a hero where drawLook would draw it, at the same size: the crawl sprite as an image
+ * when that art is loaded, otherwise the pixel figure painted into `g`.
+ */
+export function placeLook(scene: Phaser.Scene, g: Phaser.GameObjects.Graphics, look: number, x: number, y: number, scale: number) {
+  const key = lookTexture(scene, look);
+  if (!key.startsWith('crawl-')) return void drawLook(g, look, x, y, scale);
+  const side = (LOOK_H + 2) * scale;
+  scene.add.image(x + ((LOOK_W + 1) * scale) / 2, y + (LOOK_H + 1) * scale, key).setOrigin(0.5, 1).setDisplaySize(side, side);
+}
+
 /** Makes one texture per look (2 screen pixels per pixel) the first time it is needed. */
 export function lookTexture(scene: Phaser.Scene, look: number): string {
+  if (hasCrawl(scene, `hero-${look % LOOKS.length}`)) return crawlKey(`hero-${look % LOOKS.length}`);
   return gridTexture(scene, `hunter-look-${look % LOOKS.length}`, lookGrid(look), 2);
 }

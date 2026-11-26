@@ -1,4 +1,6 @@
 import * as Phaser from 'phaser';
+import { preloadCrawl } from '../game/crawl';
+import { ART } from '../game/art';
 import { activeHunter, AfterRunNews, agencyOf, enterGate, gradeIn, PREPS, rivalAgencyNames, rivalHunters, settleDaily, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
 import { DAILY_RULES, DailyRun, dateLabel } from '../core/daily';
 import { CODEX_IDS, recordKills } from '../core/codex';
@@ -28,10 +30,13 @@ import { GuidePage, showGuide, tipWanted, markTip } from '../game/guide';
 import { TIPS } from '../game/tips';
 import { ABYSS_GOLD_PER_RULE, ABYSS_RULE_EVERY, rulesLine } from '../core/abyss';
 
-const TILE = 24;
+/** World units per map tile: the sprites' own size (32 for the crawl set), so they are drawn pixel for pixel. */
+const TILE = ART === 'crawl' ? 32 : 24;
+/** The camera zooms are tuned for 24-unit tiles; crawl tiles come out a little bigger, to show their detail. */
+const TILE_FIT = ART === 'crawl' ? 0.85 : 1;
 /** Tint for tiles and props the hunter remembers but cannot see right now. */
 const REMEMBERED = 0x4a4038;
-const HUD_Y = MAP_H * TILE; // 600
+const HUD_Y = MAP_H * 24; // 600
 
 // Portrait layout: status bar on top, a camera that follows the hunter, the log,
 // then a thumb area with the joystick on the left and action buttons on the right.
@@ -108,6 +113,10 @@ export class TowerScene extends Phaser.Scene {
     this.daily = data?.daily;
   }
 
+  preload() {
+    preloadCrawl(this);
+  }
+
   create() {
     this.cameras.main.setBackgroundColor(PALETTE.bg);
     this.joy = null;
@@ -124,10 +133,10 @@ export class TowerScene extends Phaser.Scene {
     this.dynamic = [];
     this.uiCam = null;
     if (PORTRAIT) {
-      fitCamera(this.cameras.main, 0, P_TOP_H, GW, P_MAP_H, P_ZOOM);
+      fitCamera(this.cameras.main, 0, P_TOP_H, GW, P_MAP_H, P_ZOOM * TILE_FIT);
       this.uiCam = fitCamera(this.cameras.add(0, 0, GW, GH));
     } else {
-      fitCamera(this.cameras.main, 0, 0, GW, HUD_Y, L_ZOOM);
+      fitCamera(this.cameras.main, 0, 0, GW, HUD_Y, L_ZOOM * TILE_FIT);
       this.uiCam = fitCamera(this.cameras.add(0, 0, GW, GH));
     }
     this.tileLayer = this.world(this.add.blitter(0, 0, tileset(this)));

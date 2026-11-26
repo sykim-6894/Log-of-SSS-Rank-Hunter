@@ -1,4 +1,5 @@
 import type * as Phaser from 'phaser';
+import { crawlKey, hasCrawl } from './crawl';
 import { finish, gridTexture, parse } from './pixel';
 
 /**
@@ -268,6 +269,7 @@ export function hasMonsterArt(kindId: string): boolean {
 /** Makes the texture the first time it is needed (2 screen pixels per sprite pixel), after the shared finishing pass. */
 export function monsterTexture(scene: Phaser.Scene, kindId: string): string {
   const id = baseId(kindId);
+  if (hasCrawl(scene, id)) return crawlKey(id);
   const s = SPRITES[id];
   return gridTexture(scene, `monster-${id}`, finish(parse(s.rows, s.colors)), 2);
 }

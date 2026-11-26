@@ -1,4 +1,5 @@
 import type * as Phaser from 'phaser';
+import { CRAWL_SIZE, crawlImage, hasCrawl } from './crawl';
 import { darken, finish, Grid, gridTexture, mix, paintCanvas, parse } from './pixel';
 
 /**
@@ -133,6 +134,7 @@ function rim(dir: 'N' | 'E' | 'W'): Grid {
 /** Makes the tileset texture once and returns its key. Frames are named after TileFrame. */
 export function tileset(scene: Phaser.Scene): string {
   if (scene.textures.exists(TILESET)) return TILESET;
+  if (hasCrawl(scene, 'floor0')) return crawlTileset(scene);
   const size = P * S;
   const tex = scene.textures.createCanvas(TILESET, size * ORDER.length, size);
   if (!tex) return TILESET;
@@ -197,10 +199,57 @@ const MERCHANT = parse(
 );
 
 export function chestTexture(scene: Phaser.Scene) {
+  if (hasCrawl(scene, 'chest')) return 'crawl-chest';
   return gridTexture(scene, 'prop-chest', finish(CHEST), 2);
 }
 
 export function merchantTexture(scene: Phaser.Scene) {
+  if (hasCrawl(scene, 'merchant')) return 'crawl-merchant';
   return gridTexture(scene, 'prop-merchant', finish(MERCHANT), 2);
 }
 
+
+/** The same frames built from the crawl tile set (32×32): pebble floor, brown brick walls. */
+function crawlTileset(scene: Phaser.Scene): string {
+  const size = CRAWL_SIZE;
+  const tex = scene.textures.createCanvas(TILESET, size * ORDER.length, size);
+  if (!tex) return TILESET;
+  const ctx = tex.getContext();
+  ctx.imageSmoothingEnabled = false;
+  const src: Partial<Record<TileFrame, string>> = {
+    floor0: 'floor0', floor1: 'floor2', floor2: 'floor4', floor3: 'floor6',
+    wallFront: 'wall0', wallFront2: 'wall1', wallTop: 'wall2', stairsOpen: 'stairs', stairsShut: 'stairs',
+  };
+  ORDER.forEach((name, i) => {
+    const x = i * size;
+    const from = src[name];
+    if (from) ctx.drawImage(crawlImage(scene, from), x, 0, size, size);
+    if (name === 'stairsShut') {
+      // Sealed while the floor's boss lives: the same stairs in shadow.
+      ctx.fillStyle = 'rgba(10,6,4,0.6)';
+      ctx.fillRect(x, 0, size, size);
+    }
+    if (name.startsWith('wall')) {
+      // Toned down to sit with the dark floor; walls not facing the hunter darker still,
+      // so the room's inside edge stands out.
+      ctx.fillStyle = name === 'wallTop' ? 'rgba(12,8,6,0.62)' : 'rgba(20,12,8,0.3)';
+      ctx.fillRect(x, 0, size, size);
+    }
+    if (name === 'shadowN' || name === 'shadowW') {
+      for (let d = 0; d < 4; d++) {
+        ctx.fillStyle = `rgba(0,0,0,${[0.45, 0.3, 0.18, 0.08][d]})`;
+        if (name === 'shadowN') ctx.fillRect(x, d * 2, size, 2);
+        else ctx.fillRect(x + d * 2, 0, 2, size);
+      }
+    }
+    if (name === 'rimN' || name === 'rimE' || name === 'rimW') {
+      ctx.fillStyle = 'rgba(160,130,90,0.55)';
+      if (name === 'rimN') ctx.fillRect(x, 0, size, 2);
+      if (name === 'rimE') ctx.fillRect(x + size - 2, 0, 2, size);
+      if (name === 'rimW') ctx.fillRect(x, 0, 2, size);
+    }
+    tex.add(name, 0, x, 0, size, size);
+  });
+  tex.refresh();
+  return TILESET;
+}
