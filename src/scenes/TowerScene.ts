@@ -1077,7 +1077,8 @@ export class TowerScene extends Phaser.Scene {
    * Under the minimap in portrait, top right of the map in landscape.
    */
   private drawStalkerClock() {
-    if (this.run.duel || this.run.survival) return;
+    if (this.run.survival) return this.drawWaveCount();
+    if (this.run.duel) return;
     const run = this.run;
     const r = this.minimapRect();
     const x = r ? r.x + r.w : GW - 10;
@@ -1087,6 +1088,22 @@ export class TowerScene extends Phaser.Scene {
     const color = run.stalkers > 0 || left <= 30 ? '#e0574f' : INK.quiet;
     const t = this.ui(text(this, x, y, label, 12, color).setOrigin(1, 0).setDepth(30));
     t.setBackgroundColor('#000000aa').setPadding(4, 2, 4, 2);
+    this.dynamic.push(t);
+  }
+
+  /** Arena: the wave and how many of its foes are still standing, where the collapse clock goes. */
+  private drawWaveCount() {
+    const run = this.run;
+    const sv = run.survival!;
+    if (run.status !== 'playing' || sv.wave < 1) return;
+    const r = this.minimapRect();
+    const x = r ? r.x + r.w : GW - 10;
+    const y = r ? r.y + r.h + 4 : 8;
+    const left = run.monsters.length;
+    const total = sv.foes && sv.foes >= left ? `/${sv.foes}` : '';
+    const label = L(`${sv.wave}웨이브 · 남은 적 ${left}${total}`, `Wave ${sv.wave} · ${left}${total} foes left`);
+    const t = this.ui(text(this, x, y, label, 13, left <= 2 ? INK.gold : INK.text, true).setOrigin(1, 0).setDepth(30));
+    t.setBackgroundColor('#000000aa').setPadding(5, 3, 5, 3);
     this.dynamic.push(t);
   }
 
