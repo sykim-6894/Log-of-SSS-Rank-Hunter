@@ -81,41 +81,53 @@ export interface SkillInfo {
   aimed?: boolean;
   /** Fire, ice or lightning: monsters may be weak to it or resist it. */
   element?: Element;
+  /** Turns to wait before using it again. */
+  cd: number;
   text: string;
   max: string;
 }
 
 export const SKILLS: Record<SkillId, SkillInfo> = {
-  spin: { cls: 'sword', name: L('회전베기', 'Whirlwind'), mp: 5, text: L('주변 8칸 모든 적 ×1.5', 'All 8 tiles around ×1.5'), max: L('범위 2칸', 'Range 2') },
-  charge: { cls: 'sword', name: L('돌진', 'Charge'), mp: 6, aimed: true, text: L('바라보는 방향 3칸 돌진, 첫 적 ×2.0 + 1턴 기절', 'Dash 3 tiles ahead, first enemy ×2.0 + stun 1 turn'), max: L('길 위의 적 모두 벰', 'Cuts every enemy on the path') },
-  smash: { cls: 'sword', name: L('내려찍기', 'Smash'), mp: 5, text: L('붙어 있는 적 하나 ×2.5, 방어 무시', 'One adjacent enemy ×2.5, ignores DEF'), max: L('처치하면 마나 돌려받음', 'Refunds mana on kill') },
-  stance: { cls: 'sword', name: L('반격 자세', 'Riposte'), mp: 4, text: L('3턴 동안 맞을 때마다 ×1.2 반격', 'For 3 turns, counter ×1.2 when hit'), max: L('받는 피해 절반', 'Damage taken halved') },
-  warcry: { cls: 'sword', name: L('전투 함성', 'War Cry'), mp: 6, text: L('4턴 동안 공격 +30%', 'ATK +30% for 4 turns'), max: L('주변 적 1턴 기절', 'Stuns nearby enemies 1 turn') },
-  storm: { cls: 'sword', name: L('검기 폭풍', 'Tempest'), mp: 15, mpMax: 10, ultimate: true, text: L('2칸 안 모든 적 ×2.5', 'All enemies within 2 tiles ×2.5'), max: L('마나 10', 'Mana 10') },
-  fireball: { cls: 'mage', name: L('화염구', 'Fireball'), mp: 5, element: 'fire', text: L('[화염] 4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', '[Fire] Nearest enemy within 4 ×2.0, around it ×1.0'), max: L('3턴 화상', 'Burn 3 turns') },
-  icebolt: { cls: 'mage', name: L('얼음 화살', 'Ice Bolt'), mp: 5, aimed: true, element: 'ice', text: L('[냉기] 직선 5칸 첫 적 ×1.3 + 2턴 빙결', '[Ice] First enemy in a 5-tile line ×1.3 + freeze 2 turns'), max: L('빙결 3턴, 관통', 'Freeze 3 turns, pierces') },
-  chain: { cls: 'mage', name: L('번개 사슬', 'Lightning'), mp: 7, element: 'lightning', text: L('[번개] 가까운 적부터 3명 연쇄 ×1.2', '[Lightning] Chains 3 nearest enemies ×1.2'), max: L('5명까지', 'Up to 5') },
-  manashield: { cls: 'mage', name: L('마나 보호막', 'Mana Wall'), mp: 6, text: L('5턴 동안 피해를 마나로 대신 받음', 'For 5 turns, mana absorbs damage'), max: L('마나 1로 피해 2 막음', '1 mana blocks 2 damage') },
-  blink: { cls: 'mage', name: L('점멸', 'Blink'), mp: 4, aimed: true, text: L('바라보는 방향 최대 4칸 순간이동', 'Teleport up to 4 tiles ahead'), max: L('떠난 자리 ×1.5 폭발', 'Explodes ×1.5 where you left') },
-  meteor: { cls: 'mage', name: L('유성 낙하', 'Meteor'), mp: 20, mpMax: 15, ultimate: true, element: 'fire', text: L('[화염] 보이는 모든 적 ×1.8', '[Fire] Every visible enemy ×1.8'), max: L('마나 15', 'Mana 15') },
-  pierce: { cls: 'archer', name: L('관통 화살', 'Pierce'), mp: 5, aimed: true, text: L('직선 6칸 모든 적 ×1.4', 'Every enemy in a 6-tile line ×1.4'), max: L('방어 무시', 'Ignores DEF') },
-  backshot: { cls: 'archer', name: L('물러서며 쏘기', 'Backshot'), mp: 5, text: L('붙은 적 ×1.2 후 2칸 물러남', 'Adjacent enemy ×1.2, then step back 2'), max: L('맞은 적 1턴 기절', 'Stuns the target 1 turn') },
-  poison: { cls: 'archer', name: L('독화살', 'Poison'), mp: 4, text: L('가까운 적 ×1.0 + 4턴 독', 'Nearest enemy ×1.0 + poison 4 turns'), max: L('독이 주변 적에게 퍼짐', 'Poison spreads to nearby enemies') },
-  volley: { cls: 'archer', name: L('연사', 'Volley'), mp: 6, text: L('가까운 적에게 3발 ×0.7', '3 shots ×0.7 at the nearest enemy'), max: L('4발', '4 shots') },
-  trap: { cls: 'archer', name: L('덫 설치', 'Trap'), mp: 4, text: L('발밑에 덫: 밟은 적 ×2.0 + 2턴 속박', 'Trap underfoot: ×2.0 + root 2 turns'), max: L('덫 2개까지', 'Up to 2 traps') },
-  rain: { cls: 'archer', name: L('화살비', 'Barrage'), mp: 14, ultimate: true, text: L('가까운 적 중심 3×3 칸 ×2.0', '3×3 around the nearest enemy ×2.0'), max: L('5×5 칸', '5×5 area') },
-  block: { cls: 'knight', name: L('방패 막기', 'Block'), mp: 4, text: L('다음 2번의 피격을 막고 ×1.0 반격', 'Block the next 2 hits and counter ×1.0'), max: L('3번 막음', 'Blocks 3') },
-  taunt: { cls: 'knight', name: L('도발', 'Taunt'), mp: 5, text: L('3칸 안 적을 끌어오고 3턴 방어 +3', 'Pull enemies within 3, DEF +3 for 3 turns'), max: L('끌려온 적 1턴 기절', 'Pulled enemies stunned 1 turn') },
-  bash: { cls: 'knight', name: L('방패 강타', 'Bash'), mp: 5, text: L('붙은 적 ×1.3 + 2칸 밀침, 벽에 부딪히면 기절', 'Adjacent ×1.3 + push 2, stun on wall hit'), max: L('항상 기절', 'Always stuns') },
-  heal: { cls: 'knight', name: L('치유의 빛', 'Heal'), mp: 8, text: L('체력 30% 회복', 'Heal 30% HP'), max: L('3턴 방어 +3', 'DEF +3 for 3 turns') },
-  bulwark: { cls: 'knight', name: L('철벽', 'Bulwark'), mp: 6, text: L('4턴 방어 +5, 움직이면 풀림', 'DEF +5 for 4 turns, ends if you move'), max: L('움직여도 유지', 'Stays when moving') },
-  sanctuary: { cls: 'knight', name: L('성역', 'Sanctuary'), mp: 15, ultimate: true, text: L('5턴 피해 절반, 매 턴 체력 5% 회복', 'Half damage 5 turns, heal 5% HP each turn'), max: L('7턴', '7 turns') },
+  spin: { cls: 'sword', name: L('회전베기', 'Whirlwind'), mp: 5, cd: 2, text: L('주변 8칸 모든 적 ×1.5', 'All 8 tiles around ×1.5'), max: L('범위 2칸', 'Range 2') },
+  charge: { cls: 'sword', name: L('돌진', 'Charge'), mp: 6, aimed: true, cd: 4, text: L('[끊기] 바라보는 방향 3칸 돌진, 첫 적 ×2.0 + 1턴 기절', '[Break] Dash 3 tiles ahead, first enemy ×2.0 + stun 1 turn'), max: L('길 위의 적 모두 벰', 'Cuts every enemy on the path') },
+  smash: { cls: 'sword', name: L('내려찍기', 'Smash'), mp: 5, cd: 2, text: L('[끊기] 붙어 있는 적 하나 ×2.5, 방어 무시 (웅크린 적도 깸)', '[Break] One adjacent enemy ×2.5, ignores DEF (cracks a curled foe)'), max: L('처치하면 마나 돌려받음', 'Refunds mana on kill') },
+  stance: { cls: 'sword', name: L('반격 자세', 'Riposte'), mp: 4, cd: 6, text: L('3턴 동안 맞을 때마다 ×1.2 반격', 'For 3 turns, counter ×1.2 when hit'), max: L('받는 피해 절반', 'Damage taken halved') },
+  warcry: { cls: 'sword', name: L('전투 함성', 'War Cry'), mp: 6, cd: 8, text: L('4턴 동안 공격 +30%', 'ATK +30% for 4 turns'), max: L('주변 적 1턴 기절', 'Stuns nearby enemies 1 turn') },
+  storm: { cls: 'sword', name: L('검기 폭풍', 'Tempest'), mp: 15, mpMax: 10, ultimate: true, cd: 8, text: L('2칸 안 모든 적 ×2.5', 'All enemies within 2 tiles ×2.5'), max: L('마나 10', 'Mana 10') },
+  fireball: { cls: 'mage', name: L('화염구', 'Fireball'), mp: 5, element: 'fire', cd: 2, text: L('[화염] 4칸 안 가장 가까운 적 ×2.0, 주변 ×1.0', '[Fire] Nearest enemy within 4 ×2.0, around it ×1.0'), max: L('3턴 화상', 'Burn 3 turns') },
+  icebolt: { cls: 'mage', name: L('얼음 화살', 'Ice Bolt'), mp: 5, aimed: true, element: 'ice', cd: 4, text: L('[냉기·끊기] 직선 5칸 첫 적 ×1.3 + 2턴 빙결. 언 적에 화염·번개는 ×1.5', '[Ice·Break] First enemy in a 5-tile line ×1.3 + freeze 2 turns. Fire or lightning on a frozen foe ×1.5'), max: L('빙결 3턴, 관통', 'Freeze 3 turns, pierces') },
+  chain: { cls: 'mage', name: L('번개 사슬', 'Lightning'), mp: 7, element: 'lightning', cd: 4, text: L('[번개·끊기] 가까운 적부터 3명 연쇄 ×1.2, 예고 중인 주문을 끊음', '[Lightning·Break] Chains 3 nearest enemies ×1.2, breaks wind-ups'), max: L('5명까지', 'Up to 5') },
+  manashield: { cls: 'mage', name: L('마나 보호막', 'Mana Wall'), mp: 6, cd: 10, text: L('5턴 동안 피해를 마나로 대신 받음', 'For 5 turns, mana absorbs damage'), max: L('마나 1로 피해 2 막음', '1 mana blocks 2 damage') },
+  blink: { cls: 'mage', name: L('점멸', 'Blink'), mp: 4, aimed: true, cd: 5, text: L('바라보는 방향 최대 4칸 순간이동. 위험 칸에서 빠져나올 때', 'Teleport up to 4 tiles ahead. Gets you out of red tiles'), max: L('떠난 자리 ×1.5 폭발', 'Explodes ×1.5 where you left') },
+  meteor: { cls: 'mage', name: L('유성 낙하', 'Meteor'), mp: 20, mpMax: 15, ultimate: true, element: 'fire', cd: 12, text: L('[화염] 보이는 모든 적 ×1.8', '[Fire] Every visible enemy ×1.8'), max: L('마나 15', 'Mana 15') },
+  pierce: { cls: 'archer', name: L('관통 화살', 'Pierce'), mp: 5, aimed: true, cd: 3, text: L('[끊기] 직선 6칸 모든 적 ×1.4', '[Break] Every enemy in a 6-tile line ×1.4'), max: L('방어 무시', 'Ignores DEF') },
+  backshot: { cls: 'archer', name: L('물러서며 쏘기', 'Backshot'), mp: 5, cd: 4, text: L('[끊기] 붙은 적 ×1.2 후 2칸 물러남', '[Break] Adjacent enemy ×1.2, then step back 2'), max: L('맞은 적 1턴 기절', 'Stuns the target 1 turn') },
+  poison: { cls: 'archer', name: L('독화살', 'Poison'), mp: 4, cd: 3, text: L('가까운 적 ×1.0 + 4턴 독', 'Nearest enemy ×1.0 + poison 4 turns'), max: L('독이 주변 적에게 퍼짐', 'Poison spreads to nearby enemies') },
+  volley: { cls: 'archer', name: L('연사', 'Volley'), mp: 6, cd: 2, text: L('가까운 적에게 3발 ×0.7, 독 걸린 적이면 ×1.3', '3 shots ×0.7 at the nearest enemy, ×1.3 if poisoned'), max: L('4발', '4 shots') },
+  trap: { cls: 'archer', name: L('덫 설치', 'Trap'), mp: 4, cd: 5, text: L('발밑에 덫: 밟은 적 ×2.0 + 2턴 속박', 'Trap underfoot: ×2.0 + root 2 turns'), max: L('덫 2개까지', 'Up to 2 traps') },
+  rain: { cls: 'archer', name: L('화살비', 'Barrage'), mp: 14, ultimate: true, cd: 9, text: L('가까운 적 중심 3×3 칸 ×2.0', '3×3 around the nearest enemy ×2.0'), max: L('5×5 칸', '5×5 area') },
+  block: { cls: 'knight', name: L('방패 막기', 'Block'), mp: 4, cd: 5, text: L('다음 2번의 피격(예고 공격 포함)을 막고 ×1.0 반격', 'Block the next 2 hits (wind-ups too) and counter ×1.0'), max: L('3번 막음', 'Blocks 3') },
+  taunt: { cls: 'knight', name: L('도발', 'Taunt'), mp: 5, cd: 6, text: L('[끊기] 3칸 안 적을 끌어오고 3턴 방어 +3', '[Break] Pull enemies within 3, DEF +3 for 3 turns'), max: L('끌려온 적 1턴 기절', 'Pulled enemies stunned 1 turn') },
+  bash: { cls: 'knight', name: L('방패 강타', 'Bash'), mp: 5, cd: 3, text: L('[끊기] 붙은 적 ×1.3 + 2칸 밀침, 벽에 부딪히면 기절', '[Break] Adjacent ×1.3 + push 2, stun on wall hit'), max: L('항상 기절', 'Always stuns') },
+  heal: { cls: 'knight', name: L('치유의 빛', 'Heal'), mp: 8, cd: 10, text: L('체력 30% 회복', 'Heal 30% HP'), max: L('3턴 방어 +3', 'DEF +3 for 3 turns') },
+  bulwark: { cls: 'knight', name: L('철벽', 'Bulwark'), mp: 6, cd: 8, text: L('4턴 방어 +5, 움직이면 풀림', 'DEF +5 for 4 turns, ends if you move'), max: L('움직여도 유지', 'Stays when moving') },
+  sanctuary: { cls: 'knight', name: L('성역', 'Sanctuary'), mp: 15, ultimate: true, cd: 15, text: L('5턴 피해 절반, 매 턴 체력 5% 회복', 'Half damage 5 turns, heal 5% HP each turn'), max: L('7턴', '7 turns') },
 };
 
 /** Skills of a class in table order. The first is the class's signature skill. */
 export function classSkills(cls: ClassId): SkillId[] {
   return (Object.keys(SKILLS) as SkillId[]).filter((id) => SKILLS[id].cls === cls);
 }
+
+/**
+ * Combat rules shared by the skills: stunned, frozen or winding-up enemies are off guard
+ * and take more; skills marked [끊기] break a wind-up.
+ */
+export const OFF_GUARD = 1.3;
+export const SHATTER = 1.5;
+export const POISON_VOLLEY = 1.3;
+/** Skills that break an enemy's wind-up on whatever they hit (stuns and freezes always do). */
+export const BREAKERS: SkillId[] = ['charge', 'smash', 'icebolt', 'chain', 'pierce', 'backshot', 'taunt', 'bash'];
 
 export const MAX_SKILL_LV = 5;
 export const ULTIMATE_LEVEL = 8;
@@ -166,7 +178,7 @@ export function cardTitle(c: LevelCard, h: Hunter): string {
 export function cardText(c: LevelCard, h: Hunter): string {
   if (c.type === 'stat') return L('스킬 칸이 다 찼고 모든 스킬이 5단계일 때 나오는 카드', 'Shown when all skill slots are full and every skill is level 5');
   const info = SKILLS[c.skill];
-  if (c.type === 'learn') return info.text + (h.skills.length >= slotCount(h.level) ? L(' · 칸이 차서 하나와 바꿈', ' · slots full, replaces one') : '');
+  if (c.type === 'learn') return info.text + L(` · 대기 ${info.cd}턴`, ` · ${info.cd}-turn cooldown`) + (h.skills.length >= slotCount(h.level) ? L(' · 칸이 차서 하나와 바꿈', ' · slots full, replaces one') : '');
   const lv = h.skills.find((s) => s.id === c.skill)?.lv ?? 1;
   return lv + 1 >= MAX_SKILL_LV ? L(`위력 +20%, 5단계: ${info.max}`, `Power +20%, level 5: ${info.max}`) : L('위력 +20%', 'Power +20%');
 }

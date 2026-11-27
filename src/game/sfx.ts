@@ -101,5 +101,17 @@ export const sfx = {
   levelup: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, { delay: i * 0.08, vol: 0.06 })),
   rescue: () => [784, 659, 784, 1047].forEach((f, i) => tone(f, 0.1, { type: 'triangle', delay: i * 0.07, vol: 0.06 })),
   floor: () => [262, 392].forEach((f, i) => tone(f, 0.15, { type: 'triangle', delay: i * 0.1, vol: 0.06 })),
+  /** A monster winds up a big move. */
+  warn: () => [880, 660].forEach((f, i) => tone(f, 0.09, { type: 'square', delay: i * 0.09, vol: 0.05 })),
+  /** The hunter broke a wind-up. */
+  interrupt: () => {
+    noise(0.08, 0.08);
+    tone(1200, 0.1, { type: 'triangle', to: 600, vol: 0.06 });
+  },
+  /** A wound-up move goes off. */
+  blast: () => {
+    noise(0.2, 0.11);
+    tone(120, 0.2, { type: 'sawtooth', to: 50, vol: 0.07 });
+  },
   death: () => [392, 330, 262, 196].forEach((f, i) => tone(f, 0.25, { type: 'sawtooth', delay: i * 0.18, vol: 0.06 })),
 };

@@ -10,7 +10,7 @@ export const CRAWL_SIZE = 32;
 
 const FILES = [
   'hero-0', 'hero-1', 'hero-2', 'hero-3',
-  'goblin', 'archer', 'wolf', 'orc', 'lizard', 'knight', 'shaman', 'beast', 'warden', 'overlord', 'dragon', 'master', 'stalker',
+  'goblin', 'bomber', 'archer', 'wolf', 'orc', 'lizard', 'knight', 'shaman', 'beast', 'warden', 'overlord', 'dragon', 'master', 'stalker',
   'floor0', 'floor1', 'floor2', 'floor3', 'floor4', 'floor5', 'floor6', 'floor7',
   'wall0', 'wall1', 'wall2', 'wall3', 'chest', 'stairs', 'merchant',
 ];

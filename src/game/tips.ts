@@ -56,6 +56,10 @@ export const TIPS = {
   boss: (): GuidePage[] => [
     { text: L('층 보스예요! 5층마다 있고, 쓰러뜨려야 계단이 열려요. 체력과 물약을 확인하고 싸우세요.', 'A floor boss! One every 5 floors, and the stairs stay shut until it falls. Check your HP and potions first.') },
   ],
+  telegraph: (): GuidePage[] => [
+    { text: L('빨간 칸이 보이죠? 몬스터가 다음 턴에 큰 공격을 할 곳이에요. 칸 밖으로 한 걸음 피하면 맞지 않아요.', "See the red tiles? A monster will land a big attack there next turn. Step off them and it misses.") },
+    { text: L('[끊기]가 붙은 스킬이나 기절·빙결로 준비 중인 공격을 끊을 수도 있어요. 준비 중이거나 기절한 적은 더 아프게 맞아요. 스킬은 쓰고 나면 대기시간이 있으니 상황에 맞게 골라 쓰세요.', 'Skills marked [Break], stuns and freezes also cut a wind-up short, and winding-up or stunned foes take more damage. Skills have cooldowns, so pick the right one for the moment.') },
+  ],
   merchant: (): GuidePage[] => [
     { text: L('$ 표시는 떠돌이 상인이에요. 이번 탐험 수입으로 물건을 살 수 있고, 거래가 끝나면 떠나요.', "The $ is a wandering merchant. Buy with this run's income; they leave once you're done.") },
   ],

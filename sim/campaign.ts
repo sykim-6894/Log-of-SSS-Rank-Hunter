@@ -5,7 +5,7 @@ import {
 } from '../src/core/agency';
 import { agencyLevel, unlocked } from '../src/core/agencyLevel';
 import { autoPick } from '../src/core/classes';
-import { botAction, stepTowards } from '../src/core/bot';
+import { botAction, breakSkill, dodgeStep, readySlot, stepTowards } from '../src/core/bot';
 import { skillCost } from '../src/core/classes';
 import type { Action } from '../src/core/run';
 import { combatPower } from '../src/core/hunter';
@@ -123,17 +123,25 @@ export function campaign(seed: number, days: number, cautious = 0.55): Campaign 
 }
 
 /** The test bot plus what a careful player does: drinks earlier, uses skills on bosses, leaves before the collapse. */
+/** Whether the simulated player steps off red tiles. Off: a player who ignores the warnings. */
+export const DODGE = process.env.DODGE !== '0';
+
 export function playerAction(run: TowerRun): Action {
   const h = run.hunter;
   if (h.hp < h.maxHp * 0.45 && h.bag.hp > 0 && run.gate?.rule !== 'sealed') return { type: 'use', item: 'hp' };
   if (h.mp < 4 && h.bag.mp > 0) return { type: 'use', item: 'mp' };
+  if (DODGE) {
+    const dodge = breakSkill(run) ?? dodgeStep(run);
+    if (dodge) return dodge;
+  }
   const near = run.monsters.filter((m) => Math.max(Math.abs(m.x - run.pos.x), Math.abs(m.y - run.pos.y)) <= 1 && !m.kind.stalker);
   const big = near.some((m) => m.kind.boss || m.kind.elite || m.hunter);
-  if ((big || near.length >= 2) && h.skills[0] && h.mp >= skillCost(h.skills[0])) return { type: 'skill', slot: 0 };
+  const slot = readySlot(run);
+  if ((big || near.length >= 2) && slot !== undefined) return { type: 'skill', slot };
   // Head for the stairs before the dungeon collapses, or when a stalker is out.
   if ((run.stalkerIn < 60 || run.stalkers > 0) && !run.bossAlive) {
     const step = stepTowards(run, run.map.stairs);
     if (step) return step;
   }
-  return botAction(run);
+  return botAction(run, DODGE);
 }
