@@ -5,6 +5,7 @@ import { DARK_SIGHT, Gate, gateBoss, gateClearGold, gateClearStones, gateDanger,
 import {
   abyssDepth, bossFor, eliteOf, floorExpScale, floorScale, MonsterKind, monsterPool, overLevelFactor, RESPAWN_EVERY, STALKER_FIRST, STALKER_NEXT,
   stalkerKind, TOP_FLOOR, TRAIT_RULES, Element, elementFactor,
+  ABILITIES, abilitiesOf, AbilityId, MONSTER_MP, MONSTERS, regenEveryTurn,
 } from './monsters';
 import {
   addToBag,
@@ -31,6 +32,7 @@ import { Rng } from './rng';
 import {
   ARCHER_DODGE, ARCHER_FAR_DAMAGE, ARCHER_RANGE, archerHitChance, KNIGHT_LOW_DEF, KNIGHT_LOW_HP, MAGE_SKILL_POWER, MAX_SKILL_LV,
   ClassId, OwnedSkill, SkillId, SKILL_LV_POWER, skillCost, SKILLS, SWORD_KILL_HEAL,
+  BREAKERS, OFF_GUARD, POISON_VOLLEY, SHATTER,
 } from './classes';
 import { L } from './lang';
 import { BOUNTY_MULT, dailyScore as dailyScoreOf, DAILY_FLOORS, DAILY_RULE_POWER, DAILY_RULES, DailyRule, DailyRun, floorSeed } from './daily';
@@ -54,6 +56,33 @@ export interface Monster {
   root?: number;
   /** Burn or poison: damage at the start of each of its turns. */
   dot?: { turns: number; dmg: number };
+  /** Set while the stun is the ice bolt's freeze: fire and lightning shatter it. */
+  frozen?: boolean;
+  /** Mana for special moves (bosses, shamans). */
+  mp?: number;
+  maxMp?: number;
+  /** Turns until each special move can be used again. */
+  cd?: Partial<Record<AbilityId, number>>;
+  /** A special move being wound up: it goes off when turns reach 0, unless broken first. */
+  windup?: Windup;
+  /** Turns left curled up (the beast's shell). */
+  shell?: number;
+  /** Has attacked once already (the shadow knight's ambush is spent). */
+  struck?: boolean;
+}
+
+/** A telegraphed move. Tiles are fixed when it is declared, except for moves centred on the monster. */
+export interface Windup {
+  id: AbilityId;
+  turns: number;
+  tiles?: Point[];
+}
+
+/** A tile a wound-up move will hit, and in how many enemy turns. */
+export interface DangerTile {
+  x: number;
+  y: number;
+  turns: number;
 }
 
 /** Effects the hunter's own skills put on the hunter. */
@@ -251,7 +280,13 @@ export type RunEvent =
   /** A ranker challenge is over. */
   | { type: 'duelEnd'; won: boolean }
   /** A survival-arena wave was cleared, or a new one began. */
-  | { type: 'wave'; wave: number; cleared: boolean };
+  | { type: 'wave'; wave: number; cleared: boolean }
+  /** A monster began winding up a special move. */
+  | { type: 'warn'; x: number; y: number; name: string }
+  /** The hunter broke a monster's wind-up. */
+  | { type: 'interrupt'; x: number; y: number }
+  /** A wound-up move went off over these tiles. */
+  | { type: 'blast'; tiles: Point[] };
 
 /** A run in progress, as plain data for the save file. Rival hunters are kept by id. */
 export interface RunSnapshot {
@@ -288,6 +323,7 @@ export interface RunSnapshot {
   spare?: Gear[];
   prep?: PrepId;
   tally?: Record<string, number>;
+  cooldowns?: Partial<Record<SkillId, number>>;
 }
 
 /** Departure prep: experience, kill gold and attack multipliers. */
@@ -351,6 +387,10 @@ export class TowerRun {
   prep?: PrepId;
   /** Kills this run by monster id, plus 'boss' and 'elite'. For the association's quests. */
   tally: Record<string, number> = {};
+  /** Turns left before each skill can be used again. */
+  cooldowns: Partial<Record<SkillId, number>> = {};
+  /** Set while a [끊기] skill is landing its hits. */
+  private breaking = false;
 
   constructor(
     public hunter: Hunter,
@@ -412,6 +452,7 @@ export class TowerRun {
       spare: this.spare,
       prep: this.prep,
       tally: this.tally,
+      cooldowns: this.cooldowns,
     };
   }
 
@@ -456,6 +497,7 @@ export class TowerRun {
     run.spare = s.spare ?? [];
     run.prep = s.prep;
     run.tally = s.tally ?? {};
+    run.cooldowns = s.cooldowns ?? {};
     return run;
   }
 
@@ -994,6 +1036,10 @@ export class TowerRun {
       def: Math.round(kind.def * s),
       awake: false,
     });
+    if (abilitiesOf(kind).some((a) => ABILITIES[a].mp)) {
+      const m = this.monsters[this.monsters.length - 1];
+      m.maxMp = m.mp = kind.boss ? MONSTER_MP.big : MONSTER_MP.normal;
+    }
   }
 
   monsterAt(x: number, y: number): Monster | undefined {
@@ -1134,12 +1180,16 @@ export class TowerRun {
 
   /** A shaman's turn to mend a hurt ally nearby. Returns true if it healed instead of attacking. */
   private healAlly(m: Monster): boolean {
-    if (this.turn % TRAIT_RULES.healEvery !== 0) return false;
+    const mend = ABILITIES.mend;
+    if (m.cd?.mend || (m.mp ?? 0) < mend.mp!) return false;
     const hurt = this.monsters.find(
       (o) => o !== m && !o.kind.stalker && !o.hunter && o.hp < o.maxHp * 0.7 && Math.abs(o.x - m.x) + Math.abs(o.y - m.y) <= TRAIT_RULES.healRange,
     );
     if (!hurt) return false;
-    const amount = Math.min(hurt.maxHp - hurt.hp, Math.ceil(hurt.maxHp * TRAIT_RULES.healAmount));
+    const share = hurt.kind.boss || hurt.kind.elite ? TRAIT_RULES.bigHealCap : TRAIT_RULES.healAmount;
+    const amount = Math.min(hurt.maxHp - hurt.hp, Math.ceil(hurt.maxHp * share));
+    m.mp = (m.mp ?? 0) - mend.mp!;
+    (m.cd ??= {}).mend = mend.cd;
     hurt.hp += amount;
     this.events.push({ type: 'monsterHeal', x: hurt.x, y: hurt.y, amount });
     if (this.canSee(m)) this.say(L(`${m.kind.name}이(가) ${hurt.kind.name}을(를) 치유했다. (+${amount})`, `${m.kind.name} healed ${hurt.kind.name}. (+${amount})`));
@@ -1208,6 +1258,9 @@ export class TowerRun {
         this.events.push({ type: 'heal', amount: heal });
       }
     }
+    for (const id of Object.keys(this.cooldowns) as SkillId[]) {
+      if (--this.cooldowns[id]! <= 0) delete this.cooldowns[id];
+    }
     for (const key of ['stance', 'rage', 'shield', 'defUp', 'sanctuary'] as const) {
       const buff = b[key];
       if (buff && --buff.turns <= 0) delete b[key];
@@ -1250,9 +1303,41 @@ export class TowerRun {
 
   /** A basic melee hit on an enemy next to the hunter. */
   private meleeHit(target: Monster) {
-    const dmg = this.damage(this.atkNow(), target.def);
+    const dmg = this.damage(this.atkNow(), target.def, this.guardMult(target, false));
     this.hitMonster(target, dmg);
     if (target.kind.trait === 'thorns' && !target.kind.stalker) this.thorns(target, dmg);
+  }
+
+  /**
+   * How hard a hit lands on this monster for its state: off guard (stunned or winding up) takes more,
+   * curled up takes much less unless the hit pierces defense, which cracks the shell.
+   */
+  private guardMult(m: Monster, ignoreDef: boolean): number {
+    let mult = 1;
+    if (m.stun || m.windup) mult *= OFF_GUARD;
+    if (m.shell) {
+      if (ignoreDef) {
+        m.shell = undefined;
+        this.say(L(`${m.kind.name}의 웅크린 껍질이 깨졌다!`, `${m.kind.name}'s shell cracked!`));
+      } else mult *= 0.3;
+    }
+    return mult;
+  }
+
+  /** Stuns (or freezes) a monster. Any wind-up it had is broken. */
+  private stunMonster(m: Monster, turns: number, frozen = false) {
+    if (!this.alive(m) || m.kind.stalker) return;
+    m.stun = Math.max(m.stun ?? 0, turns);
+    if (frozen) m.frozen = true;
+    this.breakWindup(m);
+  }
+
+  private breakWindup(m: Monster) {
+    if (!m.windup) return;
+    const name = ABILITIES[m.windup.id].name;
+    m.windup = undefined;
+    this.events.push({ type: 'interrupt', x: m.x, y: m.y });
+    this.say(L(`${m.kind.name}의 ${name}을(를) 끊었다!`, `Broke ${m.kind.name}'s ${name}!`));
   }
 
   /**
@@ -1296,7 +1381,7 @@ export class TowerRun {
   /** Spikes: part of a melee hit comes back. Never kills on its own. */
   private thorns(m: Monster, dealt: number) {
     const h = this.hunter;
-    const back = Math.min(h.hp - 1, Math.max(1, Math.ceil(dealt * TRAIT_RULES.thornsShare)));
+    const back = Math.min(h.hp - 1, Math.max(1, Math.ceil(dealt * TRAIT_RULES.thornsShare * (m.shell ? 2 : 1))));
     if (back <= 0 || this.guardTurns > 0) return;
     h.hp -= back;
     this.events.push({ type: 'hurt', amount: back });
@@ -1313,9 +1398,18 @@ export class TowerRun {
 
   private strike(m: Monster, mult: number, ignoreDef = false): boolean {
     if (!this.monsters.includes(m)) return false;
-    const ef = elementFactor(m.kind, this.element);
+    let ef = elementFactor(m.kind, this.element);
     if (ef !== 1) this.events.push({ type: 'element', x: m.x, y: m.y, weak: ef > 1 });
-    this.hitMonster(m, this.damage(this.atkNow(), ignoreDef ? 0 : m.def, mult * ef));
+    // Fire or lightning on ice: the freeze shatters for extra damage.
+    if (m.frozen && (this.element === 'fire' || this.element === 'lightning')) {
+      ef *= SHATTER;
+      m.frozen = false;
+      m.stun = 0;
+      this.say(L(`얼음이 깨지며 ${m.kind.name}에게 큰 피해!`, `The ice shatters on ${m.kind.name}!`));
+    }
+    const g = this.guardMult(m, ignoreDef);
+    if (this.breaking) this.breakWindup(m);
+    this.hitMonster(m, this.damage(this.atkNow(), ignoreDef ? 0 : m.def, mult * ef * g));
     return !this.monsters.includes(m);
   }
 
@@ -1407,6 +1501,11 @@ export class TowerRun {
     }
     const info = SKILLS[s.id];
     const cost = skillCost(s);
+    const wait = this.cooldowns[s.id] ?? 0;
+    if (wait > 0) {
+      this.say(L(`${info.name}은(는) ${wait}턴 뒤에 다시 쓸 수 있다.`, `${info.name} is ready again in ${wait} turns.`));
+      return false;
+    }
     if (h.mp < cost) {
       this.say(L(`마나가 부족하다. (${info.name} ${cost} 필요)`, `Not enough mana. (${info.name} needs ${cost})`));
       return false;
@@ -1416,8 +1515,10 @@ export class TowerRun {
     this.events.push({ type: 'skill', name: info.name });
     this.say(`${info.name}!`);
     this.element = info.element;
+    this.breaking = BREAKERS.includes(s.id);
     const cast = this.castSkill(s);
     this.element = undefined;
+    this.breaking = false;
     if (!cast) {
       h.mp += cost; // nothing to hit: no mana, no turn
       this.events.pop();
@@ -1425,6 +1526,8 @@ export class TowerRun {
       return false;
     }
     h.mp = Math.min(h.maxMp, h.mp + this.refund);
+    // +1: the turn spent casting counts down too.
+    this.cooldowns[s.id] = info.cd + 1;
     return true;
   }
 
@@ -1460,7 +1563,7 @@ export class TowerRun {
           const m = this.monsterAt(x, y);
           if (m) {
             hit = true;
-            if (!this.strike(m, 2 * p)) m.stun = Math.max(m.stun ?? 0, 1);
+            if (!this.strike(m, 2 * p)) this.stunMonster(m, 1);
             if (!max) break;
             if (this.monsterAt(x, y)) continue;
           }
@@ -1481,7 +1584,7 @@ export class TowerRun {
         return true;
       case 'warcry':
         this.buffs.rage = { turns: 4, mult: 1 + 0.3 * p };
-        if (max) for (const m of this.near(1)) m.stun = Math.max(m.stun ?? 0, 1);
+        if (max) for (const m of this.near(1)) this.stunMonster(m, 1);
         return true;
       case 'storm': {
         const targets = this.near(2);
@@ -1506,7 +1609,7 @@ export class TowerRun {
         const last = max ? line[line.length - 1] : line[0];
         this.events.push({ type: 'shot', x: last.x, y: last.y, fromHunter: true });
         for (const m of max ? line : [line[0]]) {
-          if (!this.strike(m, 1.3 * p)) m.stun = Math.max(m.stun ?? 0, max ? 3 : 2);
+          if (!this.strike(m, 1.3 * p)) this.stunMonster(m, max ? 3 : 2, true);
         }
         return true;
       }
@@ -1560,7 +1663,7 @@ export class TowerRun {
         if (!t) return none(L('붙어 있는 적이 없다.', 'No adjacent enemy.'));
         const dx = Math.sign(this.pos.x - t.x);
         const dy = Math.sign(this.pos.y - t.y);
-        if (!this.strike(t, 1.2 * p) && max) t.stun = Math.max(t.stun ?? 0, 1);
+        if (!this.strike(t, 1.2 * p) && max) this.stunMonster(t, 1);
         for (let i = 0; i < 2 && this.free(this.pos.x + dx, this.pos.y + dy); i++) this.moveTo(this.pos.x + dx, this.pos.y + dy);
         return true;
       }
@@ -1578,7 +1681,8 @@ export class TowerRun {
         const t = this.near(5)[0];
         if (!t) return none(L('5칸 안에 적이 없다.', 'No enemy within 5 tiles.'));
         this.events.push({ type: 'shot', x: t.x, y: t.y, fromHunter: true });
-        for (let i = 0; i < (max ? 4 : 3) && this.alive(t); i++) this.strike(t, 0.7 * p);
+        const poisoned = t.dot ? POISON_VOLLEY : 1;
+        for (let i = 0; i < (max ? 4 : 3) && this.alive(t); i++) this.strike(t, 0.7 * p * poisoned);
         return true;
       }
       case 'trap': {
@@ -1604,7 +1708,8 @@ export class TowerRun {
         for (const m of pulled) {
           m.awake = true;
           for (let i = 0; i < 3 && TowerRun.cheb(m, this.pos) > 1; i++) this.stepToward(m);
-          if (max) m.stun = Math.max(m.stun ?? 0, 1);
+          this.breakWindup(m);
+          if (max) this.stunMonster(m, 1);
         }
         this.buffs.defUp = { turns: 3, amount: 3 };
         return true;
@@ -1621,7 +1726,7 @@ export class TowerRun {
           t.y += dy;
           moved++;
         }
-        if (moved < 2 || max) t.stun = Math.max(t.stun ?? 0, 1);
+        if (moved < 2 || max) this.stunMonster(t, 1);
         return true;
       }
       case 'heal': {
@@ -1797,20 +1902,33 @@ export class TowerRun {
         this.hitMonster(m, dmg);
         if (!this.alive(m)) continue;
       }
-      if (m.kind.trait === 'regen' && m.hp < m.maxHp) {
+      if (m.cd) for (const id of Object.keys(m.cd) as AbilityId[]) if (--m.cd[id]! <= 0) delete m.cd[id];
+      if (m.maxMp) m.mp = Math.min(m.maxMp, (m.mp ?? 0) + MONSTER_MP.regen);
+      // Burning stops regeneration.
+      if (regenEveryTurn(m.kind) && m.hp < m.maxHp && !m.dot) {
         const amount = Math.min(m.maxHp - m.hp, Math.max(1, Math.round(m.maxHp * TRAIT_RULES.regenPerTurn)));
         m.hp += amount;
         this.events.push({ type: 'monsterHeal', x: m.x, y: m.y, amount });
       }
       if (m.stun) {
         m.stun -= 1;
+        if (!m.stun) m.frozen = false;
         continue;
       }
       const dx = this.pos.x - m.x;
       const dy = this.pos.y - m.y;
       if (!m.awake && dx * dx + dy * dy <= this.sight * this.sight) this.wake(m);
       if (!m.awake) continue;
+      if (m.shell) {
+        if (--m.shell <= 0) m.shell = undefined;
+        continue;
+      }
+      if (m.windup) {
+        if (--m.windup.turns <= 0) this.unleash(m);
+        continue;
+      }
       if (m.kind.trait === 'healer' && this.healAlly(m)) continue;
+      if (this.startMove(m)) continue;
       const adjacent = Math.abs(dx) + Math.abs(dy) === 1;
       if (adjacent && m.kind.trait === 'kite' && !m.root && this.rng.chance(TRAIT_RULES.kiteChance) && this.stepAway(m)) continue;
       const shoots = !adjacent && this.canShoot(m);
@@ -1844,13 +1962,19 @@ export class TowerRun {
   }
 
   /** One enemy attack on the hunter, through every defense the hunter has up. */
-  private attackHunter(m: Monster, ranged: boolean, adjacent: boolean) {
+  private attackHunter(m: Monster, ranged: boolean, adjacent: boolean, special?: { mult: number; label: string }) {
     const h = this.hunter;
     const b = this.buffs;
-    let mult = 1;
-    let label = ranged ? L('원거리 공격', 'ranged attack') : L('공격', 'attack');
+    let mult = special?.mult ?? 1;
+    let label = special?.label ?? (ranged ? L('원거리 공격', 'ranged attack') : L('공격', 'attack'));
+    // The shadow knight's first blow out of the shadows.
+    if (!special && !m.struck && abilitiesOf(m.kind).includes('ambush')) {
+      mult *= ABILITIES.ambush.mult!;
+      label = ABILITIES.ambush.name;
+    }
+    m.struck = true;
     // Enemy hunters use a skill now and then.
-    if (m.hunter && m.hunter.skills?.length && this.turn % 3 === 0) {
+    if (!special && m.hunter && m.hunter.skills?.length && this.turn % 3 === 0) {
       mult = 1.6;
       label = SKILLS[m.hunter.skills[0].id].name;
     }
@@ -1960,6 +2084,223 @@ export class TowerRun {
       if (!isWalkable(this.map, x, y) || this.monsterAt(x, y)) return false;
     }
     return true;
+  }
+
+  /** Tiles every wound-up move will hit, soonest first. For the screen's red tiles and the bot. */
+  dangerTiles(): DangerTile[] {
+    const out: DangerTile[] = [];
+    for (const m of this.monsters) {
+      if (!m.windup) continue;
+      for (const t of this.windupTiles(m)) out.push({ x: t.x, y: t.y, turns: m.windup.turns });
+    }
+    return out.sort((a, b) => a.turns - b.turns);
+  }
+
+  private windupTiles(m: Monster): Point[] {
+    const w = m.windup;
+    if (!w) return [];
+    if (w.id === 'quake' || w.id === 'fuse') return this.around(m, 1);
+    return w.tiles ?? [];
+  }
+
+  /** Walkable tiles within r of p, p included. */
+  private around(p: Point, r: number): Point[] {
+    const out: Point[] = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) if (isWalkable(this.map, p.x + dx, p.y + dy)) out.push({ x: p.x + dx, y: p.y + dy });
+    }
+    return out;
+  }
+
+  /** Tiles from `from` going `dir`, up to len, stopping at walls. */
+  private ray(from: Point, dir: Point, len: number): Point[] {
+    const out: Point[] = [];
+    for (let i = 1; i <= len; i++) {
+      const x = from.x + dir.x * i;
+      const y = from.y + dir.y * i;
+      if (!isWalkable(this.map, x, y)) break;
+      out.push({ x, y });
+    }
+    return out;
+  }
+
+  /** Straight line from the monster to the hunter (row or column) with nothing in between: its direction and length. */
+  private clearLine(m: Monster): { dir: Point; dist: number } | undefined {
+    const dx = this.pos.x - m.x;
+    const dy = this.pos.y - m.y;
+    if (dx !== 0 && dy !== 0) return undefined;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    const dir = { x: Math.sign(dx), y: Math.sign(dy) };
+    for (let i = 1; i < dist; i++) {
+      const x = m.x + dir.x * i;
+      const y = m.y + dir.y * i;
+      if (!isWalkable(this.map, x, y) || this.monsterAt(x, y)) return undefined;
+    }
+    return { dir, dist };
+  }
+
+  /** Chance a ready move is used when its moment comes. */
+  private static readonly MOVE_CHANCE: Partial<Record<AbilityId, number>> = {
+    slam: 0.8, lunge: 0.8, aimshot: 0.6, shell: 0.4, summon: 0.35, quake: 0.7, cross: 0.6, breath: 0.6,
+  };
+
+  /** Starts a special move if one is ready and fits the moment. Returns true if it used the turn. */
+  private startMove(m: Monster): boolean {
+    if (m.hunter) return false;
+    const moves = abilitiesOf(m.kind);
+    if (!moves.length) return false;
+    const pos = this.pos;
+    const orth = Math.abs(pos.x - m.x) + Math.abs(pos.y - m.y);
+    const cheb = TowerRun.cheb(m, pos);
+    const order = moves.includes('recover') ? ['recover' as AbilityId, ...moves.filter((a) => a !== 'recover')] : moves;
+    for (const id of order) {
+      const info = ABILITIES[id];
+      if (m.cd?.[id] || (info.mp && (m.mp ?? 0) < info.mp)) continue;
+      const chance = TowerRun.MOVE_CHANCE[id];
+      let tiles: Point[] | undefined;
+      switch (id) {
+        case 'slam': {
+          if (orth !== 1) continue;
+          const side = pos.x === m.x ? { x: 1, y: 0 } : { x: 0, y: 1 };
+          tiles = [{ x: pos.x - side.x, y: pos.y - side.y }, { ...pos }, { x: pos.x + side.x, y: pos.y + side.y }].filter((t) => isWalkable(this.map, t.x, t.y));
+          break;
+        }
+        case 'lunge': {
+          const line = this.clearLine(m);
+          if (!line || line.dist < 2 || line.dist > 4 || m.root) continue;
+          tiles = this.ray(m, line.dir, line.dist + 1);
+          break;
+        }
+        case 'aimshot': {
+          if (!this.canShoot(m)) continue;
+          const line = this.clearLine(m)!;
+          tiles = this.ray(m, line.dir, (m.kind.range ?? 4) + 1);
+          break;
+        }
+        case 'shell':
+          if (orth !== 1 || m.hp >= m.maxHp * 0.8) continue;
+          break;
+        case 'summon':
+          if (cheb > 6 || !this.canSee(m) || this.monsters.filter((o) => !o.kind.stalker).length >= 8 + this.danger) continue;
+          break;
+        case 'fuse':
+          if (cheb > 2) continue;
+          break;
+        case 'quake':
+          if (cheb !== 1) continue;
+          break;
+        case 'cross': {
+          const inLine = (pos.x === m.x || pos.y === m.y) && cheb <= 6;
+          if (!inLine && cheb > 2) continue;
+          tiles = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }].flatMap((d) => this.ray(m, d, 6));
+          break;
+        }
+        case 'breath': {
+          if (cheb > 5 || cheb < 1) continue;
+          const dx = pos.x - m.x;
+          const dy = pos.y - m.y;
+          const dir = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+          const side = { x: dir.y, y: dir.x };
+          tiles = [];
+          for (const lane of [-1, 0, 1]) {
+            const start = { x: m.x + side.x * lane, y: m.y + side.y * lane };
+            for (let i = 1; i <= 5; i++) {
+              const x = start.x + dir.x * i;
+              const y = start.y + dir.y * i;
+              if (isWalkable(this.map, x, y)) tiles.push({ x, y });
+            }
+          }
+          break;
+        }
+        case 'recover':
+          if (m.hp >= m.maxHp * 0.5) continue;
+          break;
+        default:
+          continue;
+      }
+      if (chance !== undefined && !this.rng.chance(chance)) continue;
+      (m.cd ??= {})[id] = info.cd;
+      if (info.mp) m.mp = (m.mp ?? 0) - info.mp;
+      const seen = this.canSee(m);
+      if (id === 'shell') {
+        m.shell = 2;
+        if (seen) this.say(L(`${m.kind.name}이(가) 몸을 웅크렸다! (2턴 동안 단단함)`, `${m.kind.name} curled up! (tough for 2 turns)`));
+        return true;
+      }
+      m.windup = { id, turns: info.windup, tiles };
+      this.events.push({ type: 'warn', x: m.x, y: m.y, name: info.name });
+      if (seen) {
+        const what = id === 'summon' || id === 'recover' ? L('주문을 외우기 시작했다', 'began chanting') : L('준비하고 있다', 'is winding up');
+        this.say(L(`${m.kind.name}이(가) ${info.name}을(를) ${what}!`, `${m.kind.name} ${what}: ${info.name}!`));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** A wound-up move goes off. */
+  private unleash(m: Monster) {
+    const w = m.windup!;
+    m.windup = undefined;
+    const info = ABILITIES[w.id];
+    const tiles = this.windupTiles({ ...m, windup: w });
+    const onHunter = tiles.some((t) => t.x === this.pos.x && t.y === this.pos.y);
+    const adjacent = Math.abs(this.pos.x - m.x) + Math.abs(this.pos.y - m.y) === 1;
+    const hitHunter = () => this.attackHunter(m, !adjacent, adjacent, { mult: info.mult ?? 1, label: info.name });
+    switch (w.id) {
+      case 'summon': {
+        const pool = this.pool.filter((k) => !k.boss && k.trait !== 'bomb');
+        const weakest = [...pool].sort((a, b) => a.hp * a.atk - b.hp * b.atk)[0] ?? MONSTERS.goblin;
+        let made = 0;
+        for (const t of this.around(m, 1)) {
+          if (made >= 2) break;
+          if (this.blocked(t.x, t.y) || this.map.tiles[t.y][t.x] === Tile.Stairs) continue;
+          this.spawn(m.kind.boss ? this.rng.pick(pool.length ? pool : [weakest]) : weakest, t.x, t.y, this.danger);
+          this.monsters[this.monsters.length - 1].awake = true;
+          made++;
+        }
+        if (this.canSee(m)) this.say(L(`${m.kind.name}이(가) 졸개 ${made}마리를 불러냈다!`, `${m.kind.name} called ${made} minions!`));
+        return;
+      }
+      case 'recover': {
+        const amount = Math.min(m.maxHp - m.hp, Math.ceil(m.maxHp * 0.2));
+        m.hp += amount;
+        this.events.push({ type: 'monsterHeal', x: m.x, y: m.y, amount });
+        if (this.canSee(m)) this.say(L(`${m.kind.name}이(가) 회복 주문을 완성했다. (+${amount})`, `${m.kind.name} finished its restoration. (+${amount})`));
+        return;
+      }
+      case 'lunge': {
+        for (const t of tiles) {
+          if (t.x === this.pos.x && t.y === this.pos.y) break;
+          if (!this.free(t.x, t.y)) break;
+          m.x = t.x;
+          m.y = t.y;
+          this.checkTrap(m);
+          if (!this.alive(m)) return;
+        }
+        this.events.push({ type: 'blast', tiles });
+        if (onHunter && Math.abs(this.pos.x - m.x) + Math.abs(this.pos.y - m.y) === 1) this.attackHunter(m, false, true, { mult: info.mult!, label: info.name });
+        else this.say(L(`${m.kind.name}의 ${info.name}을(를) 피했다.`, `Dodged ${m.kind.name}'s ${info.name}.`));
+        return;
+      }
+      case 'fuse': {
+        this.events.push({ type: 'blast', tiles });
+        this.monsters = this.monsters.filter((o) => o !== m);
+        this.events.push({ type: 'kill', x: m.x, y: m.y, big: false });
+        this.say(L(`${m.kind.name}이(가) 폭발했다!`, `${m.kind.name} exploded!`));
+        // The blast catches other monsters too.
+        for (const o of [...this.monsters]) {
+          if (o.kind.stalker || !tiles.some((t) => t.x === o.x && t.y === o.y)) continue;
+          this.hitMonster(o, Math.max(1, Math.round(m.atk * info.mult!) - o.def));
+        }
+        if (onHunter) hitHunter();
+        return;
+      }
+      default:
+        this.events.push({ type: 'blast', tiles });
+        if (onHunter) hitHunter();
+        else this.say(L(`${m.kind.name}의 ${info.name}을(를) 피했다.`, `Dodged ${m.kind.name}'s ${info.name}.`));
+    }
   }
 
   private stepToward(m: Monster) {

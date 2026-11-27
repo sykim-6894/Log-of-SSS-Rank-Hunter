@@ -126,11 +126,17 @@ describe('monster traits', () => {
 
   it('shamans mend hurt allies', () => {
     const run = arena();
-    put(run, MONSTERS.shaman, 30, 12);
+    const sh = put(run, MONSTERS.shaman, 30, 12, { mp: 20, maxMp: 20 });
     const o = put(run, MONSTERS.orc, 31, 14, { hp: 5, maxHp: 40 });
-    while (run.turn % TRAIT_RULES.healEvery !== 0) run.turn++;
     run.act({ type: 'wait' });
     expect(o.hp).toBeGreaterThan(5);
+    // Mending spends the shaman's mana and waits for its cooldown.
+    expect(sh.mp).toBeLessThan(20);
+    const after = o.hp;
+    o.hp = 5;
+    run.act({ type: 'wait' });
+    expect(o.hp).toBe(5);
+    expect(after).toBeGreaterThan(5);
   });
 
   it('beasts prick whoever hits them up close, but never kill', () => {

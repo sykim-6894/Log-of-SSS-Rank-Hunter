@@ -689,7 +689,7 @@ describe('experience and ranged enemies', () => {
     run.monsters = [];
     const { x, y } = run.pos;
     for (let i = 1; i <= 3; i++) run.map.tiles[y][x + i] = Tile.Floor;
-    run.monsters.push({ id: 1, kind: MONSTERS.archer, x: x + 3, y, hp: 50, maxHp: 50, atk: 8, def: 0, awake: true });
+    run.monsters.push({ id: 1, kind: { ...MONSTERS.archer, abilities: [] }, x: x + 3, y, hp: 50, maxHp: 50, atk: 8, def: 0, awake: true });
     run.drainEvents();
     run.act({ type: 'wait' });
     const events = run.drainEvents().map((e) => e.type);

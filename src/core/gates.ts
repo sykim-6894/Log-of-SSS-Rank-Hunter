@@ -40,7 +40,7 @@ export interface GateTheme {
 }
 
 export const GATE_THEMES: Record<GateThemeId, GateTheme> = {
-  goblin: { name: L('고블린 소굴', 'Goblin Den'), pool: ['goblin', 'archer'], boss: 'orc' },
+  goblin: { name: L('고블린 소굴', 'Goblin Den'), pool: ['goblin', 'archer', 'bomber'], boss: 'orc' },
   wolf: { name: L('잿빛 늑대 숲', 'Ashen Wolf Woods'), pool: ['wolf', 'beast'], boss: 'beast' },
   orc: { name: L('오크 전초기지', 'Orc Outpost'), pool: ['orc', 'archer', 'goblin'], boss: 'orc' },
   swamp: { name: L('독안개 늪', 'Poison Mist Swamp'), pool: ['lizard', 'shaman'], boss: 'lizard' },

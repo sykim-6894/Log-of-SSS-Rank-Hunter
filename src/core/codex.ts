@@ -25,7 +25,7 @@ export interface Achievements {
 }
 
 /** Kinds in the codex, in the order they show: ordinary monsters by floor, then the bosses. */
-export const CODEX_IDS = ['goblin', 'wolf', 'archer', 'orc', 'lizard', 'knight', 'shaman', 'beast', 'warden', 'overlord', 'dragon', 'master'];
+export const CODEX_IDS = ['goblin', 'wolf', 'archer', 'orc', 'bomber', 'lizard', 'knight', 'shaman', 'beast', 'warden', 'overlord', 'dragon', 'master'];
 
 /** "elite-orc" → "orc". Kinds that are not codex monsters (rival hunters, rankers) give undefined. */
 export function codexId(kindId: string): string | undefined {
@@ -38,7 +38,7 @@ export function codexWhere(id: string): string {
   const boss = { warden: 5, overlord: 10, dragon: 15, master: 20 }[id];
   if (boss) return L(`${boss}층 보스`, `${boss}F boss`);
   const ranges: Record<string, [number, number]> = {
-    goblin: [1, 5], wolf: [1, 8], archer: [2, 8], orc: [3, 11], lizard: [6, 15], knight: [9, TOP_FLOOR], shaman: [9, TOP_FLOOR], beast: [12, TOP_FLOOR],
+    goblin: [1, 5], wolf: [1, 8], archer: [2, 8], orc: [3, 11], bomber: [4, TOP_FLOOR], lizard: [6, 15], knight: [9, TOP_FLOOR], shaman: [9, TOP_FLOOR], beast: [12, TOP_FLOOR],
   };
   const [a, b] = ranges[id] ?? [1, TOP_FLOOR];
   return L(`${a}~${b}층`, `${a}-${b}F`);
