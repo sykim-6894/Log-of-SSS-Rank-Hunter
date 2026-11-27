@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { playMusic } from '../game/sfx';
 import { preloadCrawl } from '../game/crawl';
 import { SAVE_SLOTS } from '../core/save';
 import { fitCamera, GH, GW, PORTRAIT } from '../game/layout';
@@ -36,6 +37,7 @@ export class TitleScene extends Phaser.Scene {
     // Reloaded only to switch layouts after a rotation: go straight back to the office.
     if (takeSkipTitle()) return this.scene.start('HQ');
     fitCamera(this.cameras.main).setBackgroundColor(PALETTE.bg);
+    playMusic('title');
     const w = Math.min(GW - 40, 420);
     const x = (GW - w) / 2;
     // Key art: the four hunters in front of an open gate.

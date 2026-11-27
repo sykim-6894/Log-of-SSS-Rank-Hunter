@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser';
+import { sfx } from './sfx';
 import { RES } from './layout';
 import { OUTLINE } from './pixel';
 
@@ -122,6 +123,7 @@ export function button(
     zone.on('pointerdown', () => draw('down'));
     zone.on('pointerup', () => {
       draw('hover');
+      sfx.click();
       onClick();
     });
     container.add(zone);
