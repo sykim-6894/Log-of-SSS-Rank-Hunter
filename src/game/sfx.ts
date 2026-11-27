@@ -304,6 +304,18 @@ export const sfx = {
     noise(0.3, { vol: 0.05, filter: 'bandpass', freq: 400, to: 1600, q: 2 });
     arp([262, 392, 523], 0.1, { type: 'triangle', vol: 0.06, len: 0.18 });
   },
+  /** A monster winds up a big move. */
+  warn: () => arp([880, 660], 0.09, { type: 'square', vol: 0.05, len: 0.09 }),
+  /** The hunter broke a wind-up. */
+  interrupt: () => {
+    noise(0.08, { vol: 0.08 });
+    tone(1200, 0.1, { type: 'triangle', to: 600, vol: 0.06 });
+  },
+  /** A wound-up move goes off. */
+  blast: () => {
+    noise(0.2, { vol: 0.11, filter: 'lowpass', freq: 1800 });
+    tone(120, 0.2, { type: 'sawtooth', to: 50, vol: 0.07 });
+  },
   death: () => {
     noise(0.6, { vol: 0.12, filter: 'lowpass', freq: 600, to: 80 });
     arp([392, 330, 262, 196], 0.2, { type: 'sawtooth', vol: 0.06, len: 0.3 });

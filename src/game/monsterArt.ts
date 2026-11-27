@@ -258,17 +258,23 @@ const SPRITES: Record<string, Sprite> = {
 };
 
 /** The sprite a monster kind uses: mid-bosses ("elite-orc") share the ordinary one. */
+/** Kinds with no pixel sprite of their own borrow one (the scene tints it). */
+const SHARED: Record<string, string> = { bomber: 'goblin' };
+
 function baseId(kindId: string): string {
   return kindId.startsWith('elite-') ? kindId.slice(6) : kindId;
 }
 
 export function hasMonsterArt(kindId: string): boolean {
-  return baseId(kindId) in SPRITES;
+  const id = baseId(kindId);
+  return id in SPRITES || id in SHARED;
 }
 
 /** Makes the texture the first time it is needed (2 screen pixels per sprite pixel), after the shared finishing pass. */
 export function monsterTexture(scene: Phaser.Scene, kindId: string): string {
-  const id = baseId(kindId);
+  const own = baseId(kindId);
+  if (hasCrawl(scene, own)) return crawlKey(own);
+  const id = SHARED[own] ?? own;
   if (hasCrawl(scene, id)) return crawlKey(id);
   const s = SPRITES[id];
   return gridTexture(scene, `monster-${id}`, finish(parse(s.rows, s.colors)), 2);

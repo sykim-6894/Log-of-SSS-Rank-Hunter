@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser';
-import { preloadCrawl } from '../game/crawl';
+import { hasCrawl, preloadCrawl } from '../game/crawl';
 import { ART, Art, ART_KEY } from '../game/art';
 import { dailyTriesLeft, startDaily, abyssRecord, activeHunter, buyPrep, PREP_IDS, PREPS, prepCost, refreshQuests, rivalAgencies, syncPerks, invest, slotOpen, canDispatch, dispatch, dispatchPay, isAway, TALENTS, TalentId, depositGear, withdrawGear, sellStashed, stashFee, stashPrice, STASH_SIZE, scoutCandidates, hireScout, ARENA_UNLOCK_FLOOR, arenaRecord, arenaUnlocked, canEnterArena, startSurvival, AGENCY_NAME_MAX, canRetire, retire, buyItem, canChallenge, drawGear, nextChallenge, startDuel, EnhanceResult, enhanceChance, enhanceCost, enhanceGear, enhanceRisk, failOdds, GachaResult, changeClass, foundAgency, randomAgencyName, refreshGates, gradeIn, hire, ranking, release, SLOT_COUNT, startFloors, train, TRAINING, trainingCost, untouched } from '../core/agency';
 import { ClassId, CLASS_IDS, CLASSES, firstSkillChoices, SkillId, SKILLS } from '../core/classes';
 import { Gate, gateClearGold, gateClearStones, gateFloors, gateLevel, gateName, GATE_RULES, GATE_THEMES } from '../core/gates';
-import { elementNote, MONSTERS, TOP_FLOOR, TRAITS } from '../core/monsters';
+import { ABILITIES, abilitiesOf, elementNote, MONSTERS, TOP_FLOOR, TRAITS } from '../core/monsters';
 import { DAILY_FLOORS, DAILY_POINTS_PER_STONE, DAILY_RECORD_STONES, DAILY_RULES, DAILY_SPEED_BONUS, DAILY_TRIES, dailyBase, dailyRules, dailyToday, dateLabel, todayKey } from '../core/daily';
 import { ACHIEVEMENTS, checkAchievements, CODEX_IDS, codexCount, codexWhere, isDone, rewardText, wearTitle, wornTitle } from '../core/codex';
 import { monsterTexture } from '../game/monsterArt';
@@ -860,7 +860,7 @@ export class HQScene extends Phaser.Scene {
     const cols = PORTRAIT ? 2 : 4;
     const gap = 8;
     const cw = (w - gap * (cols - 1)) / cols;
-    const ch = PORTRAIT ? 70 : 74;
+    const ch = PORTRAIT ? 62 : 74;
     const codex = state.codex ?? {};
     CODEX_IDS.forEach((id, i) => {
       const cx = x + (i % cols) * (cw + gap);
@@ -872,6 +872,7 @@ export class HQScene extends Phaser.Scene {
       g.fillStyle(on ? 0x3a2a1c : PALETTE.panelDark, 1).fillRect(cx, cy, cw, ch);
       g.lineStyle(on ? 2 : 1, on ? PALETTE.rustLight : PALETTE.line, 1).strokeRect(cx + 0.5, cy + 0.5, cw - 1, ch - 1);
       const img = this.add.image(cx + 28, cy + ch / 2, monsterTexture(this, id));
+      if (id === 'bomber' && !hasCrawl(this, 'bomber')) img.setTint(0xff9a6a);
       img.setScale(Math.min(44 / img.width, 44 / img.height));
       if (!e) img.setTint(0x000000).setAlpha(0.7);
       const tx = cx + 56;
@@ -905,6 +906,7 @@ export class HQScene extends Phaser.Scene {
       lines.push([L(`기본 체력 ${k.hp} · 공격 ${k.atk} · 방어 ${k.def}${k.range ? ` · 사거리 ${k.range}` : ''} (층이 오를수록 강해진다)`, `Base HP ${k.hp} · ATK ${k.atk} · DEF ${k.def}${k.range ? ` · Range ${k.range}` : ''} (stronger on higher floors)`), INK.text]);
       lines.push([elementNote(k) || L('약점·저항 없음', 'No weakness or resistance'), INK.gate]);
       if (k.trait) lines.push([`[${TRAITS[k.trait].name}] ${TRAITS[k.trait].text}`, INK.quiet]);
+      for (const a of abilitiesOf(k)) if (a !== 'fuse') lines.push([`[${ABILITIES[a].name}] ${ABILITIES[a].text}`, '#ff9a7a']);
       lines.push([L(`처치 ${e.kills}마리 · ${e.day + 1}일째에 처음 쓰러뜨림`, `${e.kills} defeated · first on day ${e.day + 1}`), INK.gold]);
     }
     const ph = Math.min(room, 24 + lines.length * 20);

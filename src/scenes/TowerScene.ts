@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { preloadCrawl } from '../game/crawl';
+import { hasCrawl, preloadCrawl } from '../game/crawl';
 import { ART } from '../game/art';
 import { activeHunter, AfterRunNews, agencyOf, enterGate, gradeIn, PREPS, rivalAgencyNames, rivalHunters, settleDaily, settleDeath, settleDuel, settleReturn, storeSpare } from '../core/agency';
 import { DAILY_RULES, DailyRun, dateLabel } from '../core/daily';
@@ -19,12 +19,12 @@ import { paintConsumable } from '../game/icons';
 import { chestTexture, merchantTexture, TileFrame, tileset } from '../game/tiles';
 import { playMusic, sfx, toggleSound } from '../game/sfx';
 import { confetti, debris, shake, sparkle } from '../game/fx';
-import { abyssDepth, MONSTERS, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
+import { ABILITIES, abilitiesOf, abyssDepth, MONSTERS, recommendedLevel, TOP_FLOOR, TRAITS, elementNote } from '../core/monsters';
 import { levelUpMessage, unlocked } from '../core/agencyLevel';
 import { Action, Duel, Monster, REWARDS, RunEvent, Survival, TowerRun, waveReward } from '../core/run';
 import { cardText, cardTitle, chooseCard, pendingCards, skillCost, skillLabel, SKILLS, slotCount } from '../core/classes';
 import { persist, rng, state } from '../game/store';
-import { fitCamera, GH, GW, pointerAt, PORTRAIT } from '../game/layout';
+import { fitCamera, GH, GW, pointerAt, PORTRAIT, RES } from '../game/layout';
 import { bar, button, FONT, INK, PALETTE, panel, text, title } from '../game/ui';
 import { L } from '../core/lang';
 import { GuidePage, showGuide, tipWanted, markTip } from '../game/guide';
@@ -230,6 +230,7 @@ export class TowerScene extends Phaser.Scene {
       if (h.hp < h.maxHp * 0.6 && h.bag.hp > 0 && tip('tw-potion', TIPS['tw-potion']())) return true;
     }
     if (h.picks > 0 && tip('card', TIPS.card())) return true;
+    if (seen.some((m) => m.windup) && run.dangerTiles().length && tip('telegraph', TIPS.telegraph())) return true;
     if (seen.some((m) => m.kind.boss) && tip('boss', TIPS.boss())) return true;
     if (seen.some((m) => m.kind.elite) && tip('elite', TIPS.elite())) return true;
     if (seen.some((m) => m.hunter) && tip('former', TIPS.former())) return true;
@@ -378,6 +379,7 @@ export class TowerScene extends Phaser.Scene {
       const el = elementNote(m.kind);
       if (trait) this.run.log.push(`[${trait.name}] ${m.kind.name}: ${trait.text}${el ? ` (${el})` : ''}`);
       else if (el) this.run.log.push(`${m.kind.name}: ${el}`);
+      for (const a of abilitiesOf(m.kind)) if (a !== 'fuse') this.run.log.push(`  · ${ABILITIES[a].name}: ${ABILITIES[a].text}`);
       fresh = true;
     }
     return fresh;
@@ -504,10 +506,8 @@ export class TowerScene extends Phaser.Scene {
   }
 
   private clearDynamic() {
-    this.dynamic.forEach((o) => {
-      this.tweens.killTweensOf(o);
-      o.destroy();
-    });
+    this.tweens.killTweensOf(this.dynamic);
+    this.dynamic.forEach((o) => o.destroy());
     this.dynamic = [];
   }
 
@@ -534,6 +534,18 @@ export class TowerScene extends Phaser.Scene {
         if (tile === Tile.Wall && !this.touchesFloor(x, y)) continue;
         this.drawTile(x, y, tile, run.isVisible(x, y));
       }
+    }
+    // Red tiles: where wound-up moves will land. Brighter for the ones that go off next turn.
+    const danger = this.keep(this.add.graphics());
+    for (const d of run.dangerTiles()) {
+      if (!run.seen[d.y]?.[d.x]) continue;
+      danger.fillStyle(0xff3020, d.turns <= 1 ? 0.38 : 0.2);
+      danger.fillRect(d.x * TILE + 1, d.y * TILE + 1, TILE - 2, TILE - 2);
+      danger.lineStyle(1, 0xff6a50, d.turns <= 1 ? 0.9 : 0.5);
+      danger.strokeRect(d.x * TILE + 1.5, d.y * TILE + 1.5, TILE - 3, TILE - 3);
+    }
+    if (run.dangerTiles().length) {
+      this.tweens.add({ targets: danger, alpha: 0.55, duration: 380, yoyo: true, repeat: -1 });
     }
     // Shadows under everything standing on the floor, drawn before the figures.
     const shadows = this.keep(this.add.graphics());
@@ -562,16 +574,36 @@ export class TowerScene extends Phaser.Scene {
         if (m.kind.boss) img.setScale(1.35);
         if (m.kind.stalker) img.setScale(1.45);
         if (!m.awake) img.setAlpha(0.75);
+        if (m.kind.trait === 'bomb' && !hasCrawl(this, 'bomber')) img.setTint(0xff9a6a);
+        if (m.shell) img.setTint(0x9a9a9a);
         if (m.stun) img.setTint(0x9fd8ff);
         spriteAt.set(key, img);
       } else spriteAt.set(key, this.keep(this.glyph(m.x, m.y, m.kind.glyph, color, m.kind.boss ? 24 : m.kind.elite ? 20 : 15)));
       const hpRatio = m.hp / m.maxHp;
-      if (hpRatio < 1 && !m.kind.stalker) {
+      if ((hpRatio < 1 || m.maxMp) && !m.kind.stalker) {
         const hb = this.keep(this.add.graphics());
         hb.fillStyle(0x000000, 1);
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, TILE - 5, 3);
         hb.fillStyle(PALETTE.hp, 1);
         hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 4, (TILE - 5) * hpRatio, 3);
+        // Monsters with mana moves show a mana bar under the health bar.
+        if (m.maxMp) {
+          hb.fillStyle(0x000000, 1);
+          hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 1, TILE - 5, 3);
+          hb.fillStyle(PALETTE.mp, 1);
+          hb.fillRect(m.x * TILE + 2, m.y * TILE + TILE - 1, (TILE - 5) * ((m.mp ?? 0) / m.maxMp), 3);
+        }
+      }
+      // A wind-up: "!" and the move's name over the monster; a fuse shows its count.
+      if (m.windup) {
+        const label = m.windup.id === 'fuse' ? `${m.windup.turns}` : '!';
+        this.keep(this.add.text(m.x * TILE + TILE / 2, m.y * TILE - 2, label, {
+          fontFamily: FONT, fontSize: '16px', color: '#ff5a3c', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5, 1).setResolution(RES).setDepth(20));
+      } else if (m.shell) {
+        this.keep(this.add.text(m.x * TILE + TILE / 2, m.y * TILE - 2, L('웅크림', 'Curled'), {
+          fontFamily: FONT, fontSize: '10px', color: '#d8d0c0', stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5, 1).setResolution(RES).setDepth(20));
       }
     }
     footShadow(shadows, run.pos.x * TILE + TILE / 2, run.pos.y * TILE + TILE - 2, 18);
@@ -784,8 +816,10 @@ export class TowerScene extends Phaser.Scene {
       }
       const cost = skillCost(s);
       const key = keysShown ? `${i + 1} ` : '';
-      return button(this, bx, y, bw, hgt, L(`${key}${SKILLS[s.id].name}\n${s.lv}단·마나${cost}`, `${key}${SKILLS[s.id].name}\nLv${s.lv}·MP${cost}`), () => this.perform({ type: 'skill', slot: i }), {
-        enabled: h.mp >= cost,
+      const wait = this.run.cooldowns[s.id] ?? 0;
+      const second = wait > 0 ? L(`대기 ${wait}턴`, `Ready in ${wait}`) : L(`${s.lv}단·마나${cost}`, `Lv${s.lv}·MP${cost}`);
+      return button(this, bx, y, bw, hgt, `${key}${SKILLS[s.id].name}\n${second}`, () => this.perform({ type: 'skill', slot: i }), {
+        enabled: h.mp >= cost && wait <= 0,
       });
     });
   }
@@ -1013,6 +1047,22 @@ export class TowerScene extends Phaser.Scene {
             confetti(this, GW, GH, (o) => this.ui(o), 30);
           }
           break;
+        case 'warn':
+          if (this.run.isVisible(e.x, e.y)) {
+            this.floatText(e.x, e.y - 1, e.name, '#ff7a5a');
+            sfx.warn();
+          }
+          break;
+        case 'interrupt':
+          this.floatText(e.x, e.y - 1, L('끊음!', 'Broken!'), '#8fd3ff');
+          this.burst(e.x, e.y, false);
+          sfx.interrupt();
+          break;
+        case 'blast':
+          for (const t of e.tiles) if (this.run.isVisible(t.x, t.y)) this.blastFlash(t.x, t.y);
+          shake(cam, 140, 0.005);
+          sfx.blast();
+          break;
         case 'gateClear':
           this.clearPending = true;
           cam.flash(300, 229, 174, 70);
@@ -1123,6 +1173,12 @@ export class TowerScene extends Phaser.Scene {
       duration: 90 + 25 * (Math.abs(to.x - x) + Math.abs(to.y - y)),
       onComplete: () => p.destroy(),
     });
+  }
+
+  /** An orange blink over a tile a wound-up move just hit. */
+  private blastFlash(x: number, y: number) {
+    const r = this.world(this.add.rectangle(x * TILE + TILE / 2, y * TILE + TILE / 2, TILE, TILE, 0xff7a30, 0.6).setDepth(25));
+    this.tweens.add({ targets: r, alpha: 0, duration: 260, onComplete: () => r.destroy() });
   }
 
   private tileFlash(x: number, y: number) {
